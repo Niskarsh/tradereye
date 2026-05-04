@@ -9,8 +9,9 @@ import { Switch } from "@/components/ui/switch";
 import { Save, RefreshCcw, Send, AlertTriangle, Database, Loader2, CheckCircle2, XCircle } from "lucide-react";
 
 export default function TraderEye() {
-  const [token, setToken] = useState('');
-  const [trades, setTrades] = useState([]);
+  // Fix: Explicitly typing the state to avoid 'never[]' build errors
+  const [token, setToken] = useState<string>('');
+  const [trades, setTrades] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [direction, setDirection] = useState<'LONG' | 'SHORT'>('SHORT');
   const [loading, setLoading] = useState(false);
@@ -67,6 +68,7 @@ export default function TraderEye() {
     const totalCharges = Number((brokerage + exchTxn + sebi + stt + stamp + gst).toFixed(2));
     const netPnL = Number((grossPnL - totalCharges).toFixed(2));
     
+    // Duration Logic for Sheets (Raw Seconds) and UI (Human Readable)
     const durationSec = Math.max(0, Math.round((lTime - fTime) / 1000));
     const displayDuration = durationSec > 60 
       ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` 
@@ -147,10 +149,10 @@ export default function TraderEye() {
                 ₹{pnl.netPnL.toFixed(2)}
               </div>
             </div>
-            <div className="flex items-center gap-4 bg-zinc-900/80 p-3 px-5 rounded-2xl border border-zinc-800">
-              <span className={`text-[10px] font-black ${direction === 'LONG' ? 'text-emerald-500' : 'text-zinc-700'}`}>LONG</span>
+            <div className="flex items-center gap-4 bg-zinc-900/80 p-3 px-5 rounded-2xl border border-zinc-800 shadow-inner">
+              <span className={`text-[10px] font-black tracking-widest ${direction === 'LONG' ? 'text-emerald-500' : 'text-zinc-700'}`}>LONG</span>
               <Switch checked={direction === 'SHORT'} onCheckedChange={(s) => setDirection(s ? 'SHORT' : 'LONG')} />
-              <span className={`text-[10px] font-black ${direction === 'SHORT' ? 'text-rose-500' : 'text-zinc-700'}`}>SHORT</span>
+              <span className={`text-[10px] font-black tracking-widest ${direction === 'SHORT' ? 'text-rose-500' : 'text-zinc-700'}`}>SHORT</span>
             </div>
           </div>
 
@@ -164,7 +166,7 @@ export default function TraderEye() {
               <p className="text-xl font-black text-rose-500/60">₹{pnl.totalCharges.toFixed(2)}</p>
             </div>
             <div className="space-y-1 hidden md:block">
-              <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Trade Duration</p>
+              <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Hold Time</p>
               <p className="text-xl font-black text-zinc-400 font-mono italic">{pnl.durationStr}</p>
             </div>
           </div>
@@ -178,7 +180,7 @@ export default function TraderEye() {
         </div>
 
         {/* Data Fetch Action */}
-        <Button size="lg" className="w-full h-16 bg-zinc-100 text-black hover:bg-zinc-300 font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-xl" onClick={fetchTrades} disabled={loading}>
+        <Button size="lg" className="w-full h-16 bg-zinc-100 text-black hover:bg-zinc-300 font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-xl transition-all" onClick={fetchTrades} disabled={loading}>
           {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-3" />}
           {loading ? "SCANNING EXCHANGE LEDGER..." : "FETCH TODAY'S SESSION"}
         </Button>
@@ -189,15 +191,15 @@ export default function TraderEye() {
             <Table>
               <TableHeader className="bg-zinc-900/30">
                 <TableRow className="border-zinc-900 hover:bg-transparent">
-                  <TableHead className="w-16 text-center text-[9px] font-black text-zinc-600 uppercase">INC.</TableHead>
-                  <TableHead className="text-[9px] font-black text-zinc-600 uppercase">SYMBOL</TableHead>
-                  <TableHead className="text-right text-[9px] font-black text-zinc-600 uppercase">QTY</TableHead>
-                  <TableHead className="text-right pr-8 text-[9px] font-black text-zinc-600 uppercase">PRICE (IST)</TableHead>
+                  <TableHead className="w-16 text-center text-[9px] font-black text-zinc-600 uppercase tracking-widest">INC.</TableHead>
+                  <TableHead className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">SYMBOL</TableHead>
+                  <TableHead className="text-right text-[9px] font-black text-zinc-600 uppercase tracking-widest">QTY</TableHead>
+                  <TableHead className="text-right pr-8 text-[9px] font-black text-zinc-600 uppercase tracking-widest">PRICE (IST)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {trades.map((trade: any) => (
-                  <TableRow key={trade.exchangeTradeId} className="border-zinc-900/50 hover:bg-zinc-900/20">
+                  <TableRow key={trade.exchangeTradeId} className="border-zinc-900/50 hover:bg-zinc-900/20 transition-colors">
                     <TableCell className="text-center">
                       <input 
                         type="checkbox" className="w-5 h-5 accent-indigo-600 rounded-lg bg-black border-zinc-800"
@@ -223,7 +225,7 @@ export default function TraderEye() {
         )}
       </div>
 
-      {/* Floating Sync Primary Action */}
+      {/* Persistent Sync Action */}
       {trades.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 p-6 bg-black/80 backdrop-blur-2xl border-t border-zinc-900 md:relative md:bg-transparent md:border-none md:max-w-4xl md:mx-auto md:p-0">
           <Button onClick={() => handleSync('SYNC_DATA')} disabled={syncing || selectedIds.length === 0} className="w-full h-16 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-[0_0_50px_rgba(16,185,129,0.2)]">

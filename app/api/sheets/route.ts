@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     await doc.loadInfo();
     const sheet = doc.sheetsByIndex[0];
 
-    // SCHEMA UPDATE: Explicit IST labeling and Duration in Seconds
+    // Initialize Schema with IST labels and raw Seconds for Duration
     if (type === 'INIT_HEADERS') {
       await sheet.setHeaderRow([
         'TradeGroupId', 'Date (IST)', 'Symbol', 'Direction', 'OrderType', 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       TotalCharges: pnl.totalCharges.toFixed(2),
       Status: pnl.status,
       'Time (IST)': t.createTime.split(' ')[1],
-      'Duration (Sec)': pnl.durationSec, // Stored as integer for easier parsing
+      'Duration (Sec)': pnl.durationSec, // Stored as integer for analytical parsing
       IsConsistent: pnl.isConsistent ? "YES" : "NO",
       ExchTradeId: t.exchangeTradeId
     }));
