@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Save, RefreshCcw, Send, AlertTriangle, Database, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import TradeAnalytics from '@/components/TradeAnalytics';
 
 export default function TraderEye() {
   // Fix: Explicitly typing the state to avoid 'never[]' build errors
@@ -60,18 +61,18 @@ export default function TraderEye() {
     const turnover = Number((bVal + sVal).toFixed(2));
     const grossPnL = Number((sVal - bVal).toFixed(2));
     const brokerage = Number((Math.min(bVal * 0.0003, 20) + Math.min(sVal * 0.0003, 20)).toFixed(2));
-    const exchTxn = Number((turnover * 0.00003071).toFixed(2)); 
+    const exchTxn = Number((turnover * 0.00003071).toFixed(2));
     const stt = Number((sVal * 0.00025).toFixed(2));
     const sebi = Number((turnover * 0.000001).toFixed(2));
     const stamp = Number((bVal * 0.00003).toFixed(2));
     const gst = Number(((brokerage + exchTxn + sebi) * 0.18).toFixed(2));
     const totalCharges = Number((brokerage + exchTxn + sebi + stt + stamp + gst).toFixed(2));
     const netPnL = Number((grossPnL - totalCharges).toFixed(2));
-    
+
     // Duration Logic for Sheets (Raw Seconds) and UI (Human Readable)
     const durationSec = Math.max(0, Math.round((lTime - fTime) / 1000));
-    const displayDuration = durationSec > 60 
-      ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` 
+    const displayDuration = durationSec > 60
+      ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
       : `${durationSec}s`;
 
     return {
@@ -103,7 +104,7 @@ export default function TraderEye() {
 
   return (
     <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans pb-24">
-      
+
       {/* Toast Alert */}
       {status.type && (
         <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-sm p-4 rounded-2xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl ${status.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'}`}>
@@ -113,7 +114,10 @@ export default function TraderEye() {
       )}
 
       <div className="max-w-4xl mx-auto px-4 pt-10 space-y-8">
-        
+
+        {/* NEW ANALYTICS SECTION */}
+        <TradeAnalytics />
+
         {/* Navigation / Meta */}
         <header className="flex justify-between items-center border-b border-zinc-900 pb-6">
           <div className="space-y-0.5">
@@ -127,12 +131,12 @@ export default function TraderEye() {
 
         {/* Credentials Interface */}
         <div className="flex gap-2 p-2 bg-zinc-900/40 rounded-2xl border border-zinc-800">
-          <Input 
-            type="password" placeholder="Dhan Auth Token" 
-            className="bg-transparent border-none h-10 text-xs focus-visible:ring-0 placeholder:text-zinc-800 font-mono" 
-            value={token} onChange={(e) => setToken(e.target.value)} 
+          <Input
+            type="password" placeholder="Dhan Auth Token"
+            className="bg-transparent border-none h-10 text-xs focus-visible:ring-0 placeholder:text-zinc-800 font-mono"
+            value={token} onChange={(e) => setToken(e.target.value)}
           />
-          <Button size="icon" className="h-10 w-10 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl" onClick={() => setCookie('dhanTokenId', token, { maxAge: 18*60*60 })}><Save className="w-4 h-4"/></Button>
+          <Button size="icon" className="h-10 w-10 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl" onClick={() => setCookie('dhanTokenId', token, { maxAge: 18 * 60 * 60 })}><Save className="w-4 h-4" /></Button>
         </div>
 
         {/* PnL Terminal Board */}
@@ -201,9 +205,9 @@ export default function TraderEye() {
                 {trades.map((trade: any) => (
                   <TableRow key={trade.exchangeTradeId} className="border-zinc-900/50 hover:bg-zinc-900/20 transition-colors">
                     <TableCell className="text-center">
-                      <input 
+                      <input
                         type="checkbox" className="w-5 h-5 accent-indigo-600 rounded-lg bg-black border-zinc-800"
-                        checked={selectedIds.includes(trade.exchangeTradeId)} 
+                        checked={selectedIds.includes(trade.exchangeTradeId)}
                         onChange={() => setSelectedIds(prev => prev.includes(trade.exchangeTradeId) ? prev.filter(i => i !== trade.exchangeTradeId) : [...prev, trade.exchangeTradeId])}
                       />
                     </TableCell>
