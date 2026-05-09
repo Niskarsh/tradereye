@@ -4,6 +4,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { RefreshCcw, CalendarDays, Loader2, Maximize2, X } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { calculateCumilitivePnl } from '@/app/utils/TradeAnalytics';
 
 // High-Contrast Tooltip with White Text and Defined Background
 const CustomTooltip = ({ active, payload, label, mode }: any) => {
@@ -60,7 +61,7 @@ export default function TradeAnalytics() {
         });
       }
     });
-
+    
     const uniqueTrades = Array.from(tradeGroups.values());
     let totalGross = 0, totalNet = 0, charges = 0;
     const dailyMap: Record<string, number> = {};
@@ -89,7 +90,7 @@ export default function TradeAnalytics() {
 
   const renderChart = (type: 'equity' | 'daily', isExpanded = false) => {
     const height = isExpanded ? "90%" : 220; // Use numeric height for stable rendering
-
+console.log('*****************', stats);
     return (
       <div className={`flex flex-col w-full h-full`}>
         <div className="flex justify-between items-center mb-4">
@@ -107,7 +108,7 @@ export default function TradeAnalytics() {
         <div style={{ width: '100%', height: height }}>
           <ResponsiveContainer width="100%" height="100%">
             {type === 'equity' ? (
-              <LineChart data={stats.chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+              <LineChart data={calculateCumilitivePnl(stats.chartData)} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
                 <XAxis dataKey="date" stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
