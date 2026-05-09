@@ -38,9 +38,15 @@ export default function TradeAnalytics() {
     try {
       const res = await fetch('/api/analytics');
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setRawData(data);
-        localStorage.setItem('traderEye_analytics', JSON.stringify(data));
+      const currentMonth = data.current;
+
+      if (Array.isArray(data.data[currentMonth])) {
+        setRawData(data.data[currentMonth]);
+        localStorage.setItem('traderEye_analytics', JSON.stringify(data.data[currentMonth]));
+      }
+      if (Array.isArray(data.data)) {
+        // setRawData(data.data);
+        localStorage.setItem('traderEye_analytics_ranged', JSON.stringify(data.data));
       }
     } finally { setLoading(false); }
   };
@@ -50,7 +56,6 @@ export default function TradeAnalytics() {
     
     const now = new Date();
     const tradeGroups = new Map();
-    
     rawData.forEach(item => {
       if (item.TradeGroupId && !tradeGroups.has(item.TradeGroupId)) {
         tradeGroups.set(item.TradeGroupId, {
@@ -90,7 +95,7 @@ export default function TradeAnalytics() {
 
   const renderChart = (type: 'equity' | 'daily', isExpanded = false) => {
     const height = isExpanded ? "90%" : 220; // Use numeric height for stable rendering
-console.log('*****************', stats);
+// console.log('*****************', stats);
     return (
       <div className={`flex flex-col w-full h-full`}>
         <div className="flex justify-between items-center mb-4">

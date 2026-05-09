@@ -1,6 +1,5 @@
 "use client";
 import React, { useState, useEffect } from 'react';
-import { setCookie, getCookie } from 'cookies-next';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Save, RefreshCcw, Send, AlertTriangle, Database, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import TradeAnalytics from '@/components/TradeAnalytics';
+import { useAuth } from '@/context/AuthContext';
 
 export default function TraderEye() {
+  const { token, setToken } = useAuth();
   // Fix: Explicitly typing the state to avoid 'never[]' build errors
-  const [token, setToken] = useState<string>('');
   const [trades, setTrades] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [direction, setDirection] = useState<'LONG' | 'SHORT'>('SHORT');
@@ -20,8 +20,6 @@ export default function TraderEye() {
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null, msg: string }>({ type: null, msg: '' });
 
   useEffect(() => {
-    const savedToken = getCookie('dhanTokenId');
-    if (savedToken) setToken(savedToken as string);
     document.documentElement.classList.add('dark');
   }, []);
 
@@ -103,7 +101,7 @@ export default function TraderEye() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans pb-24">
+    <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans pb-24 pt-16 md:pt-0">
 
       {/* Toast Alert */}
       {status.type && (
@@ -136,7 +134,7 @@ export default function TraderEye() {
             className="bg-transparent border-none h-10 text-xs focus-visible:ring-0 placeholder:text-zinc-800 font-mono"
             value={token} onChange={(e) => setToken(e.target.value)}
           />
-          <Button size="icon" className="h-10 w-10 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl" onClick={() => setCookie('dhanTokenId', token, { maxAge: 18 * 60 * 60 })}><Save className="w-4 h-4" /></Button>
+          <Button size="icon" className="h-10 w-10 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl" onClick={() => {}}><Save className="w-4 h-4" /></Button>
         </div>
 
         {/* PnL Terminal Board */}
