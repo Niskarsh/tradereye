@@ -88,6 +88,7 @@ export async function GET(request: Request) {
             IsConsistent: row.get('IsConsistent'),
             ExchTradeId: row.get('ExchTradeId'),
             Comment: row.get('Comment') || '',
+            ScreenshotUrl: row.get('ScreenshotUrl') || '',
             sheetTitle: title
           }));
         } catch (sheetError) {

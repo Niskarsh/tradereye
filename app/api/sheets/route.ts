@@ -21,12 +21,14 @@ export async function POST(request: Request) {
       'TradeGroupId', 'Date (IST)', 'Symbol', 'Direction', 'OrderType', 
       'Price', 'Qty', 'GrossPnL', 'NetPnL', 'TotalCharges', 
       'Status', 'Time (IST)', 'Duration (Sec)', 'IsConsistent', 'ExchTradeId',
-      'Comment',
+      'Comment', 'ScreenshotUrl',
     ];
 
     // 1. Determine the target sheet name based on the trade date
-    // Assuming trades[0].createTime is "YYYY-MM-DD HH:MM:SS"
-    const tradeDate = new Date(trades[0].createTime.replace(/-/g, '/')); 
+    // If only INIT_HEADERS is passed, use current date to form the monthly sheet name.
+    const tradeDate = trades && trades.length > 0
+      ? new Date(trades[0].createTime.replace(/-/g, '/'))
+      : new Date();
     const monthNames = ["january", "february", "march", "april", "may", "june",
                         "july", "august", "september", "october", "november", "december"];
     
@@ -66,7 +68,8 @@ export async function POST(request: Request) {
       'Duration (Sec)': pnl.durationSec,
       IsConsistent: pnl.isConsistent ? "YES" : "NO",
       ExchTradeId: t.exchangeTradeId,
-      Comment: '' 
+      Comment: '',
+      ScreenshotUrl: '', 
     }));
 
     await sheet.addRows(rows);
