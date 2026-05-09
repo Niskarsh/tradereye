@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 
   try {
     const auth = new JWT({
-      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL!,
       key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
@@ -59,35 +59,40 @@ export async function GET(request: Request) {
     }
 
     // 3. Fetch data from all required sheets in parallel
-    const tradeData: Record<string, any[]> = {};
+    const tradeData: Record<string, unknown[]> = {};
 
     await Promise.all(
       targetSheetTitles.map(async (title) => {
-        const sheet = doc.sheetsByTitle[title];
-        if (!sheet) {
-          tradeData[title] = []; 
-          return;
-        }
+        try {
+          const sheet = doc.sheetsByTitle[title];
+          if (!sheet) {
+            tradeData[title] = []; 
+            return;
+          }
 
-        const rows = await sheet.getRows();
-        tradeData[title] = rows.map(row => ({
-          TradeGroupId: row.get('TradeGroupId'),
-          date: row.get('Date (IST)'),
-          Symbol: row.get('Symbol'),
-          Direction: row.get('Direction'),
-          OrderType: row.get('OrderType'),
-          Price: row.get('Price'),
-          Qty: row.get('Qty'),
-          GrossPnL: row.get('GrossPnL'),
-          NetPnL: row.get('NetPnL'),
-          TotalCharges: row.get('TotalCharges'),
-          Status: row.get('Status'),
-          'Time (IST)': row.get('Time (IST)'),
-          'Duration (Sec)': row.get('Duration (Sec)'),
-          IsConsistent: row.get('IsConsistent'),
-          ExchTradeId: row.get('ExchTradeId'),
-          Comment: row.get('Comment') || ''
-        }));
+          const rows = await sheet.getRows();
+          tradeData[title] = rows.map(row => ({
+            TradeGroupId: row.get('TradeGroupId'),
+            date: row.get('Date (IST)'),
+            Symbol: row.get('Symbol'),
+            Direction: row.get('Direction'),
+            OrderType: row.get('OrderType'),
+            Price: row.get('Price'),
+            Qty: row.get('Qty'),
+            GrossPnL: row.get('GrossPnL'),
+            NetPnL: row.get('NetPnL'),
+            TotalCharges: row.get('TotalCharges'),
+            Status: row.get('Status'),
+            'Time (IST)': row.get('Time (IST)'),
+            'Duration (Sec)': row.get('Duration (Sec)'),
+            IsConsistent: row.get('IsConsistent'),
+            ExchTradeId: row.get('ExchTradeId'),
+            Comment: row.get('Comment') || ''
+          }));
+        } catch (sheetError) {
+          console.error(`Error fetching sheet ${title}:`, sheetError);
+          tradeData[title] = [];
+        }
       })
     );
 
@@ -97,8 +102,9 @@ export async function GET(request: Request) {
       data: tradeData             // { "may-2026": [...], "april-2026": [...] }
     });
 
-  } catch (error: any) {
-    console.error("GET Error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("GET Error:", error);
+    const message = error instanceof Error ? error.message : 'Failed to fetch analytics data';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Menu, X, Home, BookOpen } from 'lucide-react';
+import { Menu, X, Home, BookOpen, ChartSpline } from 'lucide-react';
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -70,6 +70,19 @@ export default function Sidebar() {
             >
               <BookOpen size={20} />
               <span className="font-medium">Journal</span>
+            </div>
+          </Link>
+
+          <Link href="/pnl-history" onClick={() => setIsOpen(false)}>
+            <div
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                isActive('/pnl-history')
+                  ? 'bg-cyan-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <ChartSpline size={20} />
+              <span className="font-medium">PnL History</span>
             </div>
           </Link>
         </nav>
