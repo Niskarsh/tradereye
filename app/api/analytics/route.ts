@@ -87,7 +87,8 @@ export async function GET(request: Request) {
             'Duration (Sec)': row.get('Duration (Sec)'),
             IsConsistent: row.get('IsConsistent'),
             ExchTradeId: row.get('ExchTradeId'),
-            Comment: row.get('Comment') || ''
+            Comment: row.get('Comment') || '',
+            sheetTitle: title
           }));
         } catch (sheetError) {
           console.error(`Error fetching sheet ${title}:`, sheetError);
