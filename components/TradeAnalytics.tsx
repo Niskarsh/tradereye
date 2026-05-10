@@ -53,7 +53,7 @@ export default function TradeAnalytics() {
 
   const stats = useMemo(() => {
     if (!rawData || rawData.length === 0) return { chartData: [], totalGross: 0, totalNet: 0, charges: 0 };
-    
+
     const now = new Date();
     const tradeGroups = new Map();
     rawData.forEach(item => {
@@ -66,7 +66,7 @@ export default function TradeAnalytics() {
         });
       }
     });
-    
+
     const uniqueTrades = Array.from(tradeGroups.values());
     let totalGross = 0, totalNet = 0, charges = 0;
     const dailyMap: Record<string, number> = {};
@@ -95,7 +95,16 @@ export default function TradeAnalytics() {
 
   const renderChart = (type: 'equity' | 'daily', isExpanded = false) => {
     const height = isExpanded ? "90%" : 220; // Use numeric height for stable rendering
-// console.log('*****************', stats);
+    // console.log('*****************', stats);
+    const data = calculateCumilitivePnl(stats.chartData);
+    const values = data.map(i => i.val);
+    const maxVal = Math.max(...values);
+    const minVal = Math.min(...values);
+
+    const off = maxVal <= 0 ? 0 : maxVal / (maxVal - minVal);
+
+    // 1. Define a helper to get the color based on value
+    const getPointColor = (value: number) => (value >= 0 ? '#10b981' : '#ef4444');
     return (
       <div className={`flex flex-col w-full h-full`}>
         <div className="flex justify-between items-center mb-4">
@@ -108,23 +117,47 @@ export default function TradeAnalytics() {
             </button>
           )}
         </div>
-        
+
         {/* Wrapper with explicit height to prevent 0px rendering */}
         <div style={{ width: '100%', height: height }}>
           <ResponsiveContainer width="100%" height="100%">
             {type === 'equity' ? (
-              <LineChart data={calculateCumilitivePnl(stats.chartData)} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+              <LineChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset={off} stopColor="#10b981" stopOpacity={1} /> {/* Green above 0 */}
+                    <stop offset={off} stopColor="#ef4444" stopOpacity={1} /> {/* Red below 0 */}
+                  </linearGradient>
+                </defs>
+
                 <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
                 <XAxis dataKey="date" stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
                 <Tooltip content={<CustomTooltip mode={viewMode} />} cursor={{ stroke: '#52525b', strokeWidth: 1 }} />
-                <Line 
-                  type="monotone" 
-                  dataKey="val" 
-                  stroke={viewMode === 'gross' ? '#6366f1' : '#10b981'} 
-                  strokeWidth={4} 
-                  dot={{ r: 4, fill: '#09090b', strokeWidth: 2 }} 
-                  activeDot={{ r: 6, strokeWidth: 0 }} 
+
+                <Line
+                  type="monotone"
+                  dataKey="val"
+                  stroke="url(#splitColor)"
+                  strokeWidth={4}
+                  // Use a function to render the dot dynamically
+                  dot={(props) => {
+                    const { cx, cy, payload } = props;
+                    if (cx === undefined || cy === undefined) return null;
+
+                    return (
+                      <circle
+                        key={`dot-${payload.date}`}
+                        cx={cx}
+                        cy={cy}
+                        r={4}
+                        fill="#09090b"           // Dark center
+                        stroke={getPointColor(payload.val)} // Green or Red border
+                        strokeWidth={2}
+                      />
+                    );
+                  }}
+                  activeDot={{ r: 6, strokeWidth: 0 }}
                 />
               </LineChart>
             ) : (
