@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Trader's Eye - Your Trade Analytics Companion",
-  description: "A powerful tool to analyze and visualize your trading performance with ease.",
+  description: "A powerful tool to analyze, visualize and journal your trading performance with ease.",
 };
 
 export default function RootLayout({
