@@ -101,7 +101,7 @@ export default function TraderEye() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans pb-24 pt-16 md:pt-0">
+    <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-24 pt-0">
 
       {/* Toast Alert */}
       {status.type && (

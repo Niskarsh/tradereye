@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo } from 'react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell, AreaChart, Area } from 'recharts';
 import { RefreshCcw, CalendarDays, Loader2, Maximize2, X } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -93,18 +93,18 @@ export default function TradeAnalytics() {
     return { chartData, totalGross, totalNet, charges };
   }, [rawData, viewMode]);
 
-  const renderChart = (type: 'equity' | 'daily', isExpanded = false) => {
-    const height = isExpanded ? "90%" : 220; // Use numeric height for stable rendering
-    // console.log('*****************', stats);
+ const renderChart = (type: 'equity' | 'daily', isExpanded = false) => {
+    const height = isExpanded ? "90%" : 220; 
     const data = calculateCumilitivePnl(stats.chartData);
     const values = data.map(i => i.val);
     const maxVal = Math.max(...values);
     const minVal = Math.min(...values);
 
+    // Calculate the percentage offset where 0 sits in the chart's total height span
     const off = maxVal <= 0 ? 0 : maxVal / (maxVal - minVal);
 
-    // 1. Define a helper to get the color based on value
-    const getPointColor = (value: number) => (value >= 0 ? '#10b981' : '#ef4444');
+    const getPointColor = (value: number) => (value >= 0 ? 'stroke-data-green' : 'stroke-data-red');
+    
     return (
       <div className={`flex flex-col w-full h-full`}>
         <div className="flex justify-between items-center mb-4">
@@ -118,15 +118,24 @@ export default function TradeAnalytics() {
           )}
         </div>
 
-        {/* Wrapper with explicit height to prevent 0px rendering */}
         <div style={{ width: '100%', height: height }}>
           <ResponsiveContainer width="100%" height="100%">
             {type === 'equity' ? (
-              <LineChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+              // 1. CHANGED: LineChart to AreaChart to handle fill geometry
+              <AreaChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <defs>
+                  {/* Stroke Split Gradient (Sharp Cutoff) */}
                   <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset={off} stopColor="#10b981" stopOpacity={1} /> {/* Green above 0 */}
-                    <stop offset={off} stopColor="#ef4444" stopOpacity={1} /> {/* Red below 0 */}
+                    <stop offset={off} stopColor="var(--color-data-green)" stopOpacity={1} />
+                    <stop offset={off} stopColor="var(--color-data-red)" stopOpacity={1} />
+                  </linearGradient>
+
+                  {/* 2. ADDED: Baseline Area Fill Gradient (Fades out beautifully to match TradingView) */}
+                  <linearGradient id="baselineFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset={0} stopColor="var(--color-data-green)" stopOpacity={0.25} />
+                    <stop offset={off} stopColor="var(--color-data-green)" stopOpacity={0.02} />
+                    <stop offset={off} stopColor="var(--color-data-red)" stopOpacity={0.02} />
+                    <stop offset={1} stopColor="var(--color-data-red)" stopOpacity={0.25} />
                   </linearGradient>
                 </defs>
 
@@ -134,13 +143,18 @@ export default function TradeAnalytics() {
                 <XAxis dataKey="date" stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
                 <Tooltip content={<CustomTooltip mode={viewMode} />} cursor={{ stroke: '#52525b', strokeWidth: 1 }} />
+                
+                {/* 3. ADDED: Horizontal baseline indicator running through 0 */}
+                <ReferenceLine y={0} stroke="#3f3f46" strokeDasharray="3 3" opacity={0.5} />
 
-                <Line
+                {/* 4. CHANGED: Line to Area component */}
+                <Area
                   type="monotone"
                   dataKey="val"
                   stroke="url(#splitColor)"
-                  strokeWidth={4}
-                  // Use a function to render the dot dynamically
+                  strokeWidth={3}
+                  fill="url(#baselineFill)"
+                  baseValue={0} // Forces the baseline area geometry to bound itself at 0 instead of chart floor
                   dot={(props) => {
                     const { cx, cy, payload } = props;
                     if (cx === undefined || cy === undefined) return null;
@@ -150,17 +164,18 @@ export default function TradeAnalytics() {
                         key={`dot-${payload.date}`}
                         cx={cx}
                         cy={cy}
-                        r={4}
-                        fill="#09090b"           // Dark center
-                        stroke={getPointColor(payload.val)} // Green or Red border
+                        r={3.5}
+                        fill="#09090b"
+                        className={getPointColor(payload.val)}
                         strokeWidth={2}
                       />
                     );
                   }}
-                  activeDot={{ r: 6, strokeWidth: 0 }}
+                  activeDot={{ r: 5, strokeWidth: 0 }}
                 />
-              </LineChart>
+              </AreaChart>
             ) : (
+              // BarChart block remains fully unmodified
               <BarChart data={stats.chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
                 <XAxis dataKey="date" stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
@@ -169,7 +184,7 @@ export default function TradeAnalytics() {
                 <ReferenceLine y={0} stroke="#3f3f46" />
                 <Bar dataKey="val" radius={[4, 4, 0, 0]}>
                   {stats.chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.val >= 0 ? '#10b981' : '#f43f5e'} />
+                    <Cell key={`cell-${index}`} fill={entry.val >= 0 ? 'var(--color-data-green)' : 'var(--color-data-red)'} />
                   ))}
                 </Bar>
               </BarChart>
@@ -179,7 +194,6 @@ export default function TradeAnalytics() {
       </div>
     );
   };
-
   return (
     <div className="space-y-6">
       {/* Modal Expansion */}
@@ -207,12 +221,12 @@ export default function TradeAnalytics() {
         </div>
 
         <div className="flex items-center gap-4 w-full md:w-auto">
-          <div className="flex items-center gap-3 bg-zinc-900 p-2 px-4 rounded-xl border border-zinc-800 grow md:grow-0">
+          <div className="flex items-center gap-3 bg-brand-card p-2 px-4 rounded-xl border border-zinc-800 grow md:grow-0">
             <span className={`text-[10px] font-black uppercase tracking-tighter ${viewMode === 'gross' ? 'text-indigo-400' : 'text-zinc-700'}`}>Gross</span>
             <Switch checked={viewMode === 'net'} onCheckedChange={(s) => setViewMode(s ? 'net' : 'gross')} />
             <span className={`text-[10px] font-black uppercase tracking-tighter ${viewMode === 'net' ? 'text-emerald-400' : 'text-zinc-700'}`}>Net</span>
           </div>
-          <Button variant="outline" size="sm" onClick={refreshData} disabled={loading} className="h-10 border-zinc-800 bg-zinc-900 hover:text-indigo-400 font-bold">
+          <Button variant="outline" size="sm" onClick={refreshData} disabled={loading} className="h-10 border-zinc-800 bg-brand-accent/80 hover:bg-brand-accent/90 font-bold">
             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCcw className="w-4 h-4 mr-2" />} REFRESH
           </Button>
         </div>
@@ -220,33 +234,33 @@ export default function TradeAnalytics() {
 
       {/* Analysis Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-[#0c0c0c] border border-zinc-800/60 p-6 rounded-2xl shadow-xl">
+        <div className="bg-brand-card border border-zinc-800/60 p-6 rounded-2xl shadow-xl">
           <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1 font-bold">Gross Profit</p>
-          <p className={`text-2xl font-black ${stats.totalGross >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+          <span className={`text-2xl font-black rounded-md p-1 pr-2 ${stats.totalGross >= 0 ? 'bg-data-green/10 text-data-green' : ' bg-data-red/10 text-data-red'}`}>
             ₹{stats.totalGross.toFixed(2)}
-          </p>
+          </span>
         </div>
-        <div className="bg-[#0c0c0c] border border-zinc-800/60 p-6 rounded-2xl shadow-xl">
+        <div className="bg-brand-card border border-zinc-800/60 p-6 rounded-2xl shadow-xl">
           <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1 font-bold">Deductions (Taxes)</p>
           {/* Neutral Zinc color as requested */}
-          <p className="text-2xl font-black text-zinc-400 italic">
+          <span className="text-2xl font-black rounded-md p-1 pr-2 bg-zinc-400/10 text-zinc-400 italic">
             ₹{stats.charges.toFixed(2)}
-          </p>
+          </span>
         </div>
-        <div className="bg-zinc-100 border border-zinc-200 p-6 rounded-2xl shadow-2xl">
+        <div className="bg-brand-card border border-brand-accent/70 p-6 rounded-2xl shadow-2xl">
           <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-1 font-bold">Month Net Realized</p>
-          <p className={`text-2xl font-black italic ${stats.totalNet >= 0 ? 'text-black' : 'text-rose-600'}`}>
+          <span className={`text-2xl font-black rounded-md p-1 pr-2  ${stats.totalNet >= 0 ? 'bg-data-green/10 text-data-green' : ' bg-data-red/10 text-data-red'}`}>
             ₹{stats.totalNet.toFixed(2)}
-          </p>
+          </span>
         </div>
       </div>
 
       {/* Main Graphs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-[#0c0c0c] border border-zinc-800 p-6 rounded-3xl h-[300px]">
+        <div className="bg-brand-card border border-zinc-800 p-6 rounded-3xl h-[300px]">
           {renderChart('equity')}
         </div>
-        <div className="bg-[#0c0c0c] border border-zinc-800 p-6 rounded-3xl h-[300px]">
+        <div className="bg-brand-card border border-zinc-800 p-6 rounded-3xl h-[300px]">
           {renderChart('daily')}
         </div>
       </div>
