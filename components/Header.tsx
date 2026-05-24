@@ -8,6 +8,7 @@ export default function Header() {
         { name: 'Home', href: '/', current: false },
         { name: 'My Journal', href: '/journal', current: false },
         { name: 'My Stats', href: '/stats', current: false },
+        { name: 'Fetch Today\'s Trades', href: '/sync-trades', current: false },
         { name: 'Youtube', href: 'https://www.youtube.com/@CandlesBeforeCubicles?sub_confirmation=1', current: false },
     ]
 

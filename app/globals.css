@@ -42,4 +42,5 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  @apply bg-brand-bg text-brand-text selection:bg-brand-accent selection:text-brand-bg font-sans antialiased;
 }
