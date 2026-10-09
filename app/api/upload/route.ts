@@ -13,14 +13,14 @@ const s3Client = new S3Client({
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { fileName, fileType } = body;
+        const { fileName, fileType, folderPath } = body;
 
         if (!fileName || !fileType) {
             return NextResponse.json({ success: false, error: 'Missing fileName or fileType' }, { status: 400 });
         }
 
         // Generate a unique key for the file
-        const key = `screenshots/${Date.now()}-${fileName}`;
+        const key = `${folderPath}/${Date.now()}-${fileName}`;
 
         const command = new PutObjectCommand({
             Bucket: process.env.AWS_S3_BUCKET_NAME!,

@@ -5,7 +5,7 @@ import { JWT } from 'google-auth-library';
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { sheetTitle, exchTradeId, comment, screenshotUrl } = body;
+        const { sheetTitle, exchTradeId, comment, screenshotUrl, date, key } = body;
 
         // FIX: Remove 'typeof comment !== "string"' from the required check
         if (!sheetTitle || !exchTradeId) {
@@ -25,7 +25,16 @@ export async function POST(request: Request) {
         if (!sheet) return NextResponse.json({ success: false, error: `Sheet ${sheetTitle} not found` }, { status: 404 });
 
         const rows = await sheet.getRows();
+        if (key === 'live-pnl') {
+            const row = rows.find(r => r.get('Date (IST)') === date);
+            if (!row) return NextResponse.json({ success: false, error: 'Row not found' }, { status: 404 });
+            row.set('LivePnlUrl', screenshotUrl);
+            console.log(`Syncing Row ${date}: Screenshot updated? ${!!screenshotUrl}`);
+            await row.save();
+            return NextResponse.json({ success: true });
+        }
         const row = rows.find(r => r.get('ExchTradeId') === exchTradeId);
+
 
         if (!row) return NextResponse.json({ success: false, error: 'Row not found' }, { status: 404 });
 

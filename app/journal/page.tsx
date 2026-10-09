@@ -7,6 +7,7 @@ import {
     Loader2, RefreshCcw, TrendingUp, TrendingDown, Layers,
     CheckCircle2, XCircle, Camera, Upload, Maximize2, X, Download
 } from "lucide-react";
+import LivePnl from './livePnl';
 
 // --- Functional Helpers ---
 const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -45,6 +46,11 @@ interface TradeEntry {
     ScreenshotUrl?: string;
 }
 
+const uploadFolders = {
+    'chart-screenshot': 'screenshots',
+    'live-pnl': 'live-pnl-charts'
+}
+type UploadFolderKey = keyof typeof uploadFolders
 export default function Journal() {
     const [analyticsData, setAnalyticsData] = useState<Record<string, TradeEntry[]>>(() => {
         if (typeof window === 'undefined') return {};
@@ -110,13 +116,17 @@ export default function Journal() {
         setPendingComments(prev => ({ ...prev, [groupId]: comment }));
     };
 
-    const handleScreenshotUpload = async (groupId: string, file: File, trade: TradeEntry) => {
+    const handleScreenshotUpload = async (groupId: string, file: File, trade: TradeEntry, key: UploadFolderKey = 'chart-screenshot') => {
+        const folderPath: string = uploadFolders[key];
+        if (!folderPath) {
+            throw new Error(`Wrong Folder path for S3: ${folderPath}`);
+        }
         setUploadStatus(prev => ({ ...prev, [groupId]: 'uploading' }));
         try {
             const res = await fetch('/api/upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileName: file.name, fileType: file.type, tradeGroupId: groupId }),
+                body: JSON.stringify({ fileName: file.name, fileType: file.type, tradeGroupId: groupId, folderPath }),
             });
             const result = await res.json();
             if (!res.ok || !result.success) throw new Error(result.error || 'Failed to get upload URL');
@@ -135,7 +145,9 @@ export default function Journal() {
                     sheetTitle: trade.sheetTitle,
                     exchTradeId: trade.ExchTradeId,
                     comment: pendingComments[groupId] || trade.Comment,
-                    screenshotUrl: result.publicUrl 
+                    screenshotUrl: result.publicUrl,
+                    date: dailyPnlMap.get(selectedDateState),
+                    key,
                 }),
             });
             if (!sheetRes.ok) throw new Error('Spreadsheet update failed');
@@ -311,6 +323,7 @@ export default function Journal() {
                     </div>
 
                     <div className="space-y-8">
+                        <LivePnl todayPnl={dailyPnlMap.get(selectedDateState) || 0} selectedDate={selectedDateState} handleScreenshotUpload={handleScreenshotUpload} />
                         {selectedDayGroups.length === 0 ? (
                             <div className="h-[400px] rounded-[40px] border-2 border-dashed border-zinc-900 flex flex-col items-center justify-center text-zinc-700 bg-zinc-900/5">
                                 <Calendar className="w-12 h-12 mb-4 opacity-10" /><p className="font-black uppercase tracking-[0.2em] text-[10px]">No activity recorded</p>
@@ -326,8 +339,8 @@ export default function Journal() {
                                         <div>
                                             <h3 className="text-xl font-black tracking-tight text-white">{group.trades[0].Symbol}</h3>
                                             <div className="flex items-center gap-2 mt-1">
-                                                 <Badge className={`${group.direction.toUpperCase() === 'LONG' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'} border-none text-[9px] px-2 h-5 font-black`}>{group.direction}</Badge>
-                                                 <span className="text-[10px] font-bold text-zinc-600 uppercase flex items-center gap-1.5"><Layers size={14} /> {group.trades.length} fills</span>
+                                                <Badge className={`${group.direction.toUpperCase() === 'LONG' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'} border-none text-[9px] px-2 h-5 font-black`}>{group.direction}</Badge>
+                                                <span className="text-[10px] font-bold text-zinc-600 uppercase flex items-center gap-1.5"><Layers size={14} /> {group.trades.length} fills</span>
                                             </div>
                                         </div>
                                     </div>
@@ -360,7 +373,7 @@ export default function Journal() {
                                 {/* SECTION 3: SCREENSHOT WITH DOWNLOAD */}
                                 <div className="px-6 pb-8 bg-zinc-950/30">
                                     <div className="flex items-center gap-2 mb-4 text-zinc-500"><Camera size={14} /><span className="text-[10px] font-black uppercase tracking-widest">Chart Analysis</span></div>
-                                    
+
                                     <div className="relative group w-full min-h-[260px] md:min-h-[450px] rounded-[24px] overflow-hidden border border-zinc-800/80 bg-zinc-900/20 shadow-inner">
                                         {(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl) ? (
                                             <>
@@ -371,15 +384,15 @@ export default function Journal() {
                                                     onClick={() => setFullScreenImage(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl || null)}
                                                 />
                                                 <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Button 
-                                                        size="icon" 
+                                                    <Button
+                                                        size="icon"
                                                         className="bg-black/80 hover:bg-cyan-600 rounded-full h-10 w-10 backdrop-blur-md border border-white/10"
                                                         onClick={() => handleDownload(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl!, group.trades[0].Symbol)}
                                                     >
                                                         <Download size={18} />
                                                     </Button>
-                                                    <Button 
-                                                        size="icon" 
+                                                    <Button
+                                                        size="icon"
                                                         className="bg-black/80 hover:bg-cyan-600 rounded-full h-10 w-10 backdrop-blur-md border border-white/10"
                                                         onClick={() => setFullScreenImage(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl || null)}
                                                     >
