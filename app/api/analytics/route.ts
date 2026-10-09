@@ -4,8 +4,8 @@ import { JWT } from 'google-auth-library';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const startParam = searchParams.get('start'); 
-  const endParam = searchParams.get('end');     
+  const startParam = searchParams.get('start');
+  const endParam = searchParams.get('end');
 
   const monthNames = [
     "january", "february", "march", "april", "may", "june",
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
 
       while (currentYear < endYearValue || (currentYear === endYearValue && currentMonthIdx <= endMonthIdx)) {
         targetSheetTitles.push(`${monthNames[currentMonthIdx]}-${currentYear}`);
-        
+
         currentMonthIdx++;
         if (currentMonthIdx > 11) {
           currentMonthIdx = 0;
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
         try {
           const sheet = doc.sheetsByTitle[title];
           if (!sheet) {
-            tradeData[title] = []; 
+            tradeData[title] = [];
             return;
           }
 
@@ -89,6 +89,7 @@ export async function GET(request: Request) {
             ExchTradeId: row.get('ExchTradeId'),
             Comment: row.get('Comment') || '',
             ScreenshotUrl: row.get('ScreenshotUrl') || '',
+            LivePnlUrl: row.get('LivePnlUrl') || '',
             sheetTitle: title
           }));
         } catch (sheetError) {

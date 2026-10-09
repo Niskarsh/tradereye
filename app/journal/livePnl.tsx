@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Upload, Maximize2, Download } from "lucide-react";
+import { Loader2, Upload, Maximize2, Download, TrendingUp, TrendingDown } from "lucide-react";
 
 const formatCurrency = (num: number) => {
     const absNum = Math.abs(num);
@@ -58,12 +58,13 @@ export default function LivePnl({
             <div className="p-6 flex items-center justify-between bg-zinc-900/20 border-b border-zinc-800/40">
                 <div className="flex items-center gap-4">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${todayPnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'bg-rose-500/10 text-rose-400 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]'}`}>
+                        {todayPnl >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
                     </div>
                     <div>
-                        <h3 className="text-xl font-black tracking-tight text-white">Live Pnl Chart</h3>
+                        <h3 className="text-xl font-black tracking-tight text-white">Live PnL Chart</h3>
                         <div className="flex items-center gap-2 mt-1">
                             <Badge className={`${todayPnl >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'} border-none text-[9px] px-2 h-5 font-black`}>
-                                {todayPnl >= 0 ? 'Profit' : 'Loss'}
+                                {todayPnl >= 0 ? 'PROFIT' : 'LOSS'}
                             </Badge>
                         </div>
                     </div>

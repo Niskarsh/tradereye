@@ -351,7 +351,7 @@ export default function Journal() {
                         </div>
 
                         <div className="mt-8 pt-6 border-t border-zinc-800/50 grid grid-cols-2 gap-4">
-                            <div><p className="text-[10px] text-zinc-600 uppercase font-black">Day PnL</p><p className={`text-2xl font-black mt-1 ${dailyPnlMap.get(selectedDateState) || 0 >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>{formatCurrency(dailyPnlMap.get(selectedDateState) || 0)}</p></div>
+                            <div><p className="text-[10px] text-zinc-600 uppercase font-black">Day PnL</p><p className={`text-2xl font-black mt-1 ${(dailyPnlMap.get(selectedDateState) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>{formatCurrency(dailyPnlMap.get(selectedDateState) || 0)}</p></div>
                             <div className="text-right"><p className="text-[10px] text-zinc-600 uppercase font-black">Month Total</p><p className={`text-2xl font-black mt-1 ${monthTotal >= 0 ? 'text-white' : 'text-rose-500'}`}>{formatCurrency(monthTotal)}</p></div>
                         </div>
                     </div>
@@ -360,7 +360,7 @@ export default function Journal() {
                 <main className="flex-1 min-w-0 space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 px-2">
                         <h2 className="text-4xl font-black tracking-tighter text-white">{selectedDateState}</h2>
-                        <Badge variant="outline" className="w-fit border-zinc-800 text-zinc-500 font-mono py-1.5 px-4 rounded-full uppercase text-[10px] tracking-widest">{selectedDayGroups.length} Active Trades</Badge>
+                        <Badge variant="outline" className="w-fit border-zinc-800 text-zinc-500 font-mono py-1.5 px-4 rounded-full uppercase text-[10px] tracking-widest">{selectedDayGroups.length} Trades</Badge>
                     </div>
 
                     <div className="space-y-8">
