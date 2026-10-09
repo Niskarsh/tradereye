@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import {
     Calendar, ChevronLeft, ChevronRight, MessageSquare, Save,
     Loader2, RefreshCcw, TrendingUp, TrendingDown, Layers,
-    CheckCircle2, XCircle, Camera, Upload, Maximize2, X, Download
+    CheckCircle2, XCircle, Maximize2, X, Download,
+    Camera, Upload
 } from "lucide-react";
 import LivePnl from './livePnl';
 
@@ -44,6 +45,7 @@ interface TradeEntry {
     ExchTradeId: string;
     sheetTitle?: string;
     ScreenshotUrl?: string;
+    LivePnlUrl?: string;
 }
 
 const uploadFolders = {
@@ -51,6 +53,7 @@ const uploadFolders = {
     'live-pnl': 'live-pnl-charts'
 }
 type UploadFolderKey = keyof typeof uploadFolders
+
 export default function Journal() {
     const [analyticsData, setAnalyticsData] = useState<Record<string, TradeEntry[]>>(() => {
         if (typeof window === 'undefined') return {};
@@ -62,6 +65,7 @@ export default function Journal() {
     const [selectedDateState, setSelectedDateState] = useState<string>(new Date().toISOString().split('T')[0]);
     const [pendingComments, setPendingComments] = useState<Record<string, string>>({});
     const [pendingScreenshots, setPendingScreenshots] = useState<Record<string, string>>({});
+    const [pendingDailyScreenshots, setPendingDailyScreenshots] = useState<Record<string, string>>({});
     const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'uploading' | 'success' | 'error'>>({});
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -95,14 +99,14 @@ export default function Journal() {
         }
     }, [selectedMonth, analyticsData, persistData, showStatus]);
 
-    const handleDownload = async (url: string, symbol: string) => {
+    const handleDownload = async (url: string, filename: string) => {
         try {
             const response = await fetch(url);
             const blob = await response.blob();
             const blobUrl = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = blobUrl;
-            link.download = `${symbol}_${selectedDateState}.png`;
+            link.download = `${filename}.png`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -116,17 +120,17 @@ export default function Journal() {
         setPendingComments(prev => ({ ...prev, [groupId]: comment }));
     };
 
-    const handleScreenshotUpload = async (groupId: string, file: File, trade: TradeEntry, key: UploadFolderKey = 'chart-screenshot') => {
+    const handleScreenshotUpload = async (id: string, file: File, meta: any, key: UploadFolderKey = 'chart-screenshot') => {
         const folderPath: string = uploadFolders[key];
         if (!folderPath) {
             throw new Error(`Wrong Folder path for S3: ${folderPath}`);
         }
-        setUploadStatus(prev => ({ ...prev, [groupId]: 'uploading' }));
+        setUploadStatus(prev => ({ ...prev, [id]: 'uploading' }));
         try {
             const res = await fetch('/api/upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileName: file.name, fileType: file.type, tradeGroupId: groupId, folderPath }),
+                body: JSON.stringify({ fileName: file.name, fileType: file.type, folderPath }),
             });
             const result = await res.json();
             if (!res.ok || !result.success) throw new Error(result.error || 'Failed to get upload URL');
@@ -138,25 +142,50 @@ export default function Journal() {
             });
             if (!uploadRes.ok) throw new Error('S3 Upload Failed');
 
-            const sheetRes = await fetch('/api/sheets/comment', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sheetTitle: trade.sheetTitle,
-                    exchTradeId: trade.ExchTradeId,
-                    comment: pendingComments[groupId] || trade.Comment,
-                    screenshotUrl: result.publicUrl,
-                    date: dailyPnlMap.get(selectedDateState),
-                    key,
-                }),
-            });
-            if (!sheetRes.ok) throw new Error('Spreadsheet update failed');
+            if (key === 'live-pnl') {
+                const firstTrade = currentMonthRows.find(t => t.date === selectedDateState);
+                const sheetRes = await fetch('/api/sheets/comment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sheetTitle: meta.sheetTitle || firstTrade?.sheetTitle,
+                        exchTradeId: firstTrade?.ExchTradeId || 'dummy',
+                        screenshotUrl: result.publicUrl,
+                        date: selectedDateState,
+                        key: 'live-pnl',
+                    }),
+                });
+                if (!sheetRes.ok) throw new Error('Spreadsheet update failed for Live PnL');
 
-            setPendingScreenshots(prev => ({ ...prev, [groupId]: result.publicUrl }));
-            setUploadStatus(prev => ({ ...prev, [groupId]: 'success' }));
+                setPendingDailyScreenshots(prev => ({ ...prev, [selectedDateState]: result.publicUrl }));
+
+                // Also update local state cache so it reflects immediately
+                const updatedData = { ...analyticsData };
+                Object.keys(updatedData).forEach(m => {
+                    updatedData[m] = updatedData[m].map(t => t.date === selectedDateState ? { ...t, LivePnlUrl: result.publicUrl } : t);
+                });
+                setAnalyticsData(updatedData);
+                persistData(updatedData);
+            } else {
+                const sheetRes = await fetch('/api/sheets/comment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sheetTitle: meta.sheetTitle,
+                        exchTradeId: meta.ExchTradeId,
+                        comment: pendingComments[id] || meta.Comment,
+                        screenshotUrl: result.publicUrl,
+                        key,
+                    }),
+                });
+                if (!sheetRes.ok) throw new Error('Spreadsheet update failed');
+                setPendingScreenshots(prev => ({ ...prev, [id]: result.publicUrl }));
+            }
+
+            setUploadStatus(prev => ({ ...prev, [id]: 'success' }));
             showStatus('success', 'Screenshot synced');
         } catch (error) {
-            setUploadStatus(prev => ({ ...prev, [groupId]: 'error' }));
+            setUploadStatus(prev => ({ ...prev, [id]: 'error' }));
             showStatus('error', 'Sync failed');
         }
     };
@@ -235,6 +264,16 @@ export default function Journal() {
         return map;
     }, [groupedByDay]);
 
+    const dailyLivePnlUrlMap = useMemo(() => {
+        const map = new Map<string, string>();
+        currentMonthRows.forEach(row => {
+            if (row.LivePnlUrl) {
+                map.set(row.date, row.LivePnlUrl);
+            }
+        });
+        return map;
+    }, [currentMonthRows]);
+
     const monthTotal = useMemo(() => Array.from(dailyPnlMap.values()).reduce((sum, v) => sum + v, 0), [dailyPnlMap]);
 
     const calendarCells = useMemo(() => {
@@ -251,6 +290,8 @@ export default function Journal() {
     }, [dailyPnlMap, displayMonth]);
 
     const selectedDayGroups = useMemo(() => Object.entries(groupedByDay.get(selectedDateState) || {}), [groupedByDay, selectedDateState]);
+    const currentDayLivePnlUrl = pendingDailyScreenshots[selectedDateState] || dailyLivePnlUrlMap.get(selectedDateState) || currentMonthRows.find(t => t.date === selectedDateState)?.LivePnlUrl;
+    const currentSheetTitle = currentMonthRows.find(t => t.date === selectedDateState)?.sheetTitle;
 
     return (
         <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans pb-32">
@@ -272,7 +313,7 @@ export default function Journal() {
             )}
 
             <div className="max-w-[1600px] mx-auto p-4 md:p-8 flex flex-col lg:flex-row gap-8">
-                {/* Fixed sidebar logic to prevent mobile clipping */}
+                {/* Sidebar */}
                 <aside className="w-full lg:w-[380px] space-y-6 shrink-0">
                     <header className="flex items-center justify-between px-2">
                         <h1 className="text-2xl font-black italic tracking-tighter text-white">TRADERE<span className="text-cyan-500">YE</span></h1>
@@ -323,7 +364,16 @@ export default function Journal() {
                     </div>
 
                     <div className="space-y-8">
-                        <LivePnl todayPnl={dailyPnlMap.get(selectedDateState) || 0} selectedDate={selectedDateState} handleScreenshotUpload={handleScreenshotUpload} />
+                        <LivePnl
+                            todayPnl={dailyPnlMap.get(selectedDateState) || 0}
+                            selectedDate={selectedDateState}
+                            handleScreenshotUpload={handleScreenshotUpload}
+                            dailyScreenshotUrl={currentDayLivePnlUrl}
+                            uploadStatus={uploadStatus[`daily-${selectedDateState}`]}
+                            onFullScreen={(url) => setFullScreenImage(url)}
+                            sheetTitle={currentSheetTitle}
+                        />
+
                         {selectedDayGroups.length === 0 ? (
                             <div className="h-[400px] rounded-[40px] border-2 border-dashed border-zinc-900 flex flex-col items-center justify-center text-zinc-700 bg-zinc-900/5">
                                 <Calendar className="w-12 h-12 mb-4 opacity-10" /><p className="font-black uppercase tracking-[0.2em] text-[10px]">No activity recorded</p>
@@ -407,7 +457,7 @@ export default function Journal() {
                                                     accept="image/*"
                                                     onChange={(e) => {
                                                         const file = e.target.files?.[0];
-                                                        if (file) handleScreenshotUpload(groupId, file, group.trades[0]);
+                                                        if (file) handleScreenshotUpload(groupId, file, group.trades[0], 'chart-screenshot');
                                                     }}
                                                     className="hidden"
                                                     id={`screenshot-${groupId}`}
