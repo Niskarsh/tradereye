@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Upload, Maximize2, Download, TrendingUp, TrendingDown } from "lucide-react";
+import { UploadFolderKey } from './page';
 
 const formatCurrency = (num: number) => {
     const absNum = Math.abs(num);
@@ -14,7 +15,7 @@ const formatCurrency = (num: number) => {
 interface LivePnlProps {
     todayPnl: number;
     selectedDate: string;
-    handleScreenshotUpload: (groupId: string, file: File, trade: any, key: string) => Promise<void>;
+    handleScreenshotUpload: (groupId: string, file: File, trade: any, key: UploadFolderKey) => Promise<void>;
     dailyScreenshotUrl?: string;
     uploadStatus?: string;
     onFullScreen: (url: string) => void;

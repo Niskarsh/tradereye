@@ -52,7 +52,7 @@ const uploadFolders = {
     'chart-screenshot': 'screenshots',
     'live-pnl': 'live-pnl-charts'
 }
-type UploadFolderKey = keyof typeof uploadFolders
+export type UploadFolderKey = keyof typeof uploadFolders
 
 export default function Journal() {
     const [analyticsData, setAnalyticsData] = useState<Record<string, TradeEntry[]>>(() => {
