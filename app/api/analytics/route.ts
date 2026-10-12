@@ -99,6 +99,7 @@ export async function GET(request: Request) {
             Setup: row.get('Setup') || '',
             Nifty500First5Pct: row.get('Nifty500First5Pct') || '',
             RvolAtEntry: row.get('RvolAtEntry') || '',
+            RvolDay5: row.get('RvolDay5') || '',
             MfeR: row.get('MfeR') || '',
             MaeR: row.get('MaeR') || '',
             sheetTitle: title

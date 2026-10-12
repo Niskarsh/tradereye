@@ -50,7 +50,7 @@ test('plan lists trades that need data; run fills columns, keeps Setup/comment, 
   const rows = f.table('october-2026');
   for (const r of rows) {
     assert.equal(r.Setup, 'momentum'); assert.equal(r.Comment, 'my note'); assert.equal(r.EnrichStatus, 'OK');
-    assert.ok(r.Nifty500First5Pct !== '' && r.RvolAtEntry !== '' && r.Atr2 !== '' && r.MfeR !== '');
+    assert.ok(r.Nifty500First5Pct !== '' && r.RvolAtEntry !== '' && r.RvolDay5 !== '' && r.Atr2 !== '' && r.MfeR !== '');
     assert.equal(r.SecurityId, '11'); assert.equal(r.EntryTime, '09:25:00'); assert.equal(r.ExitTime, '09:40:00'); assert.equal(r.DirFromFills, 'SHORT');
     assert.equal(r.Direction, 'SHORT'); assert.equal(r.NetPnL, '0');
   }
@@ -87,4 +87,25 @@ test('candle parsing handles Unix and 1980-based epochs; previous close picks th
   const b = parseCandles({ open: [1], high: [1], low: [1], close: [1], volume: [1], timestamp: [unix - 315532800] }, IST(DAY, '12:00:00'));
   assert.equal(a.t[0], unix); assert.equal(b.t[0], unix);
   assert.equal(previousClose({ t: [IST('2026-10-09', '15:30:00') / 1000, IST(DAY, '15:30:00') / 1000], o: [], h: [], l: [], c: [5, 6], v: [] }, DAY), 5);
+});
+
+test('TradingView-style rvol divides by the full-day average, so it is far smaller than the same-time ratio', async () => {
+  const f = sheetWithTrade();
+  await runBackfill({ dhan: dhan() as any, sheets: f.client(), lookupSecurityId: async () => '11', sleep: async () => {} }, [{ tab: 'october-2026', groupId: 'TRD-1' }]);
+  const r = f.table('october-2026')[0];
+  assert.ok(Number(r.RvolDay5) > 0 && Number(r.RvolDay5) < Number(r.Rvol5) / 10, `${r.RvolDay5} vs ${r.Rvol5}`);
+});
+
+test('Nifty first-5-min still works when the index candles start at 09:16 (shifted a minute)', async () => {
+  const f = sheetWithTrade();
+  const d = dhan();
+  const orig = d.intraday.bind(d);
+  d.intraday = async function (p: any) {
+    const c = await orig(p);
+    if (p.securityId === '19') { c.t = c.t.map((t) => t + 60); c.t.pop(); c.o.pop(); c.h.pop(); c.l.pop(); c.c.pop(); c.v.pop(); }
+    return c;
+  } as any;
+  const res = await runBackfill({ dhan: d as any, sheets: f.client(), lookupSecurityId: async () => '11', sleep: async () => {} }, [{ tab: 'october-2026', groupId: 'TRD-1' }]);
+  assert.equal(res.results[0].status, 'OK', res.results[0].detail);
+  assert.ok(f.table('october-2026')[0].Nifty500First5Pct !== '');
 });

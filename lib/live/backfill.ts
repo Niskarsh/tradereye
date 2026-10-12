@@ -130,7 +130,7 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
 
         const vals: Record<string, string | number> = {
           Nifty500First5Pct: enr.nifty500First5Pct ?? '', Nifty500AtEntryPct: enr.nifty500AtEntryPct ?? '',
-          Rvol5: enr.rvol5 ?? '', RvolAtEntry: enr.rvolAtEntry ?? '', Atr10m: enr.atr10m ?? '', Atr2: enr.atr2 ?? '',
+          Rvol5: enr.rvol5 ?? '', RvolAtEntry: enr.rvolAtEntry ?? '', RvolDay5: enr.rvolDay5 ?? '', RvolDayAtEntry: enr.rvolDayAtEntry ?? '', Atr10m: enr.atr10m ?? '', Atr2: enr.atr2 ?? '',
           ChgPrevClosePct: enr.chgPrevClosePct ?? '', GapPct: enr.gapPct ?? '', VwapDistPct: enr.vwapDistPct ?? '',
           MfePct: enr.mfePct ?? '', MaePct: enr.maePct ?? '', MfeR: enr.mfeR ?? '', MaeR: enr.maeR ?? '', RBasis: enr.rBasis ?? '',
           EnrichStatus: status === 'OK' ? 'OK' : note, EnrichedAt: `${istDateKey(nowMs)} ${istTime(nowMs)}`,

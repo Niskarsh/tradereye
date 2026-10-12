@@ -37,7 +37,7 @@ export const MONTHLY_LIVE_COLS = [
 /** Filled by the backfill route from market data (needs the Dhan Data API plan active while it runs). */
 export const MONTHLY_ENRICH_COLS = [
   'Nifty500First5Pct', 'Nifty500AtEntryPct',
-  'Rvol5', 'RvolAtEntry',
+  'Rvol5', 'RvolAtEntry', 'RvolDay5', 'RvolDayAtEntry',
   'Atr10m', 'Atr2',
   'ChgPrevClosePct', 'GapPct', 'VwapDistPct',
   'MfePct', 'MaePct', 'MfeR', 'MaeR', 'RBasis',
