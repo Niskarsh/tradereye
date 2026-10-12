@@ -54,6 +54,7 @@ interface TradeEntry {
     Setup?: string;
     Nifty500First5Pct?: string;
     RvolAtEntry?: string;
+    RvolDay5?: string;
     MfeR?: string;
     MaeR?: string;
 }
@@ -424,7 +425,7 @@ export default function Journal() {
                                     const f = group.trades[0];
                                     const items: [string, string | undefined][] = [
                                         ['Stop', f.InitialStop], ['Risk ₹', f.RiskInr], ['Exit', f.ExitType],
-                                        ['Nifty500 first 5m %', f.Nifty500First5Pct], ['Rvol at entry', f.RvolAtEntry],
+                                        ['Nifty500 first 5m %', f.Nifty500First5Pct], ['Rvol first 5m (TradingView style)', f.RvolDay5], ['Rvol at entry (vs same time)', f.RvolAtEntry],
                                         ['MFE R', f.MfeR], ['MAE R', f.MaeR],
                                     ];
                                     const shown = items.filter(([, v]) => v !== undefined && v !== '');
