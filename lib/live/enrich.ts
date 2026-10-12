@@ -13,7 +13,7 @@ import { istParts, SESSION_OPEN_MIN, SESSION_CLOSE_MIN } from './time';
  *  - RvolDayAtEntry      the same, volume up to the entry minute
  *  - Rvol5               stock volume 09:15-09:19 / average of the same window over the previous 10 sessions
  *  - RvolAtEntry         stock volume 09:15..entry / average of the same window over the previous 10 sessions
- *  - Atr10m / Atr2       Wilder ATR(14) on 10-minute bars (2xATR is the app's max-stop yardstick)
+ *  - Atr10m / Atr2       Wilder ATR(14) on 10-minute bars as the chart shows it at entry, including the bar still forming (2xATR is the app's max-stop yardstick)
  *  - VwapDistPct         entry price vs session VWAP (hlc3-weighted) of candles completed before entry, in %
  *  - MfePct/MaePct       best / worst excursion from entry price to the exit moment, in % of entry (>= 0)
  *  - MfeR/MaeR           the same in R, where R = your initial stop distance if known, else 2xATR
@@ -192,12 +192,14 @@ export function computeEnrichment(inp: EnrichInput): Enrichment {
     if (vv > 0) out.vwapDistPct = r4((inp.entryPrice / (pv / vv) - 1) * 100);
   }
 
-  // ---- ATR on 10-minute bars (last bar fully completed at entry)
-  const b10 = tenMinuteBars(inp.stock);
-  const atr = wilderAtr(b10);
-  let k = -1;
-  for (let i = 0; i < b10.length; i++) if (b10[i].end * 1000 <= inp.entryMs) k = i;
-  const atrNow = k >= 0 ? atr[k] : NaN;
+  // ---- ATR(14) on 10-minute bars, the way the chart shows it at the moment you enter:
+  // the bar that is still forming counts (built from the 1-minute candles completed before entry), and the
+  // overnight gap is part of the first bar's true range. Nothing after the entry minute is used.
+  const stockAtEntry = inp.stock.filter((s) => s.date <= inp.date)
+    .map((s) => (s.date === inp.date ? { ...s, bars: s.bars.filter((b) => b.t * 1000 < entryMinuteMs) } : s))
+    .filter((s) => s.bars.length > 0);
+  const atr = wilderAtr(tenMinuteBars(stockAtEntry));
+  const atrNow = atr.length ? atr[atr.length - 1] : NaN;
   if (Number.isFinite(atrNow)) { out.atr10m = r4(atrNow); out.atr2 = r4(atrNow * 2); } else out.missing.push('atr');
 
   // ---- excursions during the trade
