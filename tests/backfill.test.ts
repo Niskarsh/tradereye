@@ -96,18 +96,27 @@ test('TradingView-style rvol divides by the full-day average, so it is far small
   assert.ok(Number(r.RvolDay5) > 0 && Number(r.RvolDay5) < Number(r.Rvol5) / 10, `${r.RvolDay5} vs ${r.Rvol5}`);
 });
 
-test('Nifty first-5-min still works when the index candles start at 09:16 (shifted a minute)', async () => {
+test('if the index session is missing its 09:15 candle, Nifty values are left blank rather than computed from the wrong open', async () => {
   const f = sheetWithTrade();
   const d = dhan();
   const orig = d.intraday.bind(d);
   d.intraday = async function (p: any) {
     const c = await orig(p);
-    if (p.securityId === '19') { c.t = c.t.map((t) => t + 60); c.t.pop(); c.o.pop(); c.h.pop(); c.l.pop(); c.c.pop(); c.v.pop(); }
+    if (p.securityId === '19') { for (const k of ['t', 'o', 'h', 'l', 'c', 'v'] as const) c[k].shift(); }
     return c;
   } as any;
   const res = await runBackfill({ dhan: d as any, sheets: f.client(), lookupSecurityId: async () => '11', sleep: async () => {} }, [{ tab: 'october-2026', groupId: 'TRD-1' }]);
-  assert.equal(res.results[0].status, 'OK', res.results[0].detail);
-  assert.ok(f.table('october-2026')[0].Nifty500First5Pct !== '');
+  assert.equal(res.results[0].status, 'PARTIAL');
+  const r = f.table('october-2026')[0];
+  assert.equal(r.Nifty500First5Pct, ''); assert.equal(r.Nifty500AtEntryPct, '');
+});
+
+test('intraday requests start at 09:00 so the 09:15 candle is never dropped', async () => {
+  const { DhanClient } = await import('../lib/dhan');
+  let body: any;
+  const c = new DhanClient({ token: 't', fetchImpl: (async (_u: any, init: any) => { body = JSON.parse(init.body); return new Response('{}', { status: 200 }); }) as any });
+  await c.intraday({ securityId: '19', segment: 'IDX_I', instrument: 'INDEX', from: '2026-10-12', to: '2026-10-12' });
+  assert.equal(body.fromDate, '2026-10-12 09:00:00');
 });
 
 test('inspect returns raw volumes per session for a trade', async () => {
