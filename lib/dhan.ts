@@ -81,11 +81,15 @@ export class DhanClient {
     }
   }
 
-  /** Intraday candles for IST date keys `from`..`to` (inclusive of the whole `to` session). */
+  /**
+   * Intraday candles for IST date keys `from`..`to` (inclusive of the whole `to` session).
+   * The window starts at 09:00 on purpose: Dhan leaves out a candle stamped exactly at `fromDate`, so a
+   * 09:15 start silently dropped the 09:15 candle of the first day (which broke the Nifty first-5-min move).
+   */
   async intraday(p: { securityId: string; segment: string; instrument: string; from: string; to: string; interval?: number }): Promise<Candles> {
     const raw = await this.req<any>('POST', '/charts/intraday', {
       securityId: String(p.securityId), exchangeSegment: p.segment, instrument: p.instrument,
-      interval: String(p.interval ?? 1), fromDate: `${p.from} 09:15:00`, toDate: `${p.to} 15:30:00`,
+      interval: String(p.interval ?? 1), fromDate: `${p.from} 09:00:00`, toDate: `${p.to} 15:35:00`,
     });
     return parseCandles(raw);
   }
