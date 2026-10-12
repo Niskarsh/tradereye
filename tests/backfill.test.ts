@@ -109,3 +109,10 @@ test('Nifty first-5-min still works when the index candles start at 09:16 (shift
   assert.equal(res.results[0].status, 'OK', res.results[0].detail);
   assert.ok(f.table('october-2026')[0].Nifty500First5Pct !== '');
 });
+
+test('inspect returns raw volumes per session for a trade', async () => {
+  const { inspectVolume } = await import('../lib/live/backfill');
+  const f = sheetWithTrade();
+  const r = await inspectVolume({ dhan: dhan() as any, sheets: f.client(), lookupSecurityId: async () => '11' }, { tab: 'october-2026', groupId: 'TRD-1' });
+  assert.equal(r.symbol, 'ABC'); assert.ok(r.today && r.today.window5 > 0 && r.priors.length === 10 && r.priors[0].dayTotal > 0);
+});

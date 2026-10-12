@@ -72,6 +72,23 @@ function relVolumeDay(sessions: Session[], date: string, toMinExcl: number): num
   return base > 0 ? windowVolume(today, SESSION_OPEN_MIN, toMinExcl) / base : undefined;
 }
 
+export interface VolumeDiag {
+  date: string; bars: number; firstBarMin: number; window5: number; windowEntry: number; dayTotal: number; first10: number[];
+}
+
+/** Raw volume facts per session, so a suspicious relative-volume number can be checked by eye. */
+export function volumeDiagnostics(sessions: Session[], date: string, entryMinOfDay: number): { today?: VolumeDiag; priors: VolumeDiag[] } {
+  const one = (x: Session): VolumeDiag => ({
+    date: x.date, bars: x.bars.length, firstBarMin: x.bars.length ? mod(x.bars[0]) : -1,
+    window5: windowVolume(x, SESSION_OPEN_MIN, SESSION_OPEN_MIN + 5),
+    windowEntry: windowVolume(x, SESSION_OPEN_MIN, entryMinOfDay),
+    dayTotal: windowVolume(x, SESSION_OPEN_MIN, SESSION_CLOSE_MIN),
+    first10: x.bars.slice(0, 10).map((b) => b.v),
+  });
+  const today = sessions.find((x) => x.date === date);
+  return { today: today ? one(today) : undefined, priors: sessions.filter((x) => x.date < date).slice(-10).map(one) };
+}
+
 interface Bar10 { start: number; end: number; o: number; h: number; l: number; c: number }
 
 function tenMinuteBars(sessions: Session[]): Bar10[] {
