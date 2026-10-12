@@ -156,9 +156,12 @@ export function computeEnrichment(inp: EnrichInput): Enrichment {
   // ---- Nifty 500
   const nDay = inp.nifty.find((s) => s.date === inp.date);
   if (nDay && nDay.bars.length) {
-    const first5 = nDay.bars.filter((b) => mod(b) >= SESSION_OPEN_MIN && mod(b) < SESSION_OPEN_MIN + 5);
-    if (first5.length === 5) out.nifty500First5Pct = r4((first5[4].c / first5[0].o - 1) * 100);
-    else out.missing.push('nifty first 5 min');
+    // Dhan's index candles are not always labelled the same way: some days start at 09:16 (shifted by a
+    // minute), others carry an extra bar. So take the first five bars of the day, not a fixed clock window.
+    const first5 = nDay.bars.slice(0, 5);
+    if (first5.length === 5 && mod(first5[0]) <= SESSION_OPEN_MIN + 2 && mod(first5[4]) <= SESSION_OPEN_MIN + 8) {
+      out.nifty500First5Pct = r4((first5[4].c / first5[0].o - 1) * 100);
+    } else out.missing.push('nifty first 5 min');
     const before = nDay.bars.filter((b) => b.t * 1000 < entryMinuteMs);
     if (before.length) out.nifty500AtEntryPct = r4((before[before.length - 1].c / nDay.bars[0].o - 1) * 100);
   } else out.missing.push('nifty candles');

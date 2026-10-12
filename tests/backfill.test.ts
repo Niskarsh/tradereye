@@ -95,3 +95,17 @@ test('TradingView-style rvol divides by the full-day average, so it is far small
   const r = f.table('october-2026')[0];
   assert.ok(Number(r.RvolDay5) > 0 && Number(r.RvolDay5) < Number(r.Rvol5) / 10, `${r.RvolDay5} vs ${r.Rvol5}`);
 });
+
+test('Nifty first-5-min still works when the index candles start at 09:16 (shifted a minute)', async () => {
+  const f = sheetWithTrade();
+  const d = dhan();
+  const orig = d.intraday.bind(d);
+  d.intraday = async function (p: any) {
+    const c = await orig(p);
+    if (p.securityId === '19') { c.t = c.t.map((t) => t + 60); c.t.pop(); c.o.pop(); c.h.pop(); c.l.pop(); c.c.pop(); c.v.pop(); }
+    return c;
+  } as any;
+  const res = await runBackfill({ dhan: d as any, sheets: f.client(), lookupSecurityId: async () => '11', sleep: async () => {} }, [{ tab: 'october-2026', groupId: 'TRD-1' }]);
+  assert.equal(res.results[0].status, 'OK', res.results[0].detail);
+  assert.ok(f.table('october-2026')[0].Nifty500First5Pct !== '');
+});
