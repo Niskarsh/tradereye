@@ -55,6 +55,10 @@ interface TradeEntry {
     Nifty500First5Pct?: string;
     RvolAtEntry?: string;
     RvolDay5?: string;
+    RvolDayAtEntry?: string;
+    Atr10m?: string;
+    MfePct?: string;
+    MaePct?: string;
     MfeR?: string;
     MaeR?: string;
 }
@@ -423,10 +427,12 @@ export default function Journal() {
                                 {/* CONTEXT (only when live logging / backfill has filled the extra columns) */}
                                 {(() => {
                                     const f = group.trades[0];
+                                    const r2 = (v?: string) => (v === undefined || v === '' || isNaN(Number(v)) ? '' : String(Number(Number(v).toFixed(2))));
+                                    const pct = (v?: string) => (r2(v) === '' ? '' : `${r2(v)}%`);
                                     const items: [string, string | undefined][] = [
+                                        ['Rvol first 5m', r2(f.RvolDay5)], ['Rvol at entry', r2(f.RvolDayAtEntry)], ['ATR 10m', r2(f.Atr10m)],
+                                        ['MFE', pct(f.MfePct)], ['MAE', pct(f.MaePct)],
                                         ['Stop', f.InitialStop], ['Risk ₹', f.RiskInr], ['Exit', f.ExitType],
-                                        ['Nifty500 first 5m %', f.Nifty500First5Pct], ['Rvol first 5m (TradingView style)', f.RvolDay5], ['Rvol at entry (vs same time)', f.RvolAtEntry],
-                                        ['MFE R', f.MfeR], ['MAE R', f.MaeR],
                                     ];
                                     const shown = items.filter(([, v]) => v !== undefined && v !== '');
                                     if (!shown.length) return null;

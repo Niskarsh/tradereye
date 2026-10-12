@@ -100,6 +100,10 @@ export async function GET(request: Request) {
             Nifty500First5Pct: row.get('Nifty500First5Pct') || '',
             RvolAtEntry: row.get('RvolAtEntry') || '',
             RvolDay5: row.get('RvolDay5') || '',
+            RvolDayAtEntry: row.get('RvolDayAtEntry') || '',
+            Atr10m: row.get('Atr10m') || '',
+            MfePct: row.get('MfePct') || '',
+            MaePct: row.get('MaePct') || '',
             MfeR: row.get('MfeR') || '',
             MaeR: row.get('MaeR') || '',
             sheetTitle: title
