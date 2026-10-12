@@ -90,6 +90,17 @@ export async function GET(request: Request) {
             Comment: row.get('Comment') || '',
             ScreenshotUrl: row.get('ScreenshotUrl') || '',
             LivePnlUrl: row.get('LivePnlUrl') || '',
+            // Optional columns added by live logging / backfill (blank for older rows)
+            Source: row.get('Source') || '',
+            EntryTime: row.get('EntryTime') || '',
+            InitialStop: row.get('InitialStop') || '',
+            RiskInr: row.get('RiskInr') || '',
+            ExitType: row.get('ExitType') || '',
+            Setup: row.get('Setup') || '',
+            Nifty500First5Pct: row.get('Nifty500First5Pct') || '',
+            RvolAtEntry: row.get('RvolAtEntry') || '',
+            MfeR: row.get('MfeR') || '',
+            MaeR: row.get('MaeR') || '',
             sheetTitle: title
           }));
         } catch (sheetError) {

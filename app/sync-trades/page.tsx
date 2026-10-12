@@ -95,7 +95,7 @@ export default function TraderEye() {
       });
       const data = await res.json();
       if (data.success) showStatus('success', type === 'INIT_HEADERS' ? "IST SCHEMA APPLIED" : `LOGGED ${pnl.status}`);
-      else showStatus('error', "DB WRITE FAILED");
+      else showStatus('error', data.duplicate ? "ALREADY LOGGED" : "DB WRITE FAILED");
     } catch (e) { showStatus('error', "LINK TIMEOUT"); }
     finally { setSyncing(false); }
   };
