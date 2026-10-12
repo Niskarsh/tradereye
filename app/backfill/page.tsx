@@ -46,6 +46,15 @@ export default function BackfillPage() {
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(''); }
   };
 
+  const [pick, setPick] = useState('');
+  const [inspect, setInspect] = useState('');
+  const doInspect = async () => {
+    const it = plan?.items.find((i) => i.groupId === pick);
+    if (!it) return;
+    setInspect('Loading…');
+    try { setInspect(JSON.stringify(await postWithToken('/api/backfill/inspect', token, { tab: it.tab, groupId: it.groupId }))); }
+    catch (e) { setInspect((e as Error).message); }
+  };
   const total = plan?.items.length ?? 0;
   const bad = results.filter((r) => r.status !== 'OK');
 
@@ -92,6 +101,20 @@ export default function BackfillPage() {
             )}
             {total === 0 && <p className="text-sm text-data-green font-bold">Everything is filled.</p>}
           </div>
+        )}
+
+        {plan && plan.items.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Inspect volume numbers for one trade</h2>
+            <div className="flex gap-2">
+              <select value={pick} onChange={(e) => setPick(e.target.value)} className="bg-brand-card text-xs rounded-lg px-3 h-9 flex-1 font-mono">
+                <option value="">Choose a trade…</option>
+                {plan.items.map((i) => <option key={i.groupId} value={i.groupId}>{i.date} {i.symbol}</option>)}
+              </select>
+              <Button size="sm" variant="outline" onClick={doInspect} disabled={!pick || !token}>Inspect</Button>
+            </div>
+            {inspect && <textarea readOnly value={inspect} className="w-full h-40 bg-brand-card rounded-xl p-3 text-[10px] font-mono text-zinc-300" onFocus={(e) => e.currentTarget.select()} />}
+          </section>
         )}
 
         {msg && <div className="p-4 bg-brand-card border border-zinc-800 rounded-2xl text-xs font-bold text-brand-accent">{msg}</div>}

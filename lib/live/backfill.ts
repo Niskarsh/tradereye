@@ -1,7 +1,7 @@
 import type { SheetsClient } from '../sheetsApi';
 import { colLetter, rowToObject } from '../sheetsApi';
 import { DhanError, previousClose, type DhanClient } from '../dhan';
-import { LOOKBACK_CALENDAR_DAYS, computeEnrichment, toSessions } from './enrich';
+import { LOOKBACK_CALENDAR_DAYS, computeEnrichment, toSessions, volumeDiagnostics } from './enrich';
 import { MONTHLY_ALL, MONTHLY_ENRICH_COLS } from './schema';
 import { dateKeyToMs, istDateKey, istTime, monthSheetTitle, normDate, normTime, parseIst, MONTHS } from './time';
 
@@ -174,3 +174,23 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
 }
 
 export { monthSheetTitle };
+
+
+/** Shows the raw volume numbers behind a trade's relative volume (for checking against a chart). */
+export async function inspectVolume(deps: Pick<RunDeps, 'dhan' | 'sheets' | 'lookupSecurityId'>, item: { tab: string; groupId: string }) {
+  if (!TAB_RE.test(item.tab)) throw new Error('unknown tab');
+  const { headers, rows } = await deps.sheets.readAll(item.tab);
+  const g = groupRows(headers, rows).find((x) => x.groupId === item.groupId);
+  if (!g) throw new Error('trade not found');
+  const symbol = g.rows[0].o.Symbol.trim().toUpperCase();
+  const date = normDate(g.rows[0].o['Date (IST)']);
+  const times = g.rows.map((r) => parseIst(`${date} ${normTime(r.o['Time (IST)'])}`)).filter((t) => Number.isFinite(t)).sort((a, b) => a - b);
+  const secId = g.rows[0].o.SecurityId?.trim() || (await deps.lookupSecurityId(symbol)) || '';
+  if (!secId) throw new Error(`no Dhan security id for ${symbol}`);
+  const from = istDateKey(dateKeyToMs(date) - LOOKBACK_CALENDAR_DAYS * 86400_000);
+  const c = await deps.dhan.intraday({ securityId: secId, segment: 'NSE_EQ', instrument: 'EQUITY', from, to: date });
+  const entryMin = Math.floor(times[0] / 60000) * 60000;
+  const mins = new Date(entryMin + 330 * 60_000);
+  const entryMinOfDay = mins.getUTCHours() * 60 + mins.getUTCMinutes();
+  return { symbol, date, entryTime: istTime(times[0]), securityId: secId, rawCandles: c.t.length, ...volumeDiagnostics(toSessions(c), date, entryMinOfDay) };
+}
