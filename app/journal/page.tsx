@@ -46,6 +46,16 @@ interface TradeEntry {
     sheetTitle?: string;
     ScreenshotUrl?: string;
     LivePnlUrl?: string;
+    Source?: string;
+    EntryTime?: string;
+    InitialStop?: string;
+    RiskInr?: string;
+    ExitType?: string;
+    Setup?: string;
+    Nifty500First5Pct?: string;
+    RvolAtEntry?: string;
+    MfeR?: string;
+    MaeR?: string;
 }
 
 const uploadFolders = {
@@ -408,6 +418,27 @@ export default function Journal() {
                                         </tbody>
                                     </table>
                                 </div>
+
+                                {/* CONTEXT (only when live logging / backfill has filled the extra columns) */}
+                                {(() => {
+                                    const f = group.trades[0];
+                                    const items: [string, string | undefined][] = [
+                                        ['Stop', f.InitialStop], ['Risk ₹', f.RiskInr], ['Exit', f.ExitType],
+                                        ['Nifty500 first 5m %', f.Nifty500First5Pct], ['Rvol at entry', f.RvolAtEntry],
+                                        ['MFE R', f.MfeR], ['MAE R', f.MaeR],
+                                    ];
+                                    const shown = items.filter(([, v]) => v !== undefined && v !== '');
+                                    if (!shown.length) return null;
+                                    return (
+                                        <div className="px-6 pb-4 flex flex-wrap gap-2">
+                                            {shown.map(([k, v]) => (
+                                                <span key={k} className="text-[10px] font-bold text-zinc-500 bg-zinc-900/60 border border-zinc-800/60 rounded-full px-3 py-1">
+                                                    {k}: <span className="text-zinc-300 font-mono">{v}</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* SECTION 2: EXPANDED JOURNAL SPACE */}
                                 <div className="px-6 py-6 bg-zinc-950/30 border-t border-zinc-800/50">

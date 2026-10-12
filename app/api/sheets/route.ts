@@ -47,8 +47,24 @@ export async function POST(request: Request) {
 
     // Manual Header Initialization (Legacy support for your INIT_HEADERS type)
     if (type === 'INIT_HEADERS') {
-      await sheet.setHeaderRow(headers);
+      // Keep any extra columns (auto-logging / backfill add them) instead of wiping them.
+      let existing: string[] = [];
+      try { await sheet.loadHeaderRow(); existing = sheet.headerValues.filter(Boolean); } catch { /* empty sheet */ }
+      const extras = existing.filter((h: string) => !headers.includes(h));
+      await sheet.setHeaderRow([...headers, ...extras]);
       return NextResponse.json({ success: true, message: `Headers initialized for ${targetSheetTitle}` });
+    }
+
+    // Guard against double counting: skip when any of these executions is already in the sheet
+    // (for example because automatic live logging saved the trade first).
+    const incomingIds = new Set<string>(trades.map((t: any) => String(t.exchangeTradeId)));
+    const existingRows = await sheet.getRows();
+    const alreadyThere = existingRows.some((r) => {
+      const id = String(r.get('ExchTradeId') ?? '');
+      return incomingIds.has(id) || [...incomingIds].some((i) => id.startsWith(`${i}~`));
+    });
+    if (alreadyThere) {
+      return NextResponse.json({ success: false, duplicate: true, error: 'These executions are already in the sheet.' }, { status: 409 });
     }
 
     const tradeGroupId = `TRD-${Date.now()}`;
