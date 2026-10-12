@@ -33,3 +33,16 @@ test('ATR uses nothing from after the entry minute', () => {
   const run = (c: Candles) => computeEnrichment({ date: '2026-10-12', entryMs: IST('2026-10-12', '09:21:00'), exitMs: IST('2026-10-12', '09:50:00'), direction: 'LONG', entryPrice: 100, stock: toSessions(merge(...calm, c)), nifty: [] }).atr10m;
   assert.equal(run(a), run(b));
 });
+
+test('VWAP is measured on 10-minute bars like the chart: a short sold below the chart VWAP reads negative', () => {
+  // SHADOWFAX 2026-10-12, 09:15-09:20 one-minute candles (a 302 -> 279 crash in the first minute)
+  const rows = [
+    [302.0, 302.35, 279.15, 283.25, 1673082], [282.7, 288.2, 281.55, 286.25, 749254], [286.45, 288.55, 285.85, 287.55, 501541],
+    [287.1, 291.2, 286.85, 290.0, 483770], [290.25, 291.75, 290.0, 291.35, 337634], [291.25, 292.55, 290.7, 291.75, 276403],
+  ];
+  const c: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] };
+  rows.forEach(([o, h, l, cl, v], m) => { c.t.push(IST('2026-10-12', '09:15:00') / 1000 + m * 60); c.o.push(o); c.h.push(h); c.l.push(l); c.c.push(cl); c.v.push(v); });
+  const r = computeEnrichment({ date: '2026-10-12', entryMs: IST('2026-10-12', '09:21:40'), exitMs: IST('2026-10-12', '10:38:00'), direction: 'SHORT', entryPrice: 289.65, stock: toSessions(c), nifty: [] });
+  // one forming 10-minute bar: (302.35 + 279.15 + 291.75) / 3 = 291.0833 -> 289.65 is 0.49% below it
+  assert.ok(Math.abs(r.vwapDistPct! - -0.4926) < 0.01, `vwapDistPct=${r.vwapDistPct}`);
+});

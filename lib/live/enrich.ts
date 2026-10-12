@@ -89,7 +89,7 @@ export function volumeDiagnostics(sessions: Session[], date: string, entryMinOfD
   return { today: today ? one(today) : undefined, priors: sessions.filter((x) => x.date < date).slice(-10).map(one) };
 }
 
-interface Bar10 { start: number; end: number; o: number; h: number; l: number; c: number }
+interface Bar10 { start: number; end: number; o: number; h: number; l: number; c: number; v: number }
 
 function tenMinuteBars(sessions: Session[]): Bar10[] {
   const out: Bar10[] = [];
@@ -106,6 +106,7 @@ function tenMinuteBars(sessions: Session[]): Bar10[] {
       out.push({
         start: startSec, end: startSec + 600,
         o: bs[0].o, h: Math.max(...bs.map((x) => x.h)), l: Math.min(...bs.map((x) => x.l)), c: bs[bs.length - 1].c,
+        v: bs.reduce((s, x) => s + x.v, 0),
       });
     }
   }
@@ -202,10 +203,14 @@ export function computeEnrichment(inp: EnrichInput): Enrichment {
   const rdE = relVolumeDay(inp.stock, inp.date, entryMinOfDay);
   if (rdE !== undefined) out.rvolDayAtEntry = r4(rdE);
 
+  // VWAP the way a 10-minute TradingView chart draws it: each 10-minute bar contributes (H+L+C)/3 x its volume,
+  // including the bar still forming at entry (built from the 1-minute candles completed before the entry minute).
+  // On a violent open this differs from a 1-minute VWAP, and the chart is what you trade from.
+  // Sign: positive = entry above VWAP, negative = below (not flipped for direction).
   const before = day.bars.filter((b) => b.t * 1000 < entryMinuteMs);
   if (before.length) {
     let pv = 0, vv = 0;
-    for (const b of before) { const tp = (b.h + b.l + b.c) / 3; pv += tp * b.v; vv += b.v; }
+    for (const b of tenMinuteBars([{ date: day.date, bars: before }])) { pv += ((b.h + b.l + b.c) / 3) * b.v; vv += b.v; }
     if (vv > 0) out.vwapDistPct = r4((inp.entryPrice / (pv / vv) - 1) * 100);
   }
 
