@@ -97,3 +97,24 @@ test('a short whose buy-stop was trailed by partial WS frames still reports its 
   assert.equal(m.stopMoves, 2);
   assert.equal(m.riskInr, Number(((290.3 - 287.11) * 83).toFixed(2)));
 });
+
+test('exit type: a fired stop shows up as a MARKET order, still STOP (also when trailed); a real manual exit stays MANUAL', () => {
+  const mk = (exitPrice: number, exitOrder: any, stopTrail: number[]) => {
+    const fills: Fill[] = [
+      { tradeId: 'a', orderId: 'E', symbol: 'FSL', securityId: '11', segment: 'NSE_EQ', side: 'SELL', qty: 83, price: 287.11, ts: IST('2026-10-13', '09:30:57'), time: '2026-10-13 09:30:57' },
+      { tradeId: 'b', orderId: 'X', symbol: 'FSL', securityId: '11', segment: 'NSE_EQ', side: 'BUY', qty: 83, price: exitPrice, ts: IST('2026-10-13', '09:45:25'), time: '2026-10-13 09:45:25' },
+    ];
+    const [g] = groupFills(fills);
+    const known = new Map<string, TrackedOrder>();
+    const apply = (snaps: any[]) => { const r = applyOrderSnaps(known, snaps, 'POLL', IST('2026-10-13', '09:31:00')); r.updated.forEach((u) => known.set(u.orderId, u)); };
+    stopTrail.forEach((t, i) => apply([normalizeOrder(rest({ orderId: 'STOP', transactionType: 'BUY', orderType: 'STOP_LOSS_MARKET', tradingSymbol: 'FSL', triggerPrice: t, quantity: 83, createTime: '2026-10-13 09:31:00', updateTime: `2026-10-13 09:3${1 + i}:00` }))!]));
+    apply([normalizeOrder(rest({ orderId: 'X', transactionType: 'BUY', orderType: 'MARKET', tradingSymbol: 'FSL', triggerPrice: 0, price: exitPrice, quantity: 83, orderStatus: 'TRADED', filledQty: 83, createTime: '2026-10-13 09:45:25', updateTime: '2026-10-13 09:45:25', ...exitOrder }))!]);
+    return analyzeTrade(g, [...known.values()]);
+  };
+  assert.equal(mk(290.5, {}, [290.3]).exitType, 'STOP');                 // filled just beyond the stop
+  assert.equal(mk(289.55, {}, [290.3, 289.5]).exitType, 'STOP');         // trailed stop, filled at the trailed level
+  assert.equal(mk(288.0, {}, [290.3]).exitType, 'MANUAL');               // you closed it by hand, well inside the stop
+  // the stop order itself turned into the filled MARKET order (same id, trigger remembered)
+  const same = mk(290.5, { orderId: 'STOP', triggerPrice: 290.3 }, [290.3]);
+  assert.equal(same.exitType, 'STOP'); assert.equal(same.initialStop, 290.3);
+});

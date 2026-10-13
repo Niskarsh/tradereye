@@ -228,6 +228,11 @@ export function applyOrderSnaps(
 /* ------------------------------------------------------------ trade analysis */
 
 const isStop = (k: OrderKind) => k === 'SL' || k === 'SLM';
+/**
+ * A stop that has fired is shown by Dhan as a plain MARKET order (the "SL" badge in the order book), so the kind alone
+ * is not enough: any order that ever carried a trigger price was a stop, whatever it turned into.
+ */
+const stopLike = (o: TrackedOrder) => isStop(o.kind) || o.history.some((h) => h.trigger > 0);
 
 function dedupeConsecutive(values: number[]): number[] {
   const out: number[] = [];
@@ -253,7 +258,7 @@ export function analyzeTrade(g: TradeGroup, orders: TrackedOrder[]): TradeMeta {
   const meta: TradeMeta = { stopMoves: 0, tpMoves: 0, exitType: 'UNKNOWN', ordersSeen: mine.length };
 
   // ---- stops
-  const stopPts = mine.filter((o) => isStop(o.kind))
+  const stopPts = mine.filter(stopLike)
     .flatMap((o) => o.history.map((h) => ({ ...h, qty: o.qty })))
     .filter((h) => h.trigger > 0)
     .sort((a, b) => a.ts - b.ts);
@@ -293,9 +298,15 @@ export function analyzeTrade(g: TradeGroup, orders: TrackedOrder[]): TradeMeta {
     const ord = last ? orders.find((o) => o.orderId === last.fill.orderId) : undefined;
     let t: ExitType = 'UNKNOWN';
     if (ord) {
-      if (isStop(ord.kind)) t = 'STOP';
+      if (stopLike(ord)) t = 'STOP';
       else if (ord.kind === 'LIMIT') t = profitSide(ord.price, g.avgEntry) ? 'TARGET' : 'MANUAL';
       else if (ord.kind === 'MARKET') t = 'MANUAL';
+    }
+    // Still not a stop by its own record? If it filled at or beyond where your stop was sitting, the stop is what closed it.
+    if (t !== 'STOP' && last && meta.lastStop !== undefined) {
+      const px = last.fill.price, tol = meta.lastStop * 0.0003;
+      const crossed = g.direction === 'LONG' ? px <= meta.lastStop + tol : px >= meta.lastStop - tol;
+      if (crossed) t = 'STOP';
     }
     meta.exitType = t;
   }
