@@ -70,9 +70,9 @@ export class LiveStore {
 
   /* ------------------------------------------------------------------ orders */
 
-  async loadOrders(): Promise<{ known: Map<string, TrackedOrder>; rowOf: Map<string, number> }> {
+  async loadOrders(tail = TAIL_ROWS): Promise<{ known: Map<string, TrackedOrder>; rowOf: Map<string, number> }> {
     await this.ensure();
-    const rows = this.stash ? this.stash.state : (await this.sheets.readTail(TAB_ORDER_STATE, TAIL_ROWS, this.stateHeaders)).rows;
+    const rows = this.stash ? this.stash.state : (await this.sheets.readTail(TAB_ORDER_STATE, tail, this.stateHeaders)).rows;
     const known = new Map<string, TrackedOrder>();
     const rowOf = new Map<string, number>();
     for (const r of rows) {

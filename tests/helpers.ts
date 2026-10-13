@@ -24,6 +24,7 @@ export class FakeSheets {
     let r1 = 0, r2 = Infinity, c1 = 0, c2 = Infinity, mm;
     if ((mm = a.match(/^(\d+):(\d+)$/))) { r1 = +mm[1] - 1; r2 = +mm[2] - 1; }
     else if ((mm = a.match(/^([A-Z]+):([A-Z]+)$/))) { c1 = this.colIdx(mm[1]); c2 = this.colIdx(mm[2]); }
+    else if ((mm = a.match(/^([A-Z]+)(\d+):([A-Z]+)$/))) { c1 = this.colIdx(mm[1]); r1 = +mm[2] - 1; c2 = this.colIdx(mm[3]); }
     else if ((mm = a.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/))) { c1 = this.colIdx(mm[1]); r1 = +mm[2] - 1; c2 = this.colIdx(mm[3]); r2 = +mm[4] - 1; }
     else if ((mm = a.match(/^([A-Z]+)(\d+)$/))) { c1 = this.colIdx(mm[1]); r1 = +mm[2] - 1; c2 = c1; r2 = r1; }
     else throw new Error(`unsupported range ${range}`);
@@ -72,6 +73,12 @@ export class FakeSheets {
       const out = readRange(path.slice('/values/'.length));
       if (!out) return new Response('{"error":"no such sheet"}', { status: 400 });
       return ok({ values: out });
+    }
+    if (method === 'POST' && path.endsWith(':clear')) {
+      const { title, r1 } = this.parseRange(decodeURIComponent(path.slice('/values/'.length).replace(/:clear$/, '')));
+      const t = this.tabs.get(title)!;
+      t.rows.length = Math.min(t.rows.length, r1);
+      return ok({});
     }
     if (method === 'POST' && path.includes(':append')) {
       const title = this.parseRange(path.slice('/values/'.length).replace(':append', '')).title;
