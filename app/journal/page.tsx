@@ -131,6 +131,27 @@ export default function Journal() {
         }
     };
 
+    const setSetup = async (groupId: string, value: string) => {
+        const ref = Object.values(analyticsData).flat().find(t => t.TradeGroupId === groupId);
+        if (!ref?.sheetTitle) { showStatus('error', 'Trade not found'); return; }
+        try {
+            const res = await fetch('/api/sheets/comment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sheetTitle: ref.sheetTitle, tradeGroupId: groupId, setup: value }),
+            });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok || !j.success) throw new Error(j.error || 'Failed to save tag');
+            const updated = { ...analyticsData };
+            Object.keys(updated).forEach(m => { updated[m] = updated[m].map(t => t.TradeGroupId === groupId ? { ...t, Setup: value } : t); });
+            setAnalyticsData(updated);
+            persistData(updated);
+            showStatus('success', value ? `Tagged ${value}` : 'Tag cleared');
+        } catch (e: any) {
+            showStatus('error', e.message || 'Failed to save tag');
+        }
+    };
+
     const handleCommentChange = (groupId: string, comment: string) => {
         setPendingComments(prev => ({ ...prev, [groupId]: comment }));
     };
@@ -450,6 +471,21 @@ export default function Journal() {
                                 {/* SECTION 2: EXPANDED JOURNAL SPACE */}
                                 <div className="px-6 py-6 bg-zinc-950/30 border-t border-zinc-800/50">
                                     <div className="flex items-center gap-2 mb-4 text-zinc-500"><MessageSquare size={14} /><span className="text-[10px] font-black uppercase tracking-widest">Setup & Psychology Journal</span></div>
+                                    <div className="flex items-center gap-2 mb-4">
+                                        {(['momentum', 'reversal'] as const).map(opt => {
+                                            const on = (group.trades[0].Setup || '').toLowerCase() === opt;
+                                            return (
+                                                <button
+                                                    key={opt}
+                                                    type="button"
+                                                    onClick={() => setSetup(groupId, on ? '' : opt)}
+                                                    className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${on ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                                                >
+                                                    {opt}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                     <textarea
                                         className="w-full bg-zinc-900/30 border border-zinc-800/80 rounded-[24px] p-5 text-sm leading-loose text-zinc-300 min-h-[220px] md:min-h-[300px] resize-none focus:outline-none focus:ring-1 focus:ring-cyan-500/40 transition-all placeholder:text-zinc-700"
                                         placeholder="Document your setup, entry triggers, and exit rationale..."
