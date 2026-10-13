@@ -24,10 +24,11 @@ export async function POST(request: Request) {
             if (!['', 'momentum', 'reversal'].includes(setup)) {
                 return NextResponse.json({ success: false, error: 'Setup must be momentum, reversal or empty' }, { status: 400 });
             }
+            const all = await sheet.getRows(); // also loads the header row
             if (!sheet.headerValues.includes('Setup')) {
                 return NextResponse.json({ success: false, error: 'This month tab has no Setup column yet. Run Live or Backfill once to add it.' }, { status: 409 });
             }
-            const groupRows = (await sheet.getRows()).filter(r => r.get('TradeGroupId') === tradeGroupId);
+            const groupRows = all.filter(r => r.get('TradeGroupId') === tradeGroupId);
             if (groupRows.length === 0) return NextResponse.json({ success: false, error: 'Trade not found' }, { status: 404 });
             for (const r of groupRows) { r.set('Setup', setup); await r.save(); }
             return NextResponse.json({ success: true, updated: groupRows.length });

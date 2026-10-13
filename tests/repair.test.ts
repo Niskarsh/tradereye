@@ -39,3 +39,20 @@ test('clear logs empties the three log tabs and keeps their headers', async () =
   for (const t of done) assert.equal(f.rows(t).length, 1);
   assert.equal(f.rows('october-2026').length, 3);
 });
+
+test('repair reads a stop that the old feed logged without symbol or trigger (stop-limit price on the losing side, trailed)', async () => {
+  const f = new FakeSheets();
+  const mk = (o: Record<string, string>) => MONTHLY_ALL.map((h) => o[h] ?? '');
+  const base = { TradeGroupId: 'TRD-2', 'Date (IST)': T, Symbol: 'FSL', Direction: 'SHORT', SecurityId: '5', ExitType: 'MANUAL' };
+  f.addTab('october-2026', [[...MONTHLY_ALL],
+    mk({ ...base, OrderType: 'SELL', Price: '287.10', Qty: '83', 'Time (IST)': '09:30:57', ExchTradeId: 'a' }),
+    mk({ ...base, OrderType: 'BUY', Price: '290.50', Qty: '83', 'Time (IST)': '09:45:25', ExchTradeId: 'b' })]);
+  const h = JSON.stringify([[IST(T, '09:31:13'), '', 0, 290.45, 83, 0], [IST(T, '09:31:13'), '', 0, 0, 83, 0], [IST(T, '09:35:42'), '', 0, 290.3, 83, 0], [IST(T, '09:45:25'), '', 0, 290.5, 83, 0], [IST(T, '09:45:27'), '', 0, 0, 83, 0]]);
+  const st = (o: Record<string, string>) => ORDER_STATE_COLS.map((x) => o[x] ?? '');
+  f.addTab('order-state', [[...ORDER_STATE_COLS], st({ OrderId: '313', Date: T, Symbol: '', Side: 'SELL', Kind: 'MARKET', Qty: '83', History: h })]);
+  f.addTab('order-events', [[...ORDER_EVENT_COLS]]); f.addTab('live-trades', [[...LIVE_TRADE_COLS]]);
+  assert.equal((await repairFromLogs(f.client())).fixed, 1);
+  const r = f.table('october-2026')[0];
+  assert.equal(r.InitialStop, '290.45'); assert.equal(r.LastStop, '290.5'); assert.equal(r.StopMoves, '2');
+  assert.equal(r.RiskInr, (3.35 * 83).toFixed(2).replace(/0$/, '').replace(/\.$/, '')); assert.equal(r.ExitType, 'STOP');
+});

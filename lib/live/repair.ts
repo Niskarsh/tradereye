@@ -1,4 +1,4 @@
-import { SheetsClient, rowToObject } from '../sheetsApi';
+import { SheetsClient, rowToObject, type Cell } from '../sheetsApi';
 import { LiveStore } from './store';
 import { analyzeTrade } from './orders';
 import { groupFills } from './grouping';
@@ -37,7 +37,7 @@ export async function repairFromLogs(sheets: SheetsClient): Promise<RepairResult
       if (!id) continue;
       byGroup.set(id, [...(byGroup.get(id) ?? []), r]);
     }
-    const updates: { range: string; values: (string | number)[][] }[] = [];
+    const updates: { range: string; values: Cell[][] }[] = [];
     for (const [id, grows] of byGroup) {
       const objs = grows.map((r) => rowToObject(headers, r.cells));
       out.trades++;
