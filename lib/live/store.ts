@@ -44,22 +44,35 @@ export class LiveStore {
   private stateHeaders: string[] = [];
   private eventHeaders: string[] = [];
   private tradeHeaders: string[] = [];
+  private stash: { state: { rowNumber: number; cells: string[] }[]; trades: { rowNumber: number; cells: string[] }[] } | null = null;
 
   constructor(private sheets: SheetsClient) {}
 
   async ensure(): Promise<void> {
     if (this.ready) return;
-    this.stateHeaders = (await this.sheets.ensureTab(TAB_ORDER_STATE, ORDER_STATE_COLS)).headers;
-    this.eventHeaders = (await this.sheets.ensureTab(TAB_ORDER_EVENTS, ORDER_EVENT_COLS)).headers;
-    this.tradeHeaders = (await this.sheets.ensureTab(TAB_LIVE_TRADES, LIVE_TRADE_COLS)).headers;
+    // our own tabs: remember their header rows for 10 minutes instead of re-reading them on every poll
+    const opts = { cacheMs: 600_000 };
+    this.stateHeaders = (await this.sheets.ensureTab(TAB_ORDER_STATE, ORDER_STATE_COLS, opts)).headers;
+    this.eventHeaders = (await this.sheets.ensureTab(TAB_ORDER_EVENTS, ORDER_EVENT_COLS, opts)).headers;
+    this.tradeHeaders = (await this.sheets.ensureTab(TAB_LIVE_TRADES, LIVE_TRADE_COLS, opts)).headers;
     this.ready = true;
+  }
+
+  /** Reads the order state and the trades of this poll together: two requests in total, however many tabs. */
+  async preload(): Promise<void> {
+    await this.ensure();
+    const [state, trades] = await this.sheets.readTails([
+      { title: TAB_ORDER_STATE, tail: TAIL_ROWS, headers: this.stateHeaders },
+      { title: TAB_LIVE_TRADES, tail: 200, headers: this.tradeHeaders },
+    ]);
+    this.stash = { state: state.rows, trades: trades.rows };
   }
 
   /* ------------------------------------------------------------------ orders */
 
   async loadOrders(): Promise<{ known: Map<string, TrackedOrder>; rowOf: Map<string, number> }> {
     await this.ensure();
-    const { rows } = await this.sheets.readTail(TAB_ORDER_STATE, TAIL_ROWS);
+    const rows = this.stash ? this.stash.state : (await this.sheets.readTail(TAB_ORDER_STATE, TAIL_ROWS, this.stateHeaders)).rows;
     const known = new Map<string, TrackedOrder>();
     const rowOf = new Map<string, number>();
     for (const r of rows) {
@@ -107,7 +120,7 @@ export class LiveStore {
 
   async recentEvents(limit = 30): Promise<{ time: string; symbol: string; side: string; kind: string; status: string; trigger: number; price: number; qty: number; src: string; note: string }[]> {
     await this.ensure();
-    const { rows } = await this.sheets.readTail(TAB_ORDER_EVENTS, limit);
+    const { rows } = await this.sheets.readTail(TAB_ORDER_EVENTS, limit, this.eventHeaders);
     return rows.map((r) => rowToObject(this.eventHeaders, r.cells)).filter((o) => o.EventKey).reverse().map((o) => ({
       time: o.Time, symbol: o.Symbol, side: o.Side, kind: o.Kind, status: o.Status,
       trigger: n(o.Trigger), price: n(o.Price), qty: n(o.Qty), src: o.Src, note: o.Note,
@@ -118,7 +131,7 @@ export class LiveStore {
 
   async loadTrades(): Promise<Map<string, LiveTradeRow>> {
     await this.ensure();
-    const { rows } = await this.sheets.readTail(TAB_LIVE_TRADES, 200);
+    const rows = this.stash ? this.stash.trades : (await this.sheets.readTail(TAB_LIVE_TRADES, 200, this.tradeHeaders)).rows;
     const out = new Map<string, LiveTradeRow>();
     for (const r of rows) {
       const o: Obj = rowToObject(this.tradeHeaders, r.cells);

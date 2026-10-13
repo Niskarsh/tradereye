@@ -103,10 +103,15 @@ export async function runSync(deps: SyncDeps, opts: { includeRecent?: boolean; f
   const store = new LiveStore(deps.sheets);
   const warnings: string[] = [];
 
+  // Dhan and the sheet are read in parallel; the sheet costs 2 requests however many tabs are involved.
+  const preloaded = store.preload();
+  preloaded.catch(() => { /* surfaced below */ });
   const [orders, trades, positions] = await Promise.all([
     deps.dhan.orders(), deps.dhan.trades(),
     deps.dhan.positions().catch((e: Error) => { warnings.push(`Positions unavailable: ${e.message}`); return [] as any[]; }),
   ]);
+
+  await preloaded;
 
   // 1. orders
   const snaps = orders.map(normalizeOrder).filter((x): x is OrderSnapIn => !!x);

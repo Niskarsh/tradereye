@@ -115,3 +115,15 @@ test('a trade logged before its stop was understood gets stop/risk/exit filled i
   const before = s.f.calls.length; await s.run();
   assert.ok(!s.f.calls.slice(before).some((c) => c.includes('values:batchUpdate') && c.includes('october')), 'no repeated patching');
 });
+
+test('a quiet poll costs 2 Sheets reads on a warm client (it used to cost 9), so 5-second polling stays far under the quota', async () => {
+  const f = new FakeSheets(); f.addTab('october-2026', [[...MONTHLY_BASE]]);
+  const client = f.client();                       // one client, like the warm server instance
+  const dhan = { orders: async () => [], trades: async () => [trade('1', 'BUY', 10, 100, '09:20:00')], positions: async () => [] };
+  const run = (o = {}) => runSync({ dhan: dhan as any, sheets: client, now: () => IST(T, '09:30:00') }, o);
+  await run();                                      // cold: creates tabs, learns headers, saves the open trade
+  const reads = async (o = {}) => { const b = f.calls.length; await run(o); return f.calls.slice(b).filter((c) => c.startsWith('GET')).length; };
+  assert.equal(await reads({ includeRecent: false }), 2);
+  assert.equal(await reads({ includeRecent: false }), 2);
+  assert.ok(await reads({ includeRecent: true }) <= 4);   // + the activity log
+});

@@ -33,6 +33,9 @@ export function errorResponse(e: unknown): NextResponse {
     if (e.isRateLimited) return NextResponse.json({ error: 'RATE_LIMITED', message: 'Dhan is rate limiting. Try again in a few seconds.' }, { status: 429 });
     return NextResponse.json({ error: 'DHAN_ERROR', message: e.message }, { status: 502 });
   }
-  if (e instanceof SheetsApiError) return NextResponse.json({ error: 'SHEETS_ERROR', message: e.message }, { status: 502 });
+  if (e instanceof SheetsApiError) {
+    if (e.status === 429) return NextResponse.json({ error: 'RATE_LIMITED', source: 'sheets', retryAfterSec: e.retryAfterSec ?? 30, message: 'Google Sheets is rate limiting. Slowing down for a moment; nothing is lost.' }, { status: 429 });
+    return NextResponse.json({ error: 'SHEETS_ERROR', message: e.message }, { status: 502 });
+  }
   return NextResponse.json({ error: 'SERVER_ERROR', message: (e as Error)?.message ?? 'Unexpected error' }, { status: 500 });
 }

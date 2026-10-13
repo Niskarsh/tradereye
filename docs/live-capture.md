@@ -30,3 +30,6 @@ If a trade was logged before its stop was understood, the next sync fills the bl
 `RiskInr`, `LastStop`, `StopMoves`, target and `ExitType` cells on that trade's rows (only blank cells; anything you typed is
 left alone). The Live page shows the field names the order feed sends ("Order feed fields seen"), which makes a format
 change easy to spot. After stops are filled, run Backfill with "Redo trades already filled" to get MFE/MAE in your real R.
+
+## Sheets rate limit (429)
+Google allows about 60 read requests per minute. A quiet refresh now costs 2 reads (header and tab lists are cached, tails are read in one batch), the page refreshes every 8s (open trade) or 20s (flat), the activity log every 30s, and order-feed frames are grouped for 2.5s. If Google still answers 429, the server retries briefly (honouring Retry-After) and the page pauses 30s and carries on; nothing is lost.
