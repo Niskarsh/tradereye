@@ -5,7 +5,7 @@ import { JWT } from 'google-auth-library';
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { sheetTitle, exchTradeId, comment, screenshotUrl, date, key } = body;
+        const { sheetTitle, exchTradeId, comment, screenshotUrl, date, key, setup, tradeGroupId } = body;
 
         const auth = new JWT({
             email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -18,6 +18,21 @@ export async function POST(request: Request) {
 
         const sheet = doc.sheetsByTitle[sheetTitle];
         if (!sheet) return NextResponse.json({ success: false, error: `Sheet ${sheetTitle} not found` }, { status: 404 });
+
+        // Setup tag (momentum / reversal / blank) for a whole trade group
+        if (typeof setup === 'string' && tradeGroupId) {
+            if (!['', 'momentum', 'reversal'].includes(setup)) {
+                return NextResponse.json({ success: false, error: 'Setup must be momentum, reversal or empty' }, { status: 400 });
+            }
+            const all = await sheet.getRows(); // also loads the header row
+            if (!sheet.headerValues.includes('Setup')) {
+                return NextResponse.json({ success: false, error: 'This month tab has no Setup column yet. Run Live or Backfill once to add it.' }, { status: 409 });
+            }
+            const groupRows = all.filter(r => r.get('TradeGroupId') === tradeGroupId);
+            if (groupRows.length === 0) return NextResponse.json({ success: false, error: 'Trade not found' }, { status: 404 });
+            for (const r of groupRows) { r.set('Setup', setup); await r.save(); }
+            return NextResponse.json({ success: true, updated: groupRows.length });
+        }
 
         const rows = await sheet.getRows();
 

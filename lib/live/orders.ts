@@ -251,19 +251,36 @@ export function analyzeTrade(g: TradeGroup, orders: TrackedOrder[]): TradeMeta {
   const startTs = g.entryTs - 30_000;
   const endTs = g.status === 'CLOSED' ? g.lastTs + 10_000 : Number.POSITIVE_INFINITY;
 
+  const inWindow = (o: TrackedOrder) => o.history.length > 0 && o.history[0].ts >= startTs && o.history[0].ts <= endTs;
+  // Orders the feed told us about without a symbol (older partial frames): theirs if the size matches the open position then.
+  const orphanFits = (o: TrackedOrder) => {
+    if (o.symbol || !inWindow(o)) return false;
+    const q = positionAt(g, o.history[0].ts).qty;
+    return q > 0 && o.qty === q;
+  };
   const mine = orders.filter((o) =>
-    o.symbol === g.symbol && o.side === closing && o.history.length > 0 &&
-    o.history[0].ts >= startTs && o.history[0].ts <= endTs);
+    inWindow(o) && ((o.symbol === g.symbol && o.side === closing) || orphanFits(o)));
 
   const meta: TradeMeta = { stopMoves: 0, tpMoves: 0, exitType: 'UNKNOWN', ordersSeen: mine.length };
 
+  // A limit order that was first placed on the losing side of the position is a stop-limit (the feed may give only its
+  // price, no trigger); it stays a stop even if it is later trailed into profit.
+  const lossSide = (price: number, avg: number) => (g.direction === 'LONG' ? price < avg : price > avg);
+  const limitStop = (o: TrackedOrder) => {
+    if (isStop(o.kind) || o.history.some((h) => h.trigger > 0)) return false;
+    const h = o.history.find((x) => x.price > 0);
+    // a resting order only: an order that was already filled when first seen is just an exit, not a stop
+    return !!h && h.filled === 0 && h.status !== 'TRADED' && lossSide(h.price, positionAt(g, h.ts).avgCost || g.avgEntry);
+  };
+  const stopLevel = (o: TrackedOrder, h: { trigger: number; price: number }) => (h.trigger > 0 ? h.trigger : limitStop(o) ? h.price : 0);
+
   // ---- stops
-  const stopPts = mine.filter(stopLike)
-    .flatMap((o) => o.history.map((h) => ({ ...h, qty: o.qty })))
-    .filter((h) => h.trigger > 0)
+  const stopPts = mine.filter((o) => stopLike(o) || limitStop(o))
+    .flatMap((o) => o.history.map((h) => ({ ...h, qty: o.qty, level: stopLevel(o, h) })))
+    .filter((h) => h.level > 0)
     .sort((a, b) => a.ts - b.ts);
   if (stopPts.length > 0) {
-    const path = dedupeConsecutive(stopPts.map((p) => p.trigger));
+    const path = dedupeConsecutive(stopPts.map((p) => p.level));
     const first = stopPts[0];
     const pos = positionAt(g, first.ts);
     const avg = pos.avgCost || g.avgEntry;
@@ -277,7 +294,7 @@ export function analyzeTrade(g: TradeGroup, orders: TrackedOrder[]): TradeMeta {
 
   // ---- targets (limit orders on the profit side of the position)
   const profitSide = (price: number, avg: number) => (g.direction === 'LONG' ? price > avg : price < avg);
-  const tpPts = mine.filter((o) => o.kind === 'LIMIT')
+  const tpPts = mine.filter((o) => o.kind === 'LIMIT' && !limitStop(o))
     .flatMap((o) => o.history.map((h) => ({ ...h })))
     .filter((h) => {
       const avg = positionAt(g, h.ts).avgCost || g.avgEntry;

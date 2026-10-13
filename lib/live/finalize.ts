@@ -86,32 +86,40 @@ export async function finalizeGroup(
  * frames) gets its stop / risk / target / exit columns filled in afterwards. Only blank cells are written, and only
  * on rows that carry this trade's group id, so nothing you typed is ever overwritten.
  */
+/** The cell updates that fill one trade's blank stop / risk / target columns (and its exit type). */
+export function stopPatchUpdates(
+  title: string, headers: string[], rows: { rowNumber: number; cells: string[] }[], groupId: string, meta: TradeMeta,
+): { updates: { range: string; values: Cell[][] }[]; rows: number } {
+  const values: Record<string, Cell> = {
+    InitialStop: meta.initialStop ?? '', InitialStopDist: meta.initialStopDist ?? '', RiskInr: meta.riskInr ?? '',
+    LastStop: meta.lastStop ?? '', StopMoves: meta.initialStop === undefined ? '' : meta.stopMoves,
+    TpFirst: meta.tpFirst ?? '', TpLast: meta.tpLast ?? '', ExitType: meta.exitType === 'UNKNOWN' ? '' : meta.exitType,
+  };
+  const updates: { range: string; values: Cell[][] }[] = [];
+  const q = `'${title.replace(/'/g, "''")}'`;
+  let n = 0;
+  for (const r of rows) {
+    const o = rowToObject(headers, r.cells);
+    if (o.TradeGroupId !== groupId) continue;
+    n++;
+    for (const [col, v] of Object.entries(values)) {
+      const i = headers.indexOf(col);
+      if (i < 0 || v === '') continue;
+      // ExitType may already say MANUAL/UNKNOWN from the first pass; the other columns must be blank to be filled
+      if (col !== 'ExitType' && String(o[col] ?? '').trim() !== '') continue;
+      updates.push({ range: `${q}!${colLetter(i)}${r.rowNumber}`, values: [[v]] });
+    }
+  }
+  return { updates, rows: n };
+}
+
 export async function patchStopColumns(sheets: SheetsClient, g: TradeGroup, meta: TradeMeta): Promise<number> {
   if (meta.initialStop === undefined) return 0;
   const title = monthSheetTitle(g.date);
   const tab = await sheets.findTab(title);
   if (!tab) return 0;
   const { headers, rows } = await sheets.readTail(title, 600);
-  const values: Record<string, Cell> = {
-    InitialStop: meta.initialStop, InitialStopDist: meta.initialStopDist ?? '', RiskInr: meta.riskInr ?? '',
-    LastStop: meta.lastStop ?? '', StopMoves: meta.stopMoves,
-    TpFirst: meta.tpFirst ?? '', TpLast: meta.tpLast ?? '', ExitType: meta.exitType,
-  };
-  const updates: { range: string; values: Cell[][] }[] = [];
-  const q = `'${title.replace(/'/g, "''")}'`;
-  let patched = 0;
-  for (const r of rows) {
-    const o = rowToObject(headers, r.cells);
-    if (o.TradeGroupId !== g.id) continue;
-    patched++;
-    for (const [col, v] of Object.entries(values)) {
-      const i = headers.indexOf(col);
-      if (i < 0 || v === '') continue;
-      // ExitType may already say MANUAL/UNKNOWN from the first pass; the stop columns must be blank to be filled
-      if (col !== 'ExitType' && String(o[col] ?? '').trim() !== '') continue;
-      updates.push({ range: `${q}!${colLetter(i)}${r.rowNumber}`, values: [[v]] });
-    }
-  }
+  const { updates, rows: n } = stopPatchUpdates(title, headers, rows, g.id, meta);
   await sheets.updateRanges(updates);
-  return patched;
+  return n;
 }

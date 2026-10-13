@@ -202,6 +202,11 @@ export class SheetsClient {
       { method: 'POST', body: { majorDimension: 'ROWS', values: rows } });
   }
 
+  /** Empties everything below the header row of a tab (the header and the tab itself stay). */
+  async clearRows(title: string): Promise<void> {
+    await this.call(`/values/${encodeURIComponent(`${q(title)}!A2:ZZ`)}:clear`, { method: 'POST', body: {} });
+  }
+
   async updateRanges(updates: { range: string; values: Cell[][] }[], raw = false): Promise<void> {
     if (updates.length === 0) return;
     await this.call('/values:batchUpdate', {

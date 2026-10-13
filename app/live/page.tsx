@@ -1,6 +1,6 @@
 "use client";
 import React, { useState } from 'react';
-import { Loader2, Play, RefreshCcw, Square, KeyRound } from 'lucide-react';
+import { Loader2, Play, RefreshCcw, Square, KeyRound, Wrench, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
@@ -18,6 +18,8 @@ export default function LivePage() {
   const s = useLiveSession(token);
   const [renewing, setRenewing] = useState(false);
   const [renewMsg, setRenewMsg] = useState('');
+  const [maint, setMaint] = useState<'' | 'repair' | 'clear'>('');
+  const [maintMsg, setMaintMsg] = useState('');
   const running = s.state === 'running';
   const d = s.data;
   const open = d?.groups.filter((g) => g.status === 'OPEN') ?? [];
@@ -32,6 +34,22 @@ export default function LivePage() {
       await s.adoptToken(r.accessToken);
       setRenewMsg('Token renewed for another 24h. The old one no longer works.');
     } catch (e) { setRenewMsg((e as Error).message); } finally { setRenewing(false); }
+  };
+
+  const repair = async () => {
+    setMaint('repair'); setMaintMsg('');
+    try {
+      const r = await postWithToken<{ fixed: number; trades: number; noOrders: number; alreadyFine: number }>('/api/live/repair', token);
+      setMaintMsg(`Checked ${r.trades} trades: filled ${r.fixed}, already complete ${r.alreadyFine}, no stop found in the log for ${r.noOrders}. Now run Backfill with "Redo trades already filled" so the R columns use the real stops.`);
+    } catch (e) { setMaintMsg((e as Error).message); } finally { setMaint(''); }
+  };
+  const clearLogs = async () => {
+    if (!window.confirm('Empty the order-state, order-events and live-trades tabs? Your monthly trade sheets are not touched, but stops of old trades can no longer be recovered from the log afterwards.')) return;
+    setMaint('clear'); setMaintMsg('');
+    try {
+      await postWithToken('/api/live/clear-logs', token);
+      setMaintMsg('Logs cleared.');
+    } catch (e) { setMaintMsg((e as Error).message); } finally { setMaint(''); }
   };
 
   return (
@@ -57,6 +75,17 @@ export default function LivePage() {
           </Button>
         </div>
         {renewMsg && <p className="text-[11px] text-zinc-400">{renewMsg}</p>}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={repair} disabled={!token || running || maint !== ''} title="Fill empty stop / risk / exit-type cells of logged trades from the saved order log">
+            {maint === 'repair' ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Wrench className="w-4 h-4 mr-1" />}Fill missing fields from logs
+          </Button>
+          <Button size="sm" variant="outline" onClick={clearLogs} disabled={!token || running || maint !== ''} title="Empty order-state, order-events and live-trades">
+            {maint === 'clear' ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Trash2 className="w-4 h-4 mr-1" />}Clear logs
+          </Button>
+          {running && <span className="text-[10px] text-zinc-600">End the session to use these.</span>}
+        </div>
+        {maintMsg && <p className="text-[11px] text-zinc-400">{maintMsg}</p>}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <Chip label="Session" value={running ? 'Running' : s.state === 'ended' ? 'Ended' : 'Off'} ok={running} />
