@@ -4,9 +4,9 @@ import { LiveStore, type LiveTradeRow } from './store';
 import { applyOrderSnaps, analyzeTrade, normalizeOrder, normalizeTrade } from './orders';
 import { groupFills } from './grouping';
 import { computePnl } from './pnl';
-import { finalizeGroup, groupFillKeys } from './finalize';
+import { finalizeGroup, groupFillKeys, patchStopColumns } from './finalize';
 import { istDateKey, istDateTime, istTime } from './time';
-import type { OrderSnap, TradeGroup, TradeMeta, TrackedOrder } from './types';
+import type { OrderSnapIn, TradeGroup, TradeMeta, TrackedOrder } from './types';
 import type { LiveStatus } from './schema';
 
 export interface SyncDeps {
@@ -37,7 +37,7 @@ export interface SyncResult {
 }
 
 /** Applies order snapshots (from any feed) to the stored order state and appends change events. */
-export async function ingestSnaps(deps: Pick<SyncDeps, 'sheets' | 'now'>, snaps: OrderSnap[], src: string, store?: LiveStore) {
+export async function ingestSnaps(deps: Pick<SyncDeps, 'sheets' | 'now'>, snaps: OrderSnapIn[], src: string, store?: LiveStore) {
   const s = store ?? new LiveStore(deps.sheets);
   const now = (deps.now ?? Date.now)();
   const { known, rowOf } = await s.loadOrders();
@@ -109,7 +109,7 @@ export async function runSync(deps: SyncDeps, opts: { includeRecent?: boolean; f
   ]);
 
   // 1. orders
-  const snaps = orders.map(normalizeOrder).filter((x): x is OrderSnap => !!x);
+  const snaps = orders.map(normalizeOrder).filter((x): x is OrderSnapIn => !!x);
   const { events, known } = await ingestSnaps(deps, snaps, 'POLL', store);
 
   // 2. trades
@@ -144,6 +144,10 @@ export async function runSync(deps: SyncDeps, opts: { includeRecent?: boolean; f
     if (g.status === 'CLOSED') {
       if (prev && (prev.Status === 'LOGGED' || prev.Status === 'DUPLICATE')) {
         status = prev.Status;
+        // logged before its stops were known (e.g. partial feed frames): fill them in now that they are
+        if (prev.Status === 'LOGGED' && opts.finalize !== false && meta.initialStop !== undefined && (prev.InitialStop === '' || prev.InitialStop === undefined)) {
+          try { await patchStopColumns(deps.sheets, g, meta); } catch (e) { warnings.push(`Could not add stops to ${g.symbol} in the sheet yet: ${(e as Error).message}`); }
+        }
       } else if (opts.finalize !== false) {
         try {
           const r = await finalizeGroup(deps.sheets, g, computePnl(g), meta);

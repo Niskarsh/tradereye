@@ -31,6 +31,7 @@ export function useLiveSession(token: string) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [lastOkAt, setLastOkAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [frameKeys, setFrameKeys] = useState<string[]>([]);
 
   const tokenRef = useRef(token);
   tokenRef.current = token;
@@ -78,7 +79,10 @@ export function useLiveSession(token: string) {
   const flush = useCallback(async () => {
     const batch = queue.current.splice(0, 50);
     if (!batch.length || !alive.current) return;
-    try { await call('/api/live/event', tokenRef.current, { messages: batch }); } catch { /* the poll will catch up */ }
+    try {
+      const r = await call<{ frameKeys?: string[] }>('/api/live/event', tokenRef.current, { messages: batch });
+      if (r.frameKeys?.length) setFrameKeys((old) => (old.length ? old : r.frameKeys!));
+    } catch { /* the poll will catch up */ }
     sync(false);
   }, [sync]);
 
@@ -121,5 +125,5 @@ export function useLiveSession(token: string) {
     try { setProfile(await call<Profile & { clientId: string }>('/api/live/profile', newToken)); } catch { /* keep going with old info */ }
   }, []);
 
-  return { state, ws, data, error, profile, lastOkAt, now, start, stop, syncNow: () => sync(true), adoptToken };
+  return { state, ws, frameKeys, data, error, profile, lastOkAt, now, start, stop, syncNow: () => sync(true), adoptToken };
 }

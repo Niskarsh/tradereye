@@ -65,6 +65,8 @@ export default function LivePage() {
           <Chip label="Last sync" value={s.lastOkAt ? `${Math.max(0, Math.round((s.now - s.lastOkAt) / 1000))}s ago` : '—'} ok={!!s.lastOkAt && s.now - s.lastOkAt < 40_000} />
         </div>
 
+        {s.frameKeys.length > 0 && <p className="text-[10px] text-zinc-600 break-words">Order feed fields seen: {s.frameKeys.join(', ')}</p>}
+
         {s.error && <div className="p-4 bg-data-red/10 border border-data-red/30 rounded-2xl text-xs font-bold text-data-red">{s.error}</div>}
         {!running && s.state !== 'ended' && (
           <p className="text-sm text-zinc-500">Paste your token and press Start. Your trades, stop moves and targets are captured while this page stays open; the session ends on its own when the token expires.</p>
