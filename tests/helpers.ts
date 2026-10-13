@@ -51,12 +51,26 @@ export class FakeSheets {
       }
       return ok({});
     }
-    if (method === 'GET' && path.startsWith('/values/')) {
-      const { title, r1, r2, c1, c2 } = this.parseRange(path.slice('/values/'.length));
+    const readRange = (range: string): string[][] | null => {
+      const { title, r1, r2, c1, c2 } = this.parseRange(range);
       const t = this.tabs.get(title);
-      if (!t) return new Response('{"error":"no such sheet"}', { status: 400 });
+      if (!t) return null;
       const out = t.rows.slice(r1, r2 === Infinity ? undefined : r2 + 1).map((r) => r.slice(c1, c2 === Infinity ? undefined : c2 + 1));
       while (out.length && out[out.length - 1].every((c) => c === '')) out.pop();
+      return out;
+    };
+    if (method === 'GET' && path === '/values:batchGet') {
+      const valueRanges = [];
+      for (const r of url.searchParams.getAll('ranges')) {
+        const v = readRange(r);
+        if (!v) return new Response('{"error":"no such sheet"}', { status: 400 });
+        valueRanges.push({ values: v });
+      }
+      return ok({ valueRanges });
+    }
+    if (method === 'GET' && path.startsWith('/values/')) {
+      const out = readRange(path.slice('/values/'.length));
+      if (!out) return new Response('{"error":"no such sheet"}', { status: 400 });
       return ok({ values: out });
     }
     if (method === 'POST' && path.includes(':append')) {

@@ -1,4 +1,4 @@
-import { SheetsClient, objectToRow, rowToObject, type Cell } from '../sheetsApi';
+import { SheetsClient, colLetter, objectToRow, rowToObject, type Cell } from '../sheetsApi';
 import { MONTHLY_ALL } from './schema';
 import { istTime, monthSheetTitle, normDate, normTime } from './time';
 import type { Pnl, TradeGroup, TradeMeta } from './types';
@@ -79,4 +79,39 @@ export async function finalizeGroup(
   } finally {
     inFlight.delete(g.id);
   }
+}
+
+/**
+ * Self-heal: a trade that was logged before its stop orders were understood (e.g. an order feed that sent partial
+ * frames) gets its stop / risk / target / exit columns filled in afterwards. Only blank cells are written, and only
+ * on rows that carry this trade's group id, so nothing you typed is ever overwritten.
+ */
+export async function patchStopColumns(sheets: SheetsClient, g: TradeGroup, meta: TradeMeta): Promise<number> {
+  if (meta.initialStop === undefined) return 0;
+  const title = monthSheetTitle(g.date);
+  const tab = await sheets.findTab(title);
+  if (!tab) return 0;
+  const { headers, rows } = await sheets.readTail(title, 600);
+  const values: Record<string, Cell> = {
+    InitialStop: meta.initialStop, InitialStopDist: meta.initialStopDist ?? '', RiskInr: meta.riskInr ?? '',
+    LastStop: meta.lastStop ?? '', StopMoves: meta.stopMoves,
+    TpFirst: meta.tpFirst ?? '', TpLast: meta.tpLast ?? '', ExitType: meta.exitType,
+  };
+  const updates: { range: string; values: Cell[][] }[] = [];
+  const q = `'${title.replace(/'/g, "''")}'`;
+  let patched = 0;
+  for (const r of rows) {
+    const o = rowToObject(headers, r.cells);
+    if (o.TradeGroupId !== g.id) continue;
+    patched++;
+    for (const [col, v] of Object.entries(values)) {
+      const i = headers.indexOf(col);
+      if (i < 0 || v === '') continue;
+      // ExitType may already say MANUAL/UNKNOWN from the first pass; the stop columns must be blank to be filled
+      if (col !== 'ExitType' && String(o[col] ?? '').trim() !== '') continue;
+      updates.push({ range: `${q}!${colLetter(i)}${r.rowNumber}`, values: [[v]] });
+    }
+  }
+  await sheets.updateRanges(updates);
+  return patched;
 }

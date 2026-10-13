@@ -57,3 +57,64 @@ test('trade analysis with no order history is empty, not wrong', () => {
   const m = analyzeTrade(g, []);
   assert.equal(m.initialStop, undefined); assert.equal(m.exitType, 'UNKNOWN');
 });
+
+test('partial WebSocket frames never overwrite good data (no side/status/price/time must not become SELL/blank/0)', () => {
+  const known = new Map<string, TrackedOrder>();
+  // REST says: a BUY stop (the protective stop of a short), trigger 290.3
+  let r = applyOrderSnaps(known, [normalizeOrder(rest({ orderId: 'B1', transactionType: 'BUY', orderType: 'STOP_LOSS', tradingSymbol: 'FSL', triggerPrice: 290.3, price: 291 }))!], 'POLL', 0);
+  r.updated.forEach((u) => known.set(u.orderId, u));
+  // the frame the real feed produced: the order id, a new trigger, and almost nothing else
+  r = applyOrderSnaps(known, snapsFromPayload({ Type: 'order_alert', Data: { OrderNo: 'B1', TriggerPrice: 289.9, LastUpdatedTime: '1980-01-01 00:00:00' } }), 'WS', 0);
+  assert.equal(r.events.length, 1);
+  assert.match(r.events[0].note, /TRIGGER 290.3→289.9/);
+  const o = r.updated[0];
+  assert.equal(o.side, 'BUY'); assert.equal(o.kind, 'SL'); assert.equal(o.symbol, 'FSL');
+  assert.equal(o.status, 'PENDING'); assert.equal(o.price, 291); assert.equal(o.qty, 10);
+  // unseen order + frame without a side: do not invent a record, the poll will create it
+  r = applyOrderSnaps(known, snapsFromPayload({ Data: { OrderNo: 'NEW1', TriggerPrice: 5 } }), 'WS', 0);
+  assert.equal(r.events.length, 0);
+});
+
+test('field names are matched loosely (camelCase / PascalCase / snake_case)', () => {
+  const s = normalizeOrder({ orderNo: '7', txnType: 'B', status: 'Pending', symbol: 'ABC', orderType: 'SL', trigger_price: 12.5 })!;
+  assert.equal(s.side, 'BUY'); assert.equal(s.status, 'PENDING'); assert.equal(s.symbol, 'ABC'); assert.equal(s.kind, 'SL'); assert.equal(s.triggerPrice, 12.5);
+});
+
+test('a short whose buy-stop was trailed by partial WS frames still reports its first stop and risk', () => {
+  const fills: Fill[] = [
+    { tradeId: 'a', orderId: 'E', symbol: 'FSL', securityId: '11', segment: 'NSE_EQ', side: 'SELL', qty: 83, price: 287.11, ts: IST('2026-10-13', '09:30:00'), time: '2026-10-13 09:30:00' },
+    { tradeId: 'b', orderId: 'S', symbol: 'FSL', securityId: '11', segment: 'NSE_EQ', side: 'BUY', qty: 83, price: 290.5, ts: IST('2026-10-13', '09:44:28'), time: '2026-10-13 09:44:28' },
+  ];
+  const [g] = groupFills(fills);
+  const known = new Map<string, TrackedOrder>();
+  const apply = (snaps: any[], src: string) => { const r = applyOrderSnaps(known, snaps, src, IST('2026-10-13', '09:30:10')); r.updated.forEach((u) => known.set(u.orderId, u)); };
+  apply([normalizeOrder(rest({ orderId: 'STOP', transactionType: 'BUY', orderType: 'STOP_LOSS', tradingSymbol: 'FSL', triggerPrice: 290.3, quantity: 83, createTime: '2026-10-13 09:30:05', updateTime: '2026-10-13 09:30:05' }))!], 'POLL');
+  apply(snapsFromPayload({ Data: { OrderNo: 'STOP', TriggerPrice: 289.9 } }), 'WS');
+  apply(snapsFromPayload({ Data: { OrderNo: 'STOP', TriggerPrice: 289.2 } }), 'WS');
+  const m = analyzeTrade(g, [...known.values()]);
+  assert.equal(m.initialStop, 290.3);
+  assert.equal(m.lastStop, 289.2);
+  assert.equal(m.stopMoves, 2);
+  assert.equal(m.riskInr, Number(((290.3 - 287.11) * 83).toFixed(2)));
+});
+
+test('exit type: a fired stop shows up as a MARKET order, still STOP (also when trailed); a real manual exit stays MANUAL', () => {
+  const mk = (exitPrice: number, exitOrder: any, stopTrail: number[]) => {
+    const fills: Fill[] = [
+      { tradeId: 'a', orderId: 'E', symbol: 'FSL', securityId: '11', segment: 'NSE_EQ', side: 'SELL', qty: 83, price: 287.11, ts: IST('2026-10-13', '09:30:57'), time: '2026-10-13 09:30:57' },
+      { tradeId: 'b', orderId: 'X', symbol: 'FSL', securityId: '11', segment: 'NSE_EQ', side: 'BUY', qty: 83, price: exitPrice, ts: IST('2026-10-13', '09:45:25'), time: '2026-10-13 09:45:25' },
+    ];
+    const [g] = groupFills(fills);
+    const known = new Map<string, TrackedOrder>();
+    const apply = (snaps: any[]) => { const r = applyOrderSnaps(known, snaps, 'POLL', IST('2026-10-13', '09:31:00')); r.updated.forEach((u) => known.set(u.orderId, u)); };
+    stopTrail.forEach((t, i) => apply([normalizeOrder(rest({ orderId: 'STOP', transactionType: 'BUY', orderType: 'STOP_LOSS_MARKET', tradingSymbol: 'FSL', triggerPrice: t, quantity: 83, createTime: '2026-10-13 09:31:00', updateTime: `2026-10-13 09:3${1 + i}:00` }))!]));
+    apply([normalizeOrder(rest({ orderId: 'X', transactionType: 'BUY', orderType: 'MARKET', tradingSymbol: 'FSL', triggerPrice: 0, price: exitPrice, quantity: 83, orderStatus: 'TRADED', filledQty: 83, createTime: '2026-10-13 09:45:25', updateTime: '2026-10-13 09:45:25', ...exitOrder }))!]);
+    return analyzeTrade(g, [...known.values()]);
+  };
+  assert.equal(mk(290.5, {}, [290.3]).exitType, 'STOP');                 // filled just beyond the stop
+  assert.equal(mk(289.55, {}, [290.3, 289.5]).exitType, 'STOP');         // trailed stop, filled at the trailed level
+  assert.equal(mk(288.0, {}, [290.3]).exitType, 'MANUAL');               // you closed it by hand, well inside the stop
+  // the stop order itself turned into the filled MARKET order (same id, trigger remembered)
+  const same = mk(290.5, { orderId: 'STOP', triggerPrice: 290.3 }, [290.3]);
+  assert.equal(same.exitType, 'STOP'); assert.equal(same.initialStop, 290.3);
+});

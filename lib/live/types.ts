@@ -65,6 +65,13 @@ export interface OrderSnap {
   updateTime: string;    // IST string
 }
 
+/**
+ * What a feed told us about an order. REST rows are complete; WebSocket frames can be partial (no side, no status,
+ * no update time ...), so every field except the id is optional and ONLY the fields that were really present
+ * may overwrite what we already know. A missing field must never be turned into a default like SELL or price 0.
+ */
+export type OrderSnapIn = Partial<Omit<OrderSnap, 'orderId'>> & { orderId: string };
+
 export interface OrderHistoryPoint { ts: number; status: string; trigger: number; price: number; qty: number; filled: number }
 
 /** An order plus the changes we have seen it go through. */

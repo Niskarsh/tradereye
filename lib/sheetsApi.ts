@@ -27,12 +27,13 @@ export const colLetter = (index0: number): string => {
 const q = (title: string) => `'${title.replace(/'/g, "''")}'`;
 
 export class SheetsApiError extends Error {
-  constructor(public status: number, message: string) { super(message); this.name = 'SheetsApiError'; }
+  constructor(public status: number, message: string, public retryAfterSec?: number) { super(message); this.name = 'SheetsApiError'; }
 }
 
 export class SheetsClient {
   private tabs: TabInfo[] | null = null;
   private tabsAt = 0;
+  private headerCache = new Map<string, { headers: string[]; at: number }>();
   private readonly f: typeof fetch;
   private readonly base: string;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -46,7 +47,7 @@ export class SheetsClient {
   private async call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
     const url = `${this.base}/${this.opts.spreadsheetId}${path}`;
     let lastErr: Error | null = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       const token = await this.opts.getToken();
       const res = await this.f(url, {
         method: init.method ?? 'GET',
@@ -55,8 +56,14 @@ export class SheetsClient {
       });
       if (res.ok) return (await res.json()) as T;
       const text = await res.text();
-      lastErr = new SheetsApiError(res.status, `Sheets API ${res.status}: ${text.slice(0, 300)}`);
-      if (res.status === 429 || res.status >= 500) { await this.sleep(800 * 2 ** attempt); continue; }
+      const retryAfter = Number(res.headers?.get?.('retry-after'));
+      lastErr = new SheetsApiError(res.status, `Sheets API ${res.status}: ${text.slice(0, 300)}`, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined);
+      if (res.status === 429 || res.status >= 500) {
+        // Quota windows are per minute: waiting a second or two rarely helps, and hammering makes it worse.
+        // Honour Retry-After, add jitter, and give up quickly so the caller can back off for longer.
+        const wait = Math.min(10_000, Math.max(1000 * ((lastErr as SheetsApiError).retryAfterSec ?? 0), 1000 * 2 ** attempt)) * (0.75 + Math.random() * 0.5);
+        if (attempt < 3) { await this.sleep(wait); continue; }
+      }
       break;
     }
     throw lastErr ?? new Error('Sheets API failed');
@@ -65,7 +72,7 @@ export class SheetsClient {
   /* ---- tabs */
 
   async listTabs(force = false): Promise<TabInfo[]> {
-    if (!force && this.tabs && Date.now() - this.tabsAt < 30_000) return this.tabs;
+    if (!force && this.tabs && Date.now() - this.tabsAt < 120_000) return this.tabs;
     const r = await this.call<{ sheets?: { properties: { sheetId: number; title: string; gridProperties?: { rowCount?: number; columnCount?: number } } }[] }>(
       '?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))');
     this.tabs = (r.sheets ?? []).map((s) => ({
@@ -77,7 +84,9 @@ export class SheetsClient {
   }
 
   async findTab(title: string, force = false): Promise<TabInfo | undefined> {
-    return (await this.listTabs(force)).find((t) => t.title === title);
+    const hit = (await this.listTabs(force)).find((t) => t.title === title);
+    if (hit || force) return hit;
+    return (await this.listTabs(true)).find((t) => t.title === title); // not in the cached list: it may be new
   }
 
   /**
@@ -85,7 +94,7 @@ export class SheetsClient {
    * Missing headers are appended to the right of whatever is already there; existing columns are
    * never moved, renamed or overwritten. Returns the full header row as it now stands.
    */
-  async ensureTab(title: string, headers: readonly string[]): Promise<{ tab: TabInfo; headers: string[]; added: string[]; created: boolean }> {
+  async ensureTab(title: string, headers: readonly string[], opts: { cacheMs?: number } = {}): Promise<{ tab: TabInfo; headers: string[]; added: string[]; created: boolean }> {
     let tab = await this.findTab(title);
     let created = false;
     if (!tab) {
@@ -97,10 +106,16 @@ export class SheetsClient {
       if (!tab) throw new Error(`Could not create tab ${title}`);
       created = true;
     }
+    // Header rows of our own tabs change only when we change them, so they can be remembered for a while
+    // (cacheMs > 0). Your monthly sheets are never cached for long: you may edit those by hand.
+    const cached = this.headerCache.get(title);
+    if (!created && cached && opts.cacheMs && Date.now() - cached.at < opts.cacheMs && headers.every((h) => cached.headers.includes(h))) {
+      return { tab, headers: cached.headers, added: [], created };
+    }
     const current = (await this.getValues(`${q(title)}!1:1`))[0]?.map((c) => String(c ?? '').trim()) ?? [];
     const have = new Set(current.filter(Boolean));
     const missing = headers.filter((h) => !have.has(h));
-    if (missing.length === 0) return { tab, headers: current, added: [], created };
+    if (missing.length === 0) { this.headerCache.set(title, { headers: current, at: Date.now() }); return { tab, headers: current, added: [], created }; }
 
     // Row 1 may have blank gaps; append after the last non-empty header.
     let lastIdx = current.length - 1;
@@ -117,6 +132,7 @@ export class SheetsClient {
     await this.updateRanges([{ range: `${q(title)}!${colLetter(startCol)}1`, values: [missing] }], true);
     const merged = current.slice(0, startCol);
     while (merged.length < startCol) merged.push('');
+    this.headerCache.set(title, { headers: [...merged, ...missing], at: Date.now() });
     return { tab, headers: [...merged, ...missing], added: [...missing], created };
   }
 
@@ -129,14 +145,47 @@ export class SheetsClient {
   }
 
   /** Reads the header row plus (at most) the last `tail` data rows. Row numbers are real sheet rows. */
-  async readTail(title: string, tail = 400): Promise<{ headers: string[]; rows: { rowNumber: number; cells: string[] }[]; lastRow: number }> {
+  async readTail(title: string, tail = 400, knownHeaders?: string[]): Promise<{ headers: string[]; rows: { rowNumber: number; cells: string[] }[]; lastRow: number }> {
     const colA = await this.getValues(`${q(title)}!A:A`);
     const lastRow = colA.length;
-    const headers = (await this.getValues(`${q(title)}!1:1`))[0] ?? [];
+    const headers = knownHeaders ?? (await this.getValues(`${q(title)}!1:1`))[0] ?? [];
     if (lastRow <= 1) return { headers, rows: [], lastRow };
     const start = Math.max(2, lastRow - tail + 1);
     const data = await this.getValues(`${q(title)}!A${start}:${colLetter(Math.max(headers.length, 1) - 1)}${lastRow}`);
     return { headers, rows: data.map((cells, i) => ({ rowNumber: start + i, cells })), lastRow };
+  }
+
+  /** One request, several ranges (counts as ONE read against the per-minute quota). */
+  async batchGet(ranges: string[]): Promise<string[][][]> {
+    if (ranges.length === 0) return [];
+    const qs = ['majorDimension=ROWS', ...ranges.map((r) => `ranges=${encodeURIComponent(r)}`)].join('&');
+    const r = await this.call<{ valueRanges?: { values?: unknown[][] }[] }>(`/values:batchGet?${qs}`);
+    return ranges.map((_, i) => (r.valueRanges?.[i]?.values ?? []).map((row) => row.map((c) => (c === null || c === undefined ? '' : String(c)))));
+  }
+
+  /**
+   * Tail reads of several tabs in two requests in total (column A of every tab, then the data of every tab),
+   * instead of three requests per tab. Pass `headers` for tabs whose header row is already known.
+   */
+  async readTails(specs: { title: string; tail: number; headers?: string[] }[]): Promise<{ headers: string[]; rows: { rowNumber: number; cells: string[] }[]; lastRow: number }[]> {
+    const first = await this.batchGet([
+      ...specs.map((s) => `${q(s.title)}!A:A`),
+      ...specs.filter((s) => !s.headers).map((s) => `${q(s.title)}!1:1`),
+    ]);
+    let h = specs.length;
+    const meta = specs.map((s, i) => {
+      const lastRow = first[i].length;
+      const headers = s.headers ?? (first[h++]?.[0] ?? []);
+      const start = Math.max(2, lastRow - s.tail + 1);
+      return { s, lastRow, headers, start };
+    });
+    const want = meta.filter((m) => m.lastRow > 1);
+    const data = await this.batchGet(want.map((m) => `${q(m.s.title)}!A${m.start}:${colLetter(Math.max(m.headers.length, 1) - 1)}${m.lastRow}`));
+    return meta.map((m) => {
+      const k = want.indexOf(m);
+      const rows = k < 0 ? [] : data[k].map((cells, i) => ({ rowNumber: m.start + i, cells }));
+      return { headers: m.headers, rows, lastRow: m.lastRow };
+    });
   }
 
   /** Reads everything below the header (used by backfill, where we need whole months). */

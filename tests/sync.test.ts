@@ -90,3 +90,40 @@ test('an open position from an earlier day is marked STALE, never written to the
   await s.run();
   assert.equal(s.f.table('live-trades').find((x) => x.GroupId === 'TRD-old')!.Status, 'STALE');
 });
+
+test('a trade logged before its stop was understood gets stop/risk/exit filled in later, without touching what you typed', async () => {
+  const s = setup((f) => f.addTab('october-2026', [[...MONTHLY_BASE]]));
+  s.dhan.t = [trade('1', 'BUY', 10, 100, '09:20:00'), trade('2', 'SELL', 10, 101, '09:40:00')];
+  s.dhan.o = [];                       // nothing about the stop is known when the trade closes
+  s.at('09:41:00');
+  await s.run();
+  let mine = s.f.table('october-2026').filter((x) => x.Symbol === 'ABC');
+  assert.equal(mine.length, 2); assert.equal(mine[0].InitialStop, ''); assert.equal(mine[0].RiskInr, '');
+  // you add a note by hand on the first row
+  const header = s.f.rows('october-2026')[0]; const ci = header.indexOf('Comment');
+  s.f.rows('october-2026')[1][ci] = 'my note';
+  // later the stop order is understood (correct side/kind from the order book)
+  s.dhan.o = [order({ orderStatus: 'TRADED', filledQty: 10, updateTime: `${T} 09:40:00` })];
+  s.at('09:42:00');
+  const r = await s.run();
+  mine = s.f.table('october-2026').filter((x) => x.Symbol === 'ABC');
+  assert.equal(mine[0].InitialStop, '99'); assert.equal(mine[1].InitialStop, '99');
+  assert.equal(mine[0].RiskInr, '10'); assert.equal(mine[0].StopMoves, '0');
+  assert.equal(mine[0].Comment, 'my note');
+  assert.equal(r.groups[0].riskInr, 10);
+  assert.equal(s.f.table('live-trades')[0].InitialStop, '99');
+  const before = s.f.calls.length; await s.run();
+  assert.ok(!s.f.calls.slice(before).some((c) => c.includes('values:batchUpdate') && c.includes('october')), 'no repeated patching');
+});
+
+test('a quiet poll costs 2 Sheets reads on a warm client (it used to cost 9), so 5-second polling stays far under the quota', async () => {
+  const f = new FakeSheets(); f.addTab('october-2026', [[...MONTHLY_BASE]]);
+  const client = f.client();                       // one client, like the warm server instance
+  const dhan = { orders: async () => [], trades: async () => [trade('1', 'BUY', 10, 100, '09:20:00')], positions: async () => [] };
+  const run = (o = {}) => runSync({ dhan: dhan as any, sheets: client, now: () => IST(T, '09:30:00') }, o);
+  await run();                                      // cold: creates tabs, learns headers, saves the open trade
+  const reads = async (o = {}) => { const b = f.calls.length; await run(o); return f.calls.slice(b).filter((c) => c.startsWith('GET')).length; };
+  assert.equal(await reads({ includeRecent: false }), 2);
+  assert.equal(await reads({ includeRecent: false }), 2);
+  assert.ok(await reads({ includeRecent: true }) <= 4);   // + the activity log
+});
