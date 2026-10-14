@@ -121,6 +121,8 @@ export const COPILOT_CHECK_COLS = [
   // what happened next (Backfill)
   'AfterMfeR30', 'AfterMaeR30', 'AfterHitStop',
   'Notes', 'PayloadJson',
+  // added later (land on the right of existing tabs)
+  'RoomTo', 'DayHigh', 'DayLow', 'Ema200_5m', 'Ema200_10m', 'Ema200_1d',
 ] as const;
 
 /** live-trades.Status values */

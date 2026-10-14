@@ -70,7 +70,7 @@ test('no 09:15 candle: opening range and moves from the open stay blank instead 
   assert.equal(f.OrHigh, undefined);
   assert.equal(f.RsVsNiftyPct, undefined);
   assert.equal(f.ExtAdrPct, undefined);
-  assert.ok(f.missing.some((m) => m.startsWith('opening range')));
+  assert.ok(f.missing.some((m) => m.startsWith('first 5-min candle')));
 });
 
 test('opening range only after 09:20, then ABOVE/INSIDE/BELOW', () => {
@@ -348,4 +348,21 @@ test('a check reads Nifty 500 from a week of candles (the request that fixes "Ni
   assert.ok(f.NiftyFirst5Pct !== undefined && f.NiftyNowPct !== undefined && f.RsVsNiftyPct !== undefined && f.Rs15mPct !== undefined);
   // and an empty answer from Dhan is what produced UNKNOWN before
   assert.equal(computeFacts(base({ nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] } })).NiftyState, 'UNKNOWN');
+});
+
+test('AEQUS case: a momentum short at 264 names a real level as the obstacle, never the first 5-min candle low', () => {
+  // first 5 minutes: 263.75-269.35; later breaks to 262.3 (09:45) and comes back to 264
+  const d = day('2026-10-14', (m) => {
+    if (m < 5) return { o: 268, h: m === 1 ? 269.35 : 268.5, l: m === 3 ? 263.75 : 266, c: 267 };
+    if (m < 30) return { o: 266 - (m - 5) * 0.1, h: 266.2 - (m - 5) * 0.1, l: 265.8 - (m - 5) * 0.1, c: 266 - (m - 5) * 0.1 };
+    if (m === 30) return { o: 262.6, h: 262.8, l: 262.3, c: 262.5 };
+    return { o: 263.9, h: 264.2, l: 263.8, c: 264 };
+  }, 60);
+  const daily = dailyFlat(800, 275); daily.l[daily.l.length - 1] = 262.7; // previous day low 262.70
+  const f = computeFacts(base({ date: '2026-10-14', nowMs: IST('2026-10-14', '10:14:30'), price: 264, direction: 'SHORT', setup: 'MOMENTUM', stock1m: merge(...calm, d), nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] }, daily }));
+  assert.equal(f.OrLow, 263.75);
+  assert.equal(f.EntryVsOr, 'INSIDE');
+  assert.equal(f.DayLow, 262.3);
+  assert.equal(f.RoomTo, 'prev day low 262.7'); // the nearest REAL level below, not 263.75
+  assert.ok(Math.abs(f.RoomAtr! * f.Atr10m! - 1.3) < 0.02, `room ${f.RoomAtr} ATR`); // 264 - 262.70
 });

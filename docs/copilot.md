@@ -40,7 +40,7 @@ The daily 200 EMA uses about 5 years of daily candles and is left blank if the h
 | `COPILOT_RISK_INR` | 300 | Fallback only. Your max risk per trade is set on the Co-pilot page (tap "Risk ₹300 per trade") and kept in the `copilot-settings` tab. |
 | `COPILOT_NIFTY_DIR_PCT` | 0.15 | First-5-minute Nifty 500 move (%) that counts as directional. |
 | `COPILOT_EMA_REACH_ATR` | 2 | A 200 EMA this close (in ATR) in the trade's path is flagged. |
-| `COPILOT_POC_ROWS` | 24 | Volume profile rows across the day's range. |
+| `COPILOT_POC_ROWS` | 30 | Volume profile rows across the day's range (match TradingView Session Volume Profile "Number of rows"). |
 | `COPILOT_USD_INR` | 88 | Only for showing the cost of each ask in rupees. |
 | `COPILOT_THINKING` | off | `on` lets Claude think before answering: slower and costlier; the facts are already computed, so off is the default. |
 

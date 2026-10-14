@@ -48,7 +48,9 @@ export interface Facts {
   PullbackNo?: number; VolTrend?: 'RISING' | 'FALLING' | 'FLAT'; PushVsPullVol?: number;
   Climax: string; FailedBreak: string;
   StopDist?: number; StopVsAtr2?: number; SizeQty?: number; RiskInr?: number;
-  RoomAtr?: number; RoomVsStop?: number; EstChargesInr?: number;
+  RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
+  /** Raw price levels, so the card can be read straight against the chart. */
+  Ema200_5m?: number; Ema200_10m?: number; Ema200_1d?: number; DayHigh?: number; DayLow?: number;
   /** Hard rules of yours that are broken (shown red on the page). */
   flags: string[];
   /** Values that could not be computed, and why. */
@@ -253,6 +255,9 @@ export function computeFacts(inp: FactsInput): Facts {
     if (d * sign > 0 && Math.abs(d) <= inp.emaReachAtr) inPath.push(`${label} ${r2(Math.abs(d))}`);
     return r2(d);
   };
+  if (e5 !== undefined) f.Ema200_5m = r2(e5);
+  if (e10 !== undefined) f.Ema200_10m = r2(e10);
+  if (e1d !== undefined) f.Ema200_1d = r2(e1d);
   f.Ema200_5mAtr = emaDist(e5, '5m');
   f.Ema200_10mAtr = emaDist(e10, '10m');
   f.Ema200_1dAtr = emaDist(e1d, '1D');
@@ -265,7 +270,7 @@ export function computeFacts(inp: FactsInput): Facts {
     f.OrHigh = Math.max(...orBars.map((b) => b.h));
     f.OrLow = Math.min(...orBars.map((b) => b.l));
     f.EntryVsOr = price > f.OrHigh ? 'ABOVE' : price < f.OrLow ? 'BELOW' : 'INSIDE';
-  } else f.missing.push('opening range (needs the 09:15-09:19 candles, complete after 09:20)');
+  } else f.missing.push('first 5-min candle range (needs the 09:15-09:19 candles, complete after 09:20)');
 
   // ---- previous day high / low (official daily candle)
   const n = daily.c.length;
@@ -351,21 +356,33 @@ export function computeFacts(inp: FactsInput): Facts {
   }
 
   // ---- room to the next obstacle (reversal: distance to the POC, the target)
+  // Only real levels count: the day's high/low, the previous day's high/low and the 200 EMAs. The first 5-minute
+  // candle's edges are NOT obstacles (often a small candle, and usually already crossed). The level's name and price
+  // go to Claude and onto the card, so it can never be mislabelled.
+  const dayHi = Math.max(...bars.map((b) => b.h)), dayLo = Math.min(...bars.map((b) => b.l));
+  f.DayHigh = r2(dayHi); f.DayLow = r2(dayLo);
   if (atr) {
     let room: number | undefined;
     if (inp.setup === 'REVERSAL') {
-      if (poc !== undefined && (poc - price) * sign > 0) room = Math.abs(poc - price);
-      else room = 0;
+      if (poc !== undefined && (poc - price) * sign > 0) { room = Math.abs(poc - price); f.RoomTo = `POC ${r2(poc)}`; }
+      else { room = 0; f.RoomTo = poc !== undefined ? `POC ${r2(poc)} is behind the trade` : 'no POC'; }
     } else {
-      // the day's own high/low only counts when price is well away from it (at the extreme it IS the breakout)
-      const dayHi = Math.max(...bars.map((b) => b.h)), dayLo = Math.min(...bars.map((b) => b.l));
-      const levels = [
-        Math.abs(dayHi - price) > 0.5 * atr ? dayHi : NaN, Math.abs(price - dayLo) > 0.5 * atr ? dayLo : NaN,
-        n ? daily.h[n - 1] : NaN, n ? daily.l[n - 1] : NaN,
-        f.OrHigh ?? NaN, f.OrLow ?? NaN, e5 ?? NaN, e10 ?? NaN, e1d ?? NaN,
-      ].filter((x) => Number.isFinite(x) && (x - price) * sign > atr * 0.05);
-      if (levels.length) room = Math.min(...levels.map((x) => Math.abs(x - price)));
-      else f.missing.push('room: no level (day extreme, PDH/PDL, opening range, 200 EMA) in the trade\'s path');
+      // at the day's extreme (within 0.5 ATR) that level IS the breakout, not an obstacle
+      const levels: { name: string; px: number }[] = [
+        { name: 'day high', px: Math.abs(dayHi - price) > 0.5 * atr ? dayHi : NaN },
+        { name: 'day low', px: Math.abs(price - dayLo) > 0.5 * atr ? dayLo : NaN },
+        { name: 'prev day high', px: n ? daily.h[n - 1] : NaN },
+        { name: 'prev day low', px: n ? daily.l[n - 1] : NaN },
+        { name: '5m 200 EMA', px: e5 ?? NaN }, { name: '10m 200 EMA', px: e10 ?? NaN }, { name: 'daily 200 EMA', px: e1d ?? NaN },
+      ].filter((x) => Number.isFinite(x.px) && (x.px - price) * sign > atr * 0.05);
+      if (levels.length) {
+        const near = levels.reduce((a, b) => (Math.abs(b.px - price) < Math.abs(a.px - price) ? b : a));
+        room = Math.abs(near.px - price);
+        f.RoomTo = `${near.name} ${r2(near.px)}`;
+      } else {
+        const atExtreme = sign === 1 ? Math.abs(dayHi - price) <= 0.5 * atr : Math.abs(price - dayLo) <= 0.5 * atr;
+        f.RoomTo = atExtreme ? `none: price is at the day's ${sign === 1 ? 'high' : 'low'} (breakout)` : 'none in the data';
+      }
     }
     if (room !== undefined) {
       f.RoomAtr = r2(room / atr);

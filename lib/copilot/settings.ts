@@ -5,7 +5,7 @@ export function settings() {
     riskInr: n(process.env.COPILOT_RISK_INR, 300),
     niftyDirPct: n(process.env.COPILOT_NIFTY_DIR_PCT, 0.15),
     emaReachAtr: n(process.env.COPILOT_EMA_REACH_ATR, 2),
-    pocRows: Math.round(n(process.env.COPILOT_POC_ROWS, 24)),
+    pocRows: Math.round(n(process.env.COPILOT_POC_ROWS, 30)), // matches TradingView volume profile "Number of rows" 30
     dailyLimit: Math.round(n(process.env.COPILOT_DAILY_LIMIT, 25)),
     model: process.env.COPILOT_MODEL?.trim() || 'claude-sonnet-5-5',
     usdInr: n(process.env.COPILOT_USD_INR, 88),
