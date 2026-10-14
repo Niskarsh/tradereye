@@ -297,3 +297,17 @@ test('outcomes are planned only for checks older than 30 minutes and written int
   assert.notEqual(row.AfterMfeR30, ''); assert.equal(row.AfterHitStop, 'NO');
 });
 
+
+/* ---- risk setting stored in the sheet ----------------------------------------------------------------------- */
+import { getRiskInr, setRiskInr } from '../lib/copilot/userSettings';
+
+test('risk per trade: 300 by default, changed from the app and read back from the sheet', async () => {
+  const f = new FakeSheets();
+  assert.equal(await getRiskInr(f.client(), 1), 300);
+  assert.equal(await setRiskInr(f.client(), 400, 2), 400);
+  assert.deepEqual(f.table('copilot-settings').map((r) => [r.Key, r.Value]), [['RiskInr', '400']]);
+  await setRiskInr(f.client(), 350, 3);
+  assert.equal(f.table('copilot-settings').length, 1); // updated in place, not appended
+  assert.equal(await getRiskInr(f.client(), 70_000), 350); // after the 60 s cache, read from the sheet
+  await assert.rejects(setRiskInr(f.client(), -5), /positive/);
+});

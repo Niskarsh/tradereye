@@ -86,6 +86,11 @@ export function FactsCard({ c }: { c: CheckResp }) {
         </Group>
       )}
 
+      <Group title="Market">
+        <Row label="Nifty 500" value={STATE_TEXT[f.NiftyState] ?? f.NiftyState} />
+        <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
+      </Group>
+
       <Group title="Stock">
         <Row label="Rvol (TradingView)" value={fmt(f.RvolDay, 3)} />
         <Row label="ATR 10m / 2x" value={`${fmt(f.Atr10m)} / ${fmt(f.Atr2)}`} />

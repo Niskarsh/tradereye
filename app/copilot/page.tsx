@@ -16,6 +16,8 @@ export default function CopilotPage() {
   const [symbol, setSymbol] = useState('');
   const [stop, setStop] = useState('');
   const [suggest, setSuggest] = useState<string[]>([]);
+  const [editRisk, setEditRisk] = useState(false);
+  const [riskDraft, setRiskDraft] = useState('');
 
   useEffect(() => {
     const q = symbol.trim();
@@ -49,7 +51,23 @@ export default function CopilotPage() {
             <h1 className="text-2xl font-black tracking-tighter">Co-pilot</h1>
             <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">Facts first · Claude only when you ask</p>
           </div>
-          {c.market && <p className="text-[10px] text-zinc-500">{c.market.asksLeft} asks left today</p>}
+          {c.market && (
+            <div className="text-right text-[10px] text-zinc-500 space-y-1">
+              {editRisk ? (
+                <form onSubmit={(e) => { e.preventDefault(); const n = parseFloat(riskDraft); if (n > 0) c.saveRisk(n); setEditRisk(false); }} className="flex items-center gap-1 justify-end">
+                  <span>Risk ₹</span>
+                  <input value={riskDraft} onChange={(e) => setRiskDraft(e.target.value)} inputMode="numeric" autoFocus
+                    className="w-16 h-7 rounded-md bg-brand-card border border-zinc-700 px-2 text-xs text-zinc-100 font-mono" />
+                  <button type="submit" className="h-7 px-2 rounded-md bg-zinc-100 text-black text-[10px] font-black">Save</button>
+                </form>
+              ) : (
+                <button onClick={() => { setRiskDraft(String(c.market!.riskInr)); setEditRisk(true); }} className="text-zinc-300 underline decoration-dotted underline-offset-2">
+                  Risk ₹{c.market.riskInr} per trade
+                </button>
+              )}
+              <p>{c.market.asksLeft} asks left today</p>
+            </div>
+          )}
         </header>
 
         {!token && (

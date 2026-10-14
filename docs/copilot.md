@@ -37,7 +37,7 @@ The daily 200 EMA uses about 5 years of daily candles and is left blank if the h
 | `ANTHROPIC_API_KEY` | — | Required for Ask Claude. From platform.claude.com. |
 | `COPILOT_MODEL` | `claude-sonnet-5-5` | `claude-haiku-5-5` is ~20x cheaper, judges less well. |
 | `COPILOT_DAILY_LIMIT` | 25 | Asks per day. Facts still work past it. |
-| `COPILOT_RISK_INR` | 300 | Max risk per trade, for sizing and the risk flag. |
+| `COPILOT_RISK_INR` | 300 | Fallback only. Your max risk per trade is set on the Co-pilot page (tap "Risk ₹300 per trade") and kept in the `copilot-settings` tab. |
 | `COPILOT_NIFTY_DIR_PCT` | 0.15 | First-5-minute Nifty 500 move (%) that counts as directional. |
 | `COPILOT_EMA_REACH_ATR` | 2 | A 200 EMA this close (in ATR) in the trade's path is flagged. |
 | `COPILOT_POC_ROWS` | 24 | Volume profile rows across the day's range. |

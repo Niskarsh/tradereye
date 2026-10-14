@@ -13,6 +13,7 @@ import { computeFacts, computeManageFacts, niftyState, type Facts, type ManageFa
 import { buildMessage, PROMPT_VERSION } from './prompt';
 import type { CheckRow } from './store';
 import { settings } from './settings';
+import { getRiskInr } from './userSettings';
 
 export { settings };
 
@@ -28,7 +29,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function niftyFor(dhan: Pick<DhanClient, 'intraday'>, date: string, now = Date.now()): Promise<Candles> {
   const hit = niftyCache.get(date);
   if (hit && now - hit.at < 30_000) return hit.c;
-  const c = await dhan.intraday({ ...NIFTY500, from: date, to: date });
+  // a week back, not just the day: a same-day-only request has come back empty (both "vs Nifty" values blank)
+  const c = await dhan.intraday({ ...NIFTY500, from: istDateKey(dateKeyToMs(date) - 7 * 86400_000), to: date });
   niftyCache.set(date, { at: now, c });
   return c;
 }
@@ -92,7 +94,7 @@ interface Deps {
 const OPEN_STATUSES = new Set(['PENDING', 'TRANSIT', 'PART_TRADED', 'TRIGGER_PENDING', 'OPEN', 'MODIFIED', 'CONFIRM']);
 
 export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckResult> {
-  const s = settings();
+  const s = { ...settings(), riskInr: await getRiskInr(deps.sheets) };
   const nowMs = (deps.now ?? Date.now)();
   const symbol = req.symbol.trim().toUpperCase();
   const notes: string[] = [];
@@ -218,14 +220,10 @@ export async function marketStrip(deps: Pick<Deps, 'dhan' | 'sheets' | 'now'>) {
   const s = settings();
   const nowMs = (deps.now ?? Date.now)();
   const today = istDateKey(nowMs);
-  let date = today;
-  let nifty = await niftyFor(deps.dhan, today, nowMs);
-  if (!nifty.t.length) {
-    // evening / weekend: show the last session
-    const back = await deps.dhan.intraday({ ...NIFTY500, from: istDateKey(dateKeyToMs(today) - 7 * 86400_000), to: today });
-    const last = toSessions(back).at(-1);
-    if (last) { date = last.date; nifty = back; }
-  }
+  const nifty = await niftyFor(deps.dhan, today, nowMs);
+  // evening / weekend / holiday: no candles today, so show the last session in the data
+  const sessions = toSessions(nifty);
+  const date = sessions.some((x) => x.date === today) ? today : sessions.at(-1)?.date ?? today;
   const asOfMs = date === today ? nowMs : dateKeyToMs(date) + SESSION_CLOSE_MIN * 60_000;
   const nDay = toSessions(nifty).find((x) => x.date === date);
   const bars = nDay ? nDay.bars.filter((b) => b.t * 1000 < Math.floor(asOfMs / 60000) * 60000) : [];
