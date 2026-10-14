@@ -46,7 +46,7 @@ export async function planBackfill(sheets: SheetsClient, opts: { redo?: boolean 
     for (const g of groupRows(headers, rows)) {
       const st = (g.rows[0].o.EnrichStatus ?? '').trim();
       // done = market columns OK AND the newer context columns filled (so old trades get context too)
-      const ok = st === 'OK' && (g.rows[0].o.ContextStatus ?? '').trim() !== '';
+      const ok = st === 'OK' && /v2/.test(g.rows[0].o.ContextStatus ?? ''); // v2 = 10-minute chart basis
       if (ok && !opts.redo) { done++; continue; }
       items.push({ tab, groupId: g.groupId, date: normDate(g.rows[0].o['Date (IST)']), symbol: g.rows[0].o.Symbol, fills: g.rows.length, status: st || 'NEW' });
     }
@@ -164,7 +164,7 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
           Ema200_5mAtr: ctx.Ema200_5mAtr ?? '', Ema200_10mAtr: ctx.Ema200_10mAtr ?? '', Ema200_1dAtr: ctx.Ema200_1dAtr ?? '',
           RsVsNiftyPct: rs, ExtAdrPct: ctx.ExtAdrPct ?? '', PocDistAtr: ctx.PocDistAtr ?? '',
           PullbackNo: ctx.PullbackNo ?? '', VolTrend: ctx.VolTrend ?? '',
-          ContextStatus: ctxMissing.length ? `PARTIAL: ${ctxMissing.join(', ')}`.slice(0, 200) : 'OK',
+          ContextStatus: ctxMissing.length ? `PARTIAL v2: ${ctxMissing.join(', ')}`.slice(0, 200) : 'OK v2',
         };
         for (const k of MONTHLY_CONTEXT_COLS) if (!(k in ctxVals)) ctxVals[k] = '';
 

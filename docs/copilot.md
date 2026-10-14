@@ -24,6 +24,11 @@ trade's rows in the monthly sheet (the `Ck...` and `Rc...` columns) and shown as
   next 30 minutes and whether the stop would have been hit (`AfterMfeR30`, `AfterMaeR30`, `AfterHitStop`).
 
 ## How the numbers are made
+Everything candle-based is measured on the **10-minute chart**, as you trade it: the first 10-min candle (09:15-09:24),
+pullbacks, volume trend, push/pull volume, climax, failed breaks, VWAP control, relative strength over the last two
+candles, and the candles sent to Claude. Two things stay as they are: the Nifty 500 first-5-minutes test (your rule) and
+the 5-minute 200 EMA (one of your three EMAs).
+
 The co-pilot reuses the journal's own calculations (`lib/live/enrich.ts`), so relative volume (TradingView style),
 ATR(14) on 10-minute bars, VWAP and the Nifty 500 moves are identical to the journal's. Only candles completed before
 the current minute are used; bars are aligned at 09:15; no 09:15 candle means blank, never a guess.

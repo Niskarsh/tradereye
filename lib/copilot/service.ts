@@ -107,7 +107,19 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   const sess = pickSession(stock1m, nowMs);
   if (sess.date !== today) notes.push(`No candles today yet: reading the last session (${sess.date}) as of its close.`);
   await sleep(SPACING_MS);
-  const nifty1m = await niftyFor(deps.dhan, sess.date, nowMs);
+  // Nifty 500: the SAME request as the market strip (a week back, up to today), which is known to work; then,
+  // only if the session is missing from it, a request ending on the session's own date.
+  let nifty1m = await niftyFor(deps.dhan, today, nowMs);
+  if (!toSessions(nifty1m).some((x) => x.date === sess.date) && sess.date !== today) {
+    await sleep(SPACING_MS);
+    nifty1m = await niftyFor(deps.dhan, sess.date, nowMs);
+  }
+  const nSess = toSessions(nifty1m);
+  const nDayBars = nSess.find((x) => x.date === sess.date)?.bars ?? [];
+  if (!nDayBars.length || istParts(nDayBars[0].t * 1000).minuteOfDay !== 9 * 60 + 15) {
+    const first = nifty1m.t.length ? istDateKey(nifty1m.t[0] * 1000) : '-', last = nifty1m.t.length ? istDateKey(nifty1m.t[nifty1m.t.length - 1] * 1000) : '-';
+    notes.push(`Nifty 500 for ${sess.date}: Dhan returned ${nifty1m.t.length} candles (${first} to ${last}), ${nDayBars.length} for that day${nDayBars.length ? `, first at ${istTime(nDayBars[0].t * 1000).slice(0, 5)}` : ''}.`);
+  }
   await sleep(SPACING_MS);
   const daily = await dailyFor(deps.dhan, securityId, sess.date);
 

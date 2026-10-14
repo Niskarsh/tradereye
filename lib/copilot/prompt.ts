@@ -1,12 +1,11 @@
 import type { Candles } from '../dhan';
-import { toSessions, type Bar } from '../live/enrich';
+import { tenMinuteBars, toSessions, type Bar } from '../live/enrich';
 import { istParts } from '../live/time';
 import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
-import { nMinuteBars } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1.4';
+export const PROMPT_VERSION = 'copilot-v1.5';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -30,17 +29,17 @@ HOW TO READ THE REQUEST
 - Mode ENTRY: he is about to enter. Use the verdicts SUPPORTS / MIXED / WARNING.
 - Mode MANAGE: he already holds the position. The question is whether the reason he got in still holds, not whether to get in. Read the in-trade facts: OpenR and BestR (giving back most of the best R is the first warning), StopDistAtr, CounterVolRatio (volume against him rising above 1), ClimaxAgainst or FailedExtreme since entry, NiftySinceEntryPct turning against him, MinInTrade and StopMoves. Use the verdicts HOLD_STEADY (the reason is intact), WEAKENING (one or two signs against) or WARNING (the reason is gone, or a reversal pattern is in place). You cannot predict a reversal; name the signs you see. Never tell him to exit, add, or move his stop.
 - Setup and Direction are his. Judge the trade he declared. If the data says it is a different kind of trade (he says reversal but rvol is high and rising), say so plainly.
-- Distances ending in Atr are in units of ATR(14) on 10-minute bars; a positive Ema/Pdh/Pdl/Poc distance means that level is ABOVE the price. ExtAdrPct is the move from today's open as a % of the 10-day average daily range (positive = up). PullbackNo counts pullbacks of the move he is trading (for a reversal: of the stock's run he is fading). PushVsPullVol above 1 means candles moving his way carry more volume than candles moving against him. RoomTo names the nearest obstacle in the trade's path and its price (for a reversal: the POC, his target); RoomAtr is the distance to it and RoomVsStop that distance divided by his stop distance. Obstacles are only the day's high/low, the previous day's high/low and the 200 EMAs. When you mention room, name the level exactly as RoomTo gives it; never call it anything else. OrHigh/OrLow are the high and low of the FIRST 5-MINUTE CANDLE (09:15-09:19), not the day's range; EntryVsOr says whether price is above, inside or below that candle. Say "first 5-min candle", never "OR". DayHigh/DayLow are the session's extremes so far; Ema200_* without Atr are the EMA prices. Blank or missing values mean the data was not available; never fill them in.
+- Distances ending in Atr are in units of ATR(14) on 10-minute bars; a positive Ema/Pdh/Pdl/Poc distance means that level is ABOVE the price. ExtAdrPct is the move from today's open as a % of the 10-day average daily range (positive = up). PullbackNo counts pullbacks of the move he is trading (for a reversal: of the stock's run he is fading). PushVsPullVol above 1 means candles moving his way carry more volume than candles moving against him. RoomTo names the nearest obstacle in the trade's path and its price (for a reversal: the POC, his target); RoomAtr is the distance to it and RoomVsStop that distance divided by his stop distance. Obstacles are only the day's high/low, the previous day's high/low and the 200 EMAs. When you mention room, name the level exactly as RoomTo gives it; never call it anything else. OrHigh/OrLow are the high and low of the FIRST 10-MINUTE CANDLE (09:15-09:24), not the day's range; EntryVsOr says whether price is above, inside or below that candle. Say "first 10-min candle", never "OR". DayHigh/DayLow are the session's extremes so far; Ema200_* without Atr are the EMA prices. Blank or missing values mean the data was not available; never fill them in.
 
 Look in this order and stop when you have the three most important things:
 1. His own rules broken (listed under FLAGS when the app detected them): stop wider than 2x ATR; risk over the limit; a 200 EMA in the path within reach; first trade of the day lost; re-entering a symbol that stopped him out today; a reversal on a stock whose rvol is now high; momentum while Nifty is FLAT or FLIPPED.
 2. The market changed since the open: NiftyState FLIPPED or FADING, or NiftyNowPct no longer agreeing with NiftyFirst5Pct.
 3. The stock's evidence for this setup.
-   Momentum: leading Nifty (RsVsNiftyPct, Rs15mPct) or just following it; volume rising on pushes and lighter on pullbacks; first pullback rather than the third; no failed break of the day's high/low in the last minutes (FailedBreak); entry beyond the first 5-min candle, not inside it; extension already large (high ExtAdrPct = chasing); room to the next obstacle compared with the stop (RoomVsStop below 1 is poor).
+   Momentum: leading Nifty (RsVsNiftyPct, Rs20mPct = the last two 10-min candles) or just following it; volume rising on pushes and lighter on pullbacks; first pullback rather than the third; no failed break of the day's high/low in the last minutes (FailedBreak); entry beyond the first 10-min candle, not inside it; extension already large (high ExtAdrPct = chasing); room to the next obstacle compared with the stop (RoomVsStop below 1 is poor).
    Reversal: really stretched from the POC; momentum stalled (Climax, push volume fading, a failed new extreme); Nifty not pushing hard in the stock's direction; distance to the POC (the target) compared with the stop.
 4. His behaviour: MinSinceLoss under 10, many trades already today, his record in this setup when it is clearly good or bad (only with at least 10 trades).
 
-The candle lines are there so you can confirm or question the facts (for example, the last three candles are wicks against him). Do not re-describe candles he can see on his own chart.
+He trades from the 10-minute chart: every candle-based fact (pullbacks, volume trend, push/pull volume, climax, failed break, VWAP control) is measured on 10-minute candles, and the candle lines are 10-minute candles (the last one may still be forming). They are there so you can confirm or question the facts (for example, the last three candles are wicks against him). Do not re-describe candles he can see on his own chart.
 
 VERDICT
 - WARNING: one of his own rules is broken, or two strong facts point against this trade.
@@ -129,8 +128,9 @@ export function buildMessage(m: MessageInput): string {
   parts.push(`YOU ${JSON.stringify(you)}`);
   parts.push(`TODAY ${m.todayTrades.length ? m.todayTrades.map((t) => `${t.symbol} ${t.direction} ${t.netPnl} ${t.exitType || '-'}`).join(' | ') : 'none'}`);
   if (missing.length) parts.push(`MISSING ${missing.join('; ')}`);
-  parts.push('STOCK_1M last 30 (time,o,h,l,c,v)', ...bars.slice(-30).map(line));
-  parts.push('STOCK_5M since open', ...nMinuteBars([{ date: m.date, bars }], 5).map(line));
-  parts.push('NIFTY500_5M since open', ...nMinuteBars([{ date: m.date, bars: nBars }], 5).map(line));
+  // 10-minute candles, as on his chart (the last one may still be forming)
+  const tenLine = (b: { start: number; end: number; o: number; h: number; l: number; c: number; v: number }) => line(b) + (b.end * 1000 > m.asOfMs ? ',forming' : '');
+  parts.push('STOCK_10M since open (time,o,h,l,c,v)', ...tenMinuteBars([{ date: m.date, bars }]).map(tenLine));
+  parts.push('NIFTY500_10M since open', ...tenMinuteBars([{ date: m.date, bars: nBars }]).map(tenLine));
   return parts.join('\n');
 }

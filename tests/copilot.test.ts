@@ -70,7 +70,7 @@ test('no 09:15 candle: opening range and moves from the open stay blank instead 
   assert.equal(f.OrHigh, undefined);
   assert.equal(f.RsVsNiftyPct, undefined);
   assert.equal(f.ExtAdrPct, undefined);
-  assert.ok(f.missing.some((m) => m.startsWith('first 5-min candle')));
+  assert.ok(f.missing.some((m) => m.startsWith('first 10-min candle')));
 });
 
 test('opening range only after 09:20, then ABOVE/INSIDE/BELOW', () => {
@@ -345,7 +345,7 @@ test('a check reads Nifty 500 from a week of candles (the request that fixes "Ni
   );
   const f = computeFacts(base({ nifty1m: week, nowMs: IST('2026-10-12', '09:45:20') })); // 15m strength needs 15+ minutes
   assert.notEqual(f.NiftyState, 'UNKNOWN');
-  assert.ok(f.NiftyFirst5Pct !== undefined && f.NiftyNowPct !== undefined && f.RsVsNiftyPct !== undefined && f.Rs15mPct !== undefined);
+  assert.ok(f.NiftyFirst5Pct !== undefined && f.NiftyNowPct !== undefined && f.RsVsNiftyPct !== undefined && f.Rs20mPct !== undefined);
   // and an empty answer from Dhan is what produced UNKNOWN before
   assert.equal(computeFacts(base({ nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] } })).NiftyState, 'UNKNOWN');
 });
@@ -365,4 +365,59 @@ test('AEQUS case: a momentum short at 264 names a real level as the obstacle, ne
   assert.equal(f.DayLow, 262.3);
   assert.equal(f.RoomTo, 'prev day low 262.7'); // the nearest REAL level below, not 263.75
   assert.ok(Math.abs(f.RoomAtr! * f.Atr10m! - 1.3) < 0.02, `room ${f.RoomAtr} ATR`); // 264 - 262.70
+});
+
+test('10-minute chart basis: first 10-min candle from 09:25, pullbacks/climax on 10-min candles, message carries 10M candles', () => {
+  assert.equal(computeFacts(base({ nowMs: IST('2026-10-12', '09:24:30') })).OrHigh, undefined); // still forming
+  const f = computeFacts(base({ nowMs: IST('2026-10-12', '09:40:20') }));
+  assert.ok(f.OrHigh !== undefined);
+  assert.equal(f.OrHigh, 303.2); // highest high of 09:15-09:24 in the trend fixture (300.5 + 9*0.3)
+  const msg = buildMessage({
+    mode: 'ENTRY', time: '09:40', direction: 'LONG', setup: 'MOMENTUM', symbol: 'X', riskInr: 300, price: 304.6, facts: f,
+    behaviour: computeBehaviour([], { today: '2026-10-12', nowMs: 0, symbol: 'X', direction: 'LONG', setup: 'MOMENTUM', openPositions: 0 }),
+    todayTrades: [], stock1m: base().stock1m, nifty1m: niftyUp, date: '2026-10-12', asOfMs: IST('2026-10-12', '09:40:20'),
+  });
+  assert.match(msg, /STOCK_10M since open/);
+  assert.doesNotMatch(msg, /STOCK_1M|STOCK_5M/);
+  assert.match(msg, /09:35,.*,forming/); // the 09:35 candle is still forming at 09:40
+  assert.doesNotMatch(msg, /09:25,.*forming/);
+});
+
+/* ---- the whole check, end to end, with a stand-in for Dhan ------------------------------------------------- */
+import { buildCheck } from '../lib/copilot/service';
+
+function fakeDhan(opts: { niftyEmpty?: boolean } = {}) {
+  const wk = (from: string, to: string) => { const o: string[] = []; for (let ms = Date.parse(from + 'T00:00:00Z'); ms <= Date.parse(to + 'T00:00:00Z'); ms += 864e5) { const d = new Date(ms); if (d.getUTCDay() % 6) o.push(d.toISOString().slice(0, 10)); } return o; };
+  const calls: string[] = [];
+  return {
+    calls,
+    async intraday(p: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      calls.push(`I ${p.securityId} ${p.from}..${p.to}`);
+      const c: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] };
+      if (p.securityId === '19' && opts.niftyEmpty) return c;
+      for (const d of wk(p.from, p.to)) {
+        if (d > '2026-10-14') continue; // no session yet on the 15th
+        for (let m = 0; m < 375; m++) { const px = (p.securityId === '19' ? 24000 : 264) + Math.sin(m / 9); c.t.push(IST(d, '09:15:00') / 1000 + m * 60); c.o.push(px); c.h.push(px + 0.3); c.l.push(px - 0.3); c.c.push(px); c.v.push(1000); }
+      }
+      return c;
+    },
+    async daily() { return dailyFlat(900, 270); },
+    async ltp() { return undefined; }, async positions() { return []; }, async trades() { return []; }, async orders() { return []; },
+  };
+}
+
+test('end to end after hours: reads the last session, Nifty from the same request as the market strip', async () => {
+  const d = fakeDhan();
+  const r = await buildCheck({ dhan: d, sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-15', '01:58:00') }, { direction: 'SHORT', setup: 'MOMENTUM', symbol: 'AEQUS' });
+  assert.equal(r.date, '2026-10-14');
+  assert.notEqual(r.facts.NiftyState, 'UNKNOWN');
+  assert.ok(r.facts.NiftyFirst5Pct !== undefined && r.facts.RsVsNiftyPct !== undefined);
+  assert.ok(d.calls.some((c) => c.startsWith('I 19 ') && c.endsWith('..2026-10-15')), d.calls.join(' | ')); // up to today, like the strip
+});
+
+test('end to end: when Dhan sends no Nifty candles, the card says exactly what came back', async () => {
+  // a different day, so the 30 s Nifty cache from the test above is not reused
+  const r = await buildCheck({ dhan: fakeDhan({ niftyEmpty: true }), sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-16', '01:58:00') }, { direction: 'SHORT', setup: 'MOMENTUM', symbol: 'AEQUS' });
+  assert.equal(r.facts.NiftyState, 'UNKNOWN');
+  assert.ok(r.notes.some((n) => /Nifty 500 for 2026-10-14: Dhan returned 0 candles/.test(n)), r.notes.join(' | '));
 });

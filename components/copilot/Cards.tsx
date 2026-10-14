@@ -97,14 +97,14 @@ export function FactsCard({ c }: { c: CheckResp }) {
         <Row label="200 EMA 5m · 10m · 1D" value={`${fmt(f.Ema200_5m)} · ${fmt(f.Ema200_10m)} · ${fmt(f.Ema200_1d)}`} />
         <Row label="  distance" value={`${fmt(f.Ema200_5mAtr)} · ${fmt(f.Ema200_10mAtr)} · ${fmt(f.Ema200_1dAtr)}`} hint="ATR, + above" />
         <Row label="Day high / low" value={`${fmt(f.DayHigh)} / ${fmt(f.DayLow)}`} />
-        <Row label="First 5-min candle" value={f.OrHigh !== undefined ? `${fmt(f.OrLow)}–${fmt(f.OrHigh)} · price ${String(f.EntryVsOr).toLowerCase()}` : '–'} />
+        <Row label="First 10-min candle" value={f.OrHigh !== undefined ? `${fmt(f.OrLow)}–${fmt(f.OrHigh)} · price ${String(f.EntryVsOr).toLowerCase()}` : '–'} />
         <Row label="Prev day high / low" value={`${fmt(f.PdhDistAtr)} / ${fmt(f.PdlDistAtr)}`} hint="ATR" />
         <Row label="VWAP control" value={f.VwapSide ? `${f.VwapSide.toLowerCase()} · ${fmt(f.VwapHeldMin)} min` : '–'} />
-        <Row label="vs Nifty (day / 15m)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs15mPct, 2, '%')}`} />
+        <Row label="vs Nifty (day / last 2 candles)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs20mPct, 2, '%')}`} />
         <Row label="Extension from open" value={f.ExtAdrPct !== undefined ? `${signed(f.ExtAdrPct, 0, '%')} of ADR` : '–'} />
         <Row label="POC" value={f.PocPrice !== undefined ? `${fmt(f.PocPrice)} (${fmt(f.PocDistAtr)} ATR)` : '–'} hint="approx." />
-        <Row label="Pullback no." value={fmt(f.PullbackNo)} />
-        <Row label="Volume trend / push÷pull" value={`${f.VolTrend?.toLowerCase() ?? '–'} / ${fmt(f.PushVsPullVol)}`} />
+        <Row label="Pullback no." value={fmt(f.PullbackNo)} hint="10m candles" />
+        <Row label="Volume trend / push÷pull" hint="10m" value={`${f.VolTrend?.toLowerCase() ?? '–'} / ${fmt(f.PushVsPullVol)}`} />
         <Row label="Climax / failed break" value={`${f.Climax || '–'} / ${f.FailedBreak || '–'}`} />
       </Group>
 
