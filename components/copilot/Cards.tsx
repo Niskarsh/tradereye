@@ -93,6 +93,7 @@ export function FactsCard({ c }: { c: CheckResp }) {
 
       <Group title="Stock">
         <Row label="Rvol (TradingView)" value={fmt(f.RvolDay, 3)} />
+        <Row label="  vs same time of day" value={`${fmt(f.RvolSameTime)}× · ${f.RvolBusy === 'YES' ? 'busier than usual' : f.RvolBusy === 'NO' ? 'not busy' : '–'}`} hint={f.RvolBasis?.startsWith('open') ? 'open: your 0.1 rule' : '1 = normal'} />
         <Row label="ATR 10m / 2x" value={`${fmt(f.Atr10m)} / ${fmt(f.Atr2)}`} />
         <Row label="200 EMA 5m · 10m · 1D" value={`${fmt(f.Ema200_5m)} · ${fmt(f.Ema200_10m)} · ${fmt(f.Ema200_1d)}`} />
         <Row label="  distance" value={`${fmt(f.Ema200_5mAtr)} · ${fmt(f.Ema200_10mAtr)} · ${fmt(f.Ema200_1dAtr)}`} hint="ATR, + above" />

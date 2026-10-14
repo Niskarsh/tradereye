@@ -421,3 +421,29 @@ test('end to end: when Dhan sends no Nifty candles, the card says exactly what c
   assert.equal(r.facts.NiftyState, 'UNKNOWN');
   assert.ok(r.notes.some((n) => /Nifty 500 for 2026-10-14: Dhan returned 0 candles/.test(n)), r.notes.join(' | '));
 });
+
+test('high relative volume is judged for the time of day: the 0.1 rule only at the open', () => {
+  // the fixture's trade day has about twice the usual volume for the time (2000+ vs 1000 a minute)
+  const early = computeFacts(base({ nowMs: IST('2026-10-12', '09:22:10') }));
+  assert.match(early.RvolBasis!, /^open/);
+  const late = computeFacts(base({ nowMs: IST('2026-10-12', '09:54:10') }));
+  assert.match(late.RvolBasis!, /same time/);
+  assert.equal(late.RvolBusy, 'YES'); // ~2x the usual volume for 09:54
+  // a calm day read at the close: TradingView rvol near 1 is NORMAL, not "high"
+  const calmDay = day('2026-10-12', () => ({ o: 300, h: 300.6, l: 299.4, c: 300 }));
+  const close = computeFacts(base({ nowMs: IST('2026-10-12', '15:30:00'), stock1m: merge(...calm, calmDay) }));
+  assert.ok(close.RvolDay! > 0.9, `rvol ${close.RvolDay}`);
+  assert.equal(close.RvolBusy, 'NO');
+});
+
+test('his record in a setup is not sent to Claude below 10 trades', () => {
+  const inp = base();
+  const facts = computeFacts(inp);
+  const mk = (n: number) => buildMessage({
+    mode: 'ENTRY', time: '09:30', direction: 'LONG', setup: 'REVERSAL', symbol: 'X', riskInr: 300, price: 304.6, facts,
+    behaviour: { ...computeBehaviour([], { today: inp.date, nowMs: inp.nowMs, symbol: 'X', direction: 'LONG', setup: 'REVERSAL', openPositions: 0 }), SetupTrades: n, SetupWinRate: 0, SetupAvgPnl: -193 },
+    todayTrades: [], stock1m: inp.stock1m, nifty1m: inp.nifty1m, date: inp.date, asOfMs: inp.nowMs,
+  });
+  assert.doesNotMatch(mk(6), /SetupWinRate|SetupAvgPnl/);
+  assert.match(mk(12), /"SetupTrades":12/);
+});

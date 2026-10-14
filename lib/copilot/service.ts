@@ -165,7 +165,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   if (mode === 'ENTRY') {
     if (behaviour.FirstTradeLost) facts.flags.push('First trade of the day lost and nothing else is open');
     if (behaviour.SameSymbolStopped) facts.flags.push(`Stopped out of ${symbol} ${direction} earlier today`);
-    if (req.setup === 'REVERSAL' && (facts.RvolDay ?? 0) > 0.1) facts.flags.push(`Reversal on a stock with high relative volume (${facts.RvolDay})`);
+    if (req.setup === 'REVERSAL' && facts.RvolBusy === 'YES') facts.flags.push(`Reversal on a stock busier than usual (${facts.RvolBasis}: ${facts.RvolBasis?.startsWith('open') ? facts.RvolDay : facts.RvolSameTime})`);
     if (req.setup === 'MOMENTUM' && (facts.NiftyState === 'FLAT' || facts.NiftyState === 'FLIPPED')) facts.flags.push(`Momentum while Nifty 500 is ${facts.NiftyState}`);
   }
 
