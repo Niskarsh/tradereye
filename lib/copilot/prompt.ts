@@ -6,7 +6,7 @@ import type { Facts, ManageFacts } from './features';
 import { nMinuteBars } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1';
+export const PROMPT_VERSION = 'copilot-v1.1';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -55,7 +55,7 @@ WRITING
 - Use only facts in this message. If something you need is missing and it matters, say "no data on X".
 - No hedging words (may, might, could potentially) unless the data is truly split. No praise, no disclaimers, no restating his setup back to him.
 
-Answer only by calling give_read.`;
+Answer only by calling the give_read tool, once. If you cannot call it, reply with only this JSON and nothing else: {"verdict": "...", "lines": ["..."], "watch": "..."}`;
 
 export const VERDICTS = ['SUPPORTS', 'MIXED', 'WARNING', 'HOLD_STEADY', 'WEAKENING'] as const;
 export type Verdict = typeof VERDICTS[number];

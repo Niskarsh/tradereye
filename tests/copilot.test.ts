@@ -277,3 +277,14 @@ test('outcomes are planned only for checks older than 30 minutes and written int
   const row = f.table('october-2026-checks')[0];
   assert.notEqual(row.AfterMfeR30, ''); assert.equal(row.AfterHitStop, 'NO');
 });
+
+test('Claude: does not force a tool, and accepts a plain JSON answer when no tool is called', async () => {
+  let sent: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const f = (async (_u: unknown, init: { body: string }) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ content: [{ type: 'text', text: 'Here: {"verdict":"MIXED","lines":["a"],"watch":"b"}' }], usage: {} }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const r = await askClaude('m', { apiKey: 'k', fetchImpl: f });
+  assert.equal(sent.tool_choice.type, 'auto');
+  assert.equal(r.verdict, 'MIXED'); assert.deepEqual(r.lines, ['a']); assert.equal(r.watch, 'b');
+});
