@@ -25,7 +25,7 @@ export class ClaudeError extends Error {
 }
 
 export interface ClaudeOptions {
-  apiKey: string; model?: string; usdInr?: number; timeoutMs?: number;
+  apiKey: string; model?: string; usdInr?: number; timeoutMs?: number; thinking?: 'on' | 'off';
   fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void>; now?: () => number;
 }
 
@@ -42,7 +42,11 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
   const model = o.model || DEFAULT_MODEL;
   const body = {
     model,
-    max_tokens: 800,
+    // Sonnet 5.5 thinks by default, hidden, and thinking tokens count against max_tokens: that is what cut replies off
+    // mid-JSON. The facts are pre-computed, so up-front thinking is turned off ("between_tools" is Sonnet 5.5's lowest
+    // setting; "disabled" is rejected there). COPILOT_THINKING=on keeps the model's default thinking with a bigger budget.
+    max_tokens: o.thinking === 'on' ? 4000 : 1000,
+    ...(o.thinking === 'on' ? {} : { thinking: { type: 'between_tools' } }),
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     // structured outputs: the reply is guaranteed to be JSON that matches READ_SCHEMA
     output_config: { format: { type: 'json_schema', schema: READ_SCHEMA } },
@@ -51,7 +55,7 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
   const t0 = now();
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? 15_000);
+    const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? (o.thinking === 'on' ? 30_000 : 15_000));
     let res: Response;
     try {
       res = await f(API_URL, {
@@ -81,11 +85,13 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
     }
     const content: { type: string; text?: string }[] = json?.content ?? [];
     const replyText = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
-    const parsed = parseReadFromText(replyText);
+    const cutOff = json?.stop_reason === 'max_tokens';
+    const parsed = Object.keys(parseReadFromText(replyText)).length ? parseReadFromText(replyText) : salvageRead(replyText);
     const v = String(parsed.verdict ?? '').trim().toUpperCase().replace(/\s+/g, '_');
     let verdict: Verdict | 'RAW' = (VERDICTS as readonly string[]).includes(v) ? (v as Verdict) : 'RAW';
     let lines = (Array.isArray(parsed.lines) ? parsed.lines : []).map((l: unknown) => String(l)).filter(Boolean).slice(0, 3);
     let watch = String(parsed.watch ?? '');
+    if (cutOff && verdict !== 'RAW' && lines.length && !watch) watch = '(reply was cut short; the lines above are complete)';
     // Never throw away a paid answer: if it did not parse, show Claude's text as it is.
     if (verdict === 'RAW' || !lines.length) {
       verdict = 'RAW';
@@ -116,4 +122,26 @@ export function parseReadFromText(text: string): Record<string, unknown> {
     } catch { /* try a shorter span */ }
   }
   return {};
+}
+
+/**
+ * A reply cut off mid-JSON (out of tokens): recover the verdict and every line that was written out in full,
+ * so they are shown as normal lines instead of raw JSON.
+ */
+export function salvageRead(text: string): Record<string, unknown> {
+  const v = text.match(/"verdict"\s*:\s*"([^"]+)"/);
+  if (!v) return {};
+  const out: Record<string, unknown> = { verdict: v[1] };
+  const arr = text.match(/"lines"\s*:\s*\[([\s\S]*)/);
+  if (arr) {
+    const lines: string[] = [];
+    const re = /"((?:[^"\\]|\\.)*)"\s*(?=[,\]])/g;
+    let m: RegExpExecArray | null;
+    const body = arr[1].split(']')[0] + (arr[1].includes(']') ? ']' : '');
+    while ((m = re.exec(body))) { try { lines.push(JSON.parse(`"${m[1]}"`)); } catch { /* skip a broken line */ } }
+    out.lines = lines;
+  }
+  const w = text.match(/"watch"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (w) { try { out.watch = JSON.parse(`"${w[1]}"`); } catch { /* ignore */ } }
+  return out;
 }

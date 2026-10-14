@@ -42,6 +42,7 @@ The daily 200 EMA uses about 5 years of daily candles and is left blank if the h
 | `COPILOT_EMA_REACH_ATR` | 2 | A 200 EMA this close (in ATR) in the trade's path is flagged. |
 | `COPILOT_POC_ROWS` | 24 | Volume profile rows across the day's range. |
 | `COPILOT_USD_INR` | 88 | Only for showing the cost of each ask in rupees. |
+| `COPILOT_THINKING` | off | `on` lets Claude think before answering: slower and costlier; the facts are already computed, so off is the default. |
 
 ## Cost
 About ₹1 per ask on Sonnet 5.5 (about 5,000 tokens in, 300 out). The cost of every ask is in the `CostInr` column.
