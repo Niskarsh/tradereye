@@ -81,7 +81,11 @@ export interface CheckResult {
   checkId: string; mode: 'ENTRY' | 'MANAGE'; date: string; time: string; live: boolean;
   symbol: string; direction: Direction; setup: Setup; price: number; priceSource: 'LTP' | 'LAST_CANDLE';
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; row: CheckRow; payload: string; notes: string[];
+  alternatives: Alternative[];
 }
+
+/** Another setup on the same stock, read from the same data, for the "better fit" suggestion. */
+export interface Alternative { direction: Direction; setup: Setup; facts: Facts }
 
 interface Deps {
   dhan: Pick<DhanClient, 'intraday' | 'daily' | 'ltp' | 'positions' | 'trades' | 'orders'>;
@@ -162,11 +166,30 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
     chargeRate: chargeRate(trades),
   });
   const behaviour = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction, setup: req.setup, openPositions: openPositions.length });
+  const ruleFlags = (fx: Facts, b: Behaviour, setup: Setup, dir: Direction) => {
+    if (b.FirstTradeLost) fx.flags.push('First trade of the day lost and nothing else is open');
+    if (b.SameSymbolStopped) fx.flags.push(`Stopped out of ${symbol} ${dir} earlier today`);
+    if (setup === 'REVERSAL' && fx.RvolBusy === 'YES') fx.flags.push(`Reversal on a stock busier than usual (${fx.RvolBasis}: ${fx.RvolBasis?.startsWith('open') ? fx.RvolDay : fx.RvolSameTime})`);
+    if (setup === 'MOMENTUM' && (fx.NiftyState === 'FLAT' || fx.NiftyState === 'FLIPPED')) fx.flags.push(`Momentum while Nifty 500 is ${fx.NiftyState}`);
+  };
+  if (mode === 'ENTRY') ruleFlags(facts, behaviour, req.setup, direction);
+
+  // the other three setups, read from the same data, each with a stop from the 10-minute chart (ENTRY only)
+  const alternatives: Alternative[] = [];
   if (mode === 'ENTRY') {
-    if (behaviour.FirstTradeLost) facts.flags.push('First trade of the day lost and nothing else is open');
-    if (behaviour.SameSymbolStopped) facts.flags.push(`Stopped out of ${symbol} ${direction} earlier today`);
-    if (req.setup === 'REVERSAL' && (facts.RvolDay ?? 0) > 0.1) facts.flags.push(`Reversal on a stock with high relative volume (${facts.RvolDay})`);
-    if (req.setup === 'MOMENTUM' && (facts.NiftyState === 'FLAT' || facts.NiftyState === 'FLIPPED')) facts.flags.push(`Momentum while Nifty 500 is ${facts.NiftyState}`);
+    const combos: [Direction, Setup][] = [['LONG', 'MOMENTUM'], ['SHORT', 'MOMENTUM'], ['LONG', 'REVERSAL'], ['SHORT', 'REVERSAL']];
+    for (const [dir, setup] of combos) {
+      if (dir === direction && setup === req.setup) continue;
+      const common = {
+        date: sess.date, nowMs: sess.asOfMs, price, direction: dir, setup, stock1m, nifty1m, daily,
+        riskInr: s.riskInr, niftyDirPct: s.niftyDirPct, emaReachAtr: s.emaReachAtr, pocRows: s.pocRows, chargeRate: chargeRate(trades),
+      };
+      const first = computeFacts(common);
+      const fx = first.StopIdea !== undefined ? computeFacts({ ...common, plannedStop: first.StopIdea }) : first;
+      const b = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction: dir, setup, openPositions: openPositions.length });
+      ruleFlags(fx, b, setup, dir);
+      alternatives.push({ direction: dir, setup, facts: fx });
+    }
   }
 
   let manage: ManageFacts | undefined;
@@ -202,7 +225,8 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   const todayTrades = trades.filter((t) => t.date === sess.date).map((t) => ({ symbol: t.symbol, direction: t.direction, netPnl: t.netPnl, exitType: t.exitType }));
   const payload = buildMessage({
     mode, time: time.slice(0, 5), direction, setup: req.setup, symbol, riskInr: s.riskInr, price,
-    facts, manage, behaviour, todayTrades, stock1m, nifty1m, date: sess.date, asOfMs: sess.asOfMs,
+    facts, manage, behaviour, todayTrades, stock1m, nifty1m, date: sess.date, asOfMs: sess.asOfMs, live: sess.live,
+    alternatives,
   });
 
   const { flags, missing, ...plain } = facts;
@@ -224,7 +248,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   }
   for (const k of Object.keys(row)) if ((row as Record<string, unknown>)[k] === undefined) (row as Record<string, unknown>)[k] = '';
 
-  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes };
+  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives };
 }
 
 /** Today's market strip: Nifty 500 state and your day so far. */

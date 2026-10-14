@@ -5,7 +5,7 @@ import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1.5';
+export const PROMPT_VERSION = 'copilot-v1.8';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -18,8 +18,8 @@ WHO HE IS AND HOW HE TRADES
   - Directional -> momentum: trade high relative-volume stocks in the index's direction.
   - Not directional -> reversal: trade overextended, low relative-volume stocks back toward the session POC on the 10-minute chart.
   - He skips a high-rvol stock that has started reversing.
-- Relative volume (RvolDay) is TradingView's: volume so far today / 10-day average FULL-day volume. It is small early: about 0.1 at 09:20 on an ordinary day, so above 0.1 at the open means busier than usual. Rarely above 1.
-- The only moving average he uses is the 200 EMA on 5m, 10m and daily. He ignores a stock whose 200 EMA lies against the move unless it is far enough that price will not reach it before he is out. Never bring up any other moving average.
+- Relative volume (RvolDay) is TradingView's: volume so far today / 10-day average FULL-day volume. It grows through the day: about 0.1 at 09:20 on an ordinary day, near 1 at the close of an ordinary day. His "above 0.1" rule is for the OPEN only. RvolSameTime compares volume so far with the average for the same time of day (1 = normal), and RvolBusy is the app's call (YES = busier than usual, judged by RvolBasis). Use RvolBusy, never RvolDay alone, to call a stock high or low relative volume.
+- The only moving average he uses is the 200 EMA on 5m, 10m and daily. The 5m and 10m 200 EMAs are INTRADAY levels; only Ema200_1d is the daily one. Never call the 5m or 10m EMA "daily" or a "daily trend". He ignores a stock whose 200 EMA lies against the move unless it is far enough that price will not reach it before he is out. Never bring up any other moving average.
 - Stops: 2x ATR(14) on 10-minute bars is a hard cap; his real stops are usually much tighter where the chart allows. He sizes so the stop is at most the risk limit in INR.
 - He usually stops for the day if his first trade loses, unless other trades are open.
 - He does not trade on news and is sceptical of it. No news is provided; never mention news or guess at catalysts.
@@ -37,15 +37,25 @@ Look in this order and stop when you have the three most important things:
 3. The stock's evidence for this setup.
    Momentum: leading Nifty (RsVsNiftyPct, Rs20mPct = the last two 10-min candles) or just following it; volume rising on pushes and lighter on pullbacks; first pullback rather than the third; no failed break of the day's high/low in the last minutes (FailedBreak); entry beyond the first 10-min candle, not inside it; extension already large (high ExtAdrPct = chasing); room to the next obstacle compared with the stop (RoomVsStop below 1 is poor).
    Reversal: really stretched from the POC; momentum stalled (Climax, push volume fading, a failed new extreme); Nifty not pushing hard in the stock's direction; distance to the POC (the target) compared with the stop.
-4. His behaviour: MinSinceLoss under 10, many trades already today, his record in this setup when it is clearly good or bad (only with at least 10 trades).
+4. His behaviour: MinSinceLoss under 10, many trades already today, and his record in this setup (it is only sent once he has at least 10 such trades) when it is clearly good or bad.
 
 He trades from the 10-minute chart: every candle-based fact (pullbacks, volume trend, push/pull volume, climax, failed break, VWAP control) is measured on 10-minute candles, and the candle lines are 10-minute candles (the last one may still be forming). They are there so you can confirm or question the facts (for example, the last three candles are wicks against him). Do not re-describe candles he can see on his own chart.
 
 VERDICT
-- WARNING: one of his own rules is broken, or two strong facts point against this trade.
-- SUPPORTS: the setup's key evidence is present and nothing material is against it.
-- MIXED: anything else. Do not hide in MIXED; if the case is clear, say SUPPORTS or WARNING.
+Most real trades have one or two things against them; that alone is NOT a warning. Judge the setup's core conditions:
+- Momentum core: Nifty moving his way (TRENDING in his direction), the stock busier than usual (RvolBusy YES), VWAP control on his side, and room to the next obstacle (RoomAtr of about 1 or more).
+- Reversal core: the stock genuinely stretched from the POC with room back to it, not busier than usual (RvolBusy NO), and Nifty not pushing hard in the stock's direction.
+- WARNING: one of his own rules is broken (anything in FLAGS), or a core condition is clearly missing (for example momentum while Nifty is FLAT, FLIPPED or moving against him, or almost no room to the next obstacle).
+- SUPPORTS: the core conditions are present and FLAGS is none, even if one or two smaller things are against; name the most important of those in a line.
+- MIXED: the core conditions are only partly there, or they are there but one strong sign cuts against them (a climax against him, a failed break, volume fading on his pushes).
+Use each label when it fits; do not lean toward WARNING to be safe.
+If StopAssumed is YES he has not typed his stop: StopDist is only his 2x ATR cap, his real stop is usually much tighter, so never judge the trade on stop size or risk; judge room in ATR.
 (These three are for ENTRY. MANAGE uses HOLD_STEADY / WEAKENING / WARNING as defined above.)
+
+BETTER FIT
+- The ALT lines read the other setups on the same stock from the same data, each with a stop taken from the 10-minute chart.
+- When your verdict is MIXED or WARNING, set alternative to the ALT setup that clearly fits his playbook better: its core conditions met and its flags none. Use its stop exactly as written in its ALT line; never invent a stop, and never give a target. reason: under 12 words, the main thing that makes it fit.
+- If no ALT is clearly better, or your verdict is SUPPORTS, or Mode is MANAGE: direction NONE, setup NONE, stop 0, reason empty. Doing nothing is a valid answer; do not force one.
 
 WRITING
 - Exactly the 2 or 3 things that matter most, most important first. Each line is short and to the point: under 12 words, plain English, with the number that matters. Example: "Daily 200 EMA 0.4 ATR above: little room."
@@ -54,7 +64,7 @@ WRITING
 - Use only facts in this message. If something you need is missing and it matters, say "no data on X".
 - No hedging words (may, might, could potentially) unless the data is truly split. No praise, no disclaimers, no restating his setup back to him.
 
-Reply with the JSON object only: verdict, lines (at most 3), watch.`;
+Reply with the JSON object only: verdict, lines (at most 3), watch, alternative.`;
 
 export const VERDICTS = ['SUPPORTS', 'MIXED', 'WARNING', 'HOLD_STEADY', 'WEAKENING'] as const;
 export type Verdict = typeof VERDICTS[number];
@@ -70,8 +80,19 @@ export const READ_SCHEMA = {
     verdict: { type: 'string', enum: [...VERDICTS] },
     lines: { type: 'array', items: { type: 'string' }, description: 'At most 3 short lines, most important first.' },
     watch: { type: 'string' },
+    alternative: {
+      type: 'object',
+      properties: {
+        direction: { type: 'string', enum: ['LONG', 'SHORT', 'NONE'] },
+        setup: { type: 'string', enum: ['MOMENTUM', 'REVERSAL', 'NONE'] },
+        stop: { type: 'number', description: 'Exactly the stop from that ALT line; 0 when NONE.' },
+        reason: { type: 'string' },
+      },
+      required: ['direction', 'setup', 'stop', 'reason'],
+      additionalProperties: false,
+    },
   },
-  required: ['verdict', 'lines', 'watch'],
+  required: ['verdict', 'lines', 'watch', 'alternative'],
   additionalProperties: false,
 } as const;
 
@@ -86,6 +107,9 @@ export interface MessageInput {
   behaviour: Behaviour;
   todayTrades: { symbol: string; direction: string; netPnl: number; exitType: string }[];
   stock1m: Candles; nifty1m: Candles; date: string; asOfMs: number;
+  live?: boolean;          // false = the session is closed (a practice read at the close)
+  /** The other setups on the same stock (ENTRY only), each with a stop from the 10-minute chart. */
+  alternatives?: { direction: string; setup: string; facts: Facts }[];
 }
 
 const fmt = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(2) : n.toPrecision(5).replace(/\.?0+$/, ''));
@@ -117,14 +141,27 @@ export function buildMessage(m: MessageInput): string {
   const you = compact({
     TradesToday: b.TradesToday, PnlToday: b.PnlToday, FirstTradeLost: b.FirstTradeLost, OpenPositions: b.OpenPositions,
     SameSymbolStopped: b.SameSymbolStopped, MinSinceLoss: b.MinSinceLoss,
-    SetupTrades: b.SetupTrades, SetupWinRate: b.SetupWinRate, SetupAvgPnl: b.SetupAvgPnl,
+    // his record in this setup is only meaningful from 10 trades; below that it is not sent at all
+    ...(b.SetupTrades >= 10 ? { SetupTrades: b.SetupTrades, SetupWinRate: b.SetupWinRate, SetupAvgPnl: b.SetupAvgPnl } : {}),
   });
   const parts = [
     `Mode ${m.mode} · ${m.time} IST · ${m.direction} · ${m.setup} · ${m.symbol} · price ${m.price} · risk limit ${m.riskInr} INR`,
+    ...(m.live === false ? ['TEST READ: the session is closed and this is a practice read as of the close. Judge the setup as if it were live; do not mention the time or that it is late.'] : []),
     `FACTS ${JSON.stringify(compact(facts as Record<string, unknown>))}`,
   ];
   if (m.manage) { const { missing: mm, ...mf } = m.manage; parts.push(`IN_TRADE ${JSON.stringify(compact(mf as Record<string, unknown>))}`); if (mm.length) missing.push(...mm); }
   parts.push(`FLAGS ${flags.length ? flags.join('; ') : 'none'}`);
+  for (const a of m.alternatives ?? []) {
+    const x = a.facts;
+    const bits = [
+      x.StopIdea !== undefined ? `stop ${x.StopIdea} (${x.StopIdeaAtr} ATR${x.StopIdeaCapped ? ', capped at 2x ATR' : ''})` : 'stop -',
+      `room to ${x.RoomTo ?? '-'}${x.RoomAtr !== undefined ? ` ${x.RoomAtr} ATR` : ''}${x.RoomVsStop !== undefined ? ` (${x.RoomVsStop}x stop)` : ''}`,
+      `push/pull ${x.PushVsPullVol ?? '-'}`, `pullback ${x.PullbackNo ?? '-'}`, `busy ${x.RvolBusy ?? '-'}`,
+      `VWAP ${x.VwapSide?.toLowerCase() ?? '-'}`, `EMA in path ${x.Ema200InPath || '-'}`,
+      `flags ${x.flags.length ? x.flags.join('; ') : 'none'}`,
+    ];
+    parts.push(`ALT ${a.setup} ${a.direction}: ${bits.join(' · ')}`);
+  }
   parts.push(`YOU ${JSON.stringify(you)}`);
   parts.push(`TODAY ${m.todayTrades.length ? m.todayTrades.map((t) => `${t.symbol} ${t.direction} ${t.netPnl} ${t.exitType || '-'}`).join(' | ') : 'none'}`);
   if (missing.length) parts.push(`MISSING ${missing.join('; ')}`);

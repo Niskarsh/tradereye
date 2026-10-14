@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
 import { errorResponse, guard } from '@/lib/live/guard';
-import { askClaude, ClaudeError } from '@/lib/copilot/claude';
+import { askClaude, checkAlternative, ClaudeError } from '@/lib/copilot/claude';
 import { askedToday, FACTS_TTL_MS, readChecks, recall, updateCheck } from '@/lib/copilot/store';
 import { settings } from '@/lib/copilot/settings';
 
@@ -36,10 +36,12 @@ export async function POST(req: Request) {
 
     const found = { title, rowNumber: hit.rowNumber, headers, o: hit.o };
     try {
-      const r = await askClaude(payload, { apiKey, model: s.model, usdInr: s.usdInr, thinking: s.thinking });
+      const raw = await askClaude(payload, { apiKey, model: s.model, usdInr: s.usdInr, thinking: s.thinking });
+      const r = { ...raw, alternative: checkAlternative(raw.alternative, payload) };
       await updateCheck(sheets, found, {
         Status: 'ASKED', Model: r.model, Verdict: r.verdict, Line1: r.lines[0] ?? '', Line2: r.lines[1] ?? '', Line3: r.lines[2] ?? '',
-        Watch: r.watch, InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '',
+        Watch: r.watch, AltDirection: r.alternative?.direction ?? '', AltSetup: r.alternative?.setup ?? '', AltStop: r.alternative?.stop ?? '', AltReason: r.alternative?.reason ?? '',
+        InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '',
       });
       return NextResponse.json({ ...r, asksLeft: Math.max(0, s.dailyLimit - askedToday(rows, date) - 1) });
     } catch (e) {

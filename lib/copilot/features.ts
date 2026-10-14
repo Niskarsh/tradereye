@@ -39,6 +39,10 @@ export type NiftyState = 'OPENING' | 'TRENDING_UP' | 'TRENDING_DOWN' | 'FADING_U
 export interface Facts {
   NiftyFirst5Pct?: number; NiftyNowPct?: number; NiftyLast10Pct?: number; NiftyState: NiftyState;
   RvolDay?: number; Atr10m?: number; Atr2?: number;
+  /** Volume so far vs the average for the SAME time of day over the last 10 sessions (1 = normal). */
+  RvolSameTime?: number;
+  /** Busier than usual? At the open (before 09:35) his TradingView rule RvolDay > 0.1; later RvolSameTime > 1. */
+  RvolBusy?: 'YES' | 'NO'; RvolBasis?: string;
   Ema200_5mAtr?: number; Ema200_10mAtr?: number; Ema200_1dAtr?: number; Ema200InPath: string;
   OrHigh?: number; OrLow?: number; EntryVsOr?: 'ABOVE' | 'INSIDE' | 'BELOW';
   PdhDistAtr?: number; PdlDistAtr?: number;
@@ -48,6 +52,13 @@ export interface Facts {
   PullbackNo?: number; VolTrend?: 'RISING' | 'FALLING' | 'FLAT'; PushVsPullVol?: number;
   Climax: string; FailedBreak: string;
   StopDist?: number; StopVsAtr2?: number; SizeQty?: number; RiskInr?: number;
+  /**
+   * A stop taken from the 10-minute chart: just beyond the last two 10-min candles' high (short) or low (long)
+   * plus 0.1 ATR, at least 0.25 ATR from price, capped at his 2x ATR. Used for the "better fit" suggestion.
+   */
+  StopIdea?: number; StopIdeaAtr?: number; StopIdeaCapped?: 'YES';
+  /** YES when he typed no stop: StopDist is then his 2x ATR cap (worst case), not his real stop. */
+  StopAssumed?: 'YES';
   RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
   /** Raw price levels, so the card can be read straight against the chart. */
   Ema200_5m?: number; Ema200_10m?: number; Ema200_1d?: number; DayHigh?: number; DayLow?: number;
@@ -225,6 +236,14 @@ export function computeFacts(inp: FactsInput): Facts {
   f.NiftyFirst5Pct = enr.nifty500First5Pct;
   f.NiftyNowPct = enr.nifty500AtEntryPct;
   f.RvolDay = enr.rvolDayAtEntry;
+  f.RvolSameTime = enr.rvolAtEntry;
+  // TradingView's rvol grows all day (a full normal day ends near 1), so his ">0.1" rule only means something at the
+  // open. Later in the day "busy" is judged against the same time of day.
+  if (asOfMin < SESSION_OPEN_MIN + 20) {
+    if (f.RvolDay !== undefined) { f.RvolBusy = f.RvolDay > 0.1 ? 'YES' : 'NO'; f.RvolBasis = 'open: TradingView rvol > 0.1'; }
+  } else if (f.RvolSameTime !== undefined) {
+    f.RvolBusy = f.RvolSameTime > 1 ? 'YES' : 'NO'; f.RvolBasis = 'vs the same time of day (1 = normal)';
+  }
   f.Atr10m = enr.atr10m;
   f.Atr2 = enr.atr2;
   const atr = enr.atr10m;
@@ -338,13 +357,23 @@ export function computeFacts(inp: FactsInput): Facts {
   f.Climax = climax(doneBars.slice(-3), med, nowSec, 600);
   f.FailedBreak = failedBreak(tenBars.slice(0, -3), tenBars.slice(-3), price, 'BOTH', 1);
 
+  // ---- a stop from the 10-minute chart (for the "better fit" suggestion; never instead of his own stop)
+  if (atr && tenBars.length) {
+    const recent = tenBars.slice(-3); // the last two completed candles and the one forming
+    let idea = sign === -1 ? Math.max(...recent.map((b) => b.h)) + 0.1 * atr : Math.min(...recent.map((b) => b.l)) - 0.1 * atr;
+    if ((idea - price) * -sign < 0.25 * atr) idea = price - sign * 0.25 * atr; // price beyond those candles: a minimum distance
+    if (Math.abs(idea - price) > 2 * atr) { idea = price - sign * 2 * atr; f.StopIdeaCapped = 'YES'; }
+    f.StopIdea = r2(idea);
+    f.StopIdeaAtr = r2(Math.abs(idea - price) / atr);
+  }
+
   // ---- plan
   if (inp.plannedStop !== undefined && inp.plannedStop > 0) {
     const wrongSide = (inp.plannedStop - price) * sign >= 0;
     if (wrongSide) f.flags.push('Stop is on the wrong side of the price');
     else f.StopDist = r2(Math.abs(price - inp.plannedStop));
   }
-  if (f.StopDist === undefined && f.Atr2) f.StopDist = r2(f.Atr2);
+  if (f.StopDist === undefined && f.Atr2) { f.StopDist = r2(f.Atr2); f.StopAssumed = 'YES'; }
   if (f.StopDist && f.Atr2) {
     f.StopVsAtr2 = r2(f.StopDist / f.Atr2);
     if (f.StopVsAtr2 > 1.0001) f.flags.push('Stop wider than 2x ATR');
@@ -387,7 +416,8 @@ export function computeFacts(inp: FactsInput): Facts {
     }
     if (room !== undefined) {
       f.RoomAtr = r2(room / atr);
-      if (f.StopDist) f.RoomVsStop = r2(room / f.StopDist);
+      // against an assumed 2x ATR stop the ratio is meaningless (his real stops are much tighter): room in ATR only
+      if (f.StopDist && !f.StopAssumed) f.RoomVsStop = r2(room / f.StopDist);
     }
   }
   return f;

@@ -24,7 +24,8 @@ export interface CheckResp {
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; notes: string[]; asksLeft: number;
 }
 
-export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number }
+export interface AltResp { direction: Dir; setup: SetupT; stop?: number; reason: string }
+export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number; alternative?: AltResp }
 
 const MARKET_EVERY_MS = 60_000;
 
