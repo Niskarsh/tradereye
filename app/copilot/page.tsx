@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
@@ -18,10 +18,12 @@ export default function CopilotPage() {
   const [suggest, setSuggest] = useState<string[]>([]);
   const [editRisk, setEditRisk] = useState(false);
   const [riskDraft, setRiskDraft] = useState('');
+  const stopRef = useRef<HTMLInputElement>(null);
+  const picked = useRef('');
 
   useEffect(() => {
     const q = symbol.trim();
-    if (q.length < 2) { setSuggest([]); return; }
+    if (q.length < 2 || q === picked.current) { setSuggest([]); return; } // no list again for a symbol just picked
     const t = setTimeout(async () => {
       try {
         const r = await fetch(`/api/copilot/symbols?q=${encodeURIComponent(q)}`).then((x) => x.json());
@@ -30,6 +32,16 @@ export default function CopilotPage() {
     }, 200);
     return () => clearTimeout(t);
   }, [symbol]);
+
+  // picking a symbol (chip or suggestion) only fills it in and moves to the Stop box; Go runs the check
+  const pick = (sym: string) => {
+    const s = sym.trim().toUpperCase();
+    if (!s) return;
+    if (s !== symbol) setStop('');
+    picked.current = s;
+    setSymbol(s); setSuggest([]);
+    setTimeout(() => stopRef.current?.focus(), 0);
+  };
 
   const go = (sym: string) => {
     const s = sym.trim().toUpperCase();
@@ -97,7 +109,7 @@ export default function CopilotPage() {
         {chips.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {chips.map((s) => (
-              <button key={s} onClick={() => go(s)} disabled={!ready || c.busy !== ''}
+              <button key={s} onClick={() => pick(s)} disabled={c.busy !== ''}
                 className={`h-10 px-4 rounded-xl text-sm font-bold border ${c.market?.openSymbols.includes(s) ? 'border-brand-accent text-brand-accent' : 'border-zinc-700 text-zinc-200'} disabled:opacity-40`}>
                 {s}{c.market?.openSymbols.includes(s) ? ' ●' : ''}
               </button>
@@ -110,7 +122,7 @@ export default function CopilotPage() {
             <Input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="Symbol"
               autoCapitalize="characters" autoCorrect="off" spellCheck={false}
               className="h-12 flex-1 bg-brand-card border-zinc-800 text-base font-bold tracking-wide" />
-            <Input value={stop} onChange={(e) => setStop(e.target.value)} placeholder="Stop" inputMode="decimal"
+            <Input ref={stopRef} value={stop} onChange={(e) => setStop(e.target.value)} placeholder="Stop" inputMode="decimal"
               className="h-12 w-28 bg-brand-card border-zinc-800 text-base font-mono" />
             <button type="submit" disabled={!ready || !symbol || c.busy !== ''}
               className="h-12 px-5 rounded-xl bg-zinc-100 text-black text-sm font-black disabled:opacity-40">
@@ -119,7 +131,7 @@ export default function CopilotPage() {
           </div>
           {suggest.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {suggest.map((s) => <button type="button" key={s} onClick={() => go(s)} disabled={!ready} className="h-9 px-3 rounded-lg bg-brand-card text-xs font-bold text-zinc-300 disabled:opacity-40">{s}</button>)}
+              {suggest.map((s) => <button type="button" key={s} onClick={() => pick(s)} className="h-9 px-3 rounded-lg bg-brand-card text-xs font-bold text-zinc-300 disabled:opacity-40">{s}</button>)}
             </div>
           )}
           {!ready && <p className="text-[11px] text-zinc-500">Pick a direction and a setup first.</p>}
