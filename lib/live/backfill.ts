@@ -2,7 +2,9 @@ import type { SheetsClient } from '../sheetsApi';
 import { colLetter, rowToObject } from '../sheetsApi';
 import { DhanError, previousClose, type DhanClient } from '../dhan';
 import { LOOKBACK_CALENDAR_DAYS, computeEnrichment, toSessions, volumeDiagnostics } from './enrich';
-import { MONTHLY_ALL, MONTHLY_ENRICH_COLS } from './schema';
+import { MONTHLY_ALL, MONTHLY_CONTEXT_COLS, MONTHLY_ENRICH_COLS } from './schema';
+import { computeFacts } from '../copilot/features';
+import { settings as copilotSettings } from '../copilot/settings';
 import { dateKeyToMs, istDateKey, istTime, monthSheetTitle, normDate, normTime, parseIst, MONTHS } from './time';
 
 /**
@@ -43,7 +45,8 @@ export async function planBackfill(sheets: SheetsClient, opts: { redo?: boolean 
     const { headers, rows } = await sheets.readAll(tab);
     for (const g of groupRows(headers, rows)) {
       const st = (g.rows[0].o.EnrichStatus ?? '').trim();
-      const ok = st === 'OK';
+      // done = market columns OK AND the newer context columns filled (so old trades get context too)
+      const ok = st === 'OK' && (g.rows[0].o.ContextStatus ?? '').trim() !== '';
       if (ok && !opts.redo) { done++; continue; }
       items.push({ tab, groupId: g.groupId, date: normDate(g.rows[0].o['Date (IST)']), symbol: g.rows[0].o.Symbol, fills: g.rows.length, status: st || 'NEW' });
     }
@@ -113,9 +116,12 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
           await sleep(SPACING_MS);
         }
         let prevClose: number | undefined;
+        let daily: Awaited<ReturnType<RunDeps['dhan']['daily']>> | undefined;
         try {
-          const dailyFrom = istDateKey(dateKeyToMs(date) - 10 * 86400_000);
-          prevClose = previousClose(await deps.dhan.daily({ securityId: secId, segment: 'NSE_EQ', instrument: 'EQUITY', from: dailyFrom, to: date }), date);
+          // ~5 years: the previous close, and the history a daily 200 EMA needs to match the chart
+          const dailyFrom = istDateKey(dateKeyToMs(date) - 5 * 365 * 86400_000);
+          daily = await deps.dhan.daily({ securityId: secId, segment: 'NSE_EQ', instrument: 'EQUITY', from: dailyFrom, to: date });
+          prevClose = previousClose(daily, date);
           await sleep(SPACING_MS);
         } catch (e) { if (e instanceof DhanError && (e.isAuth || e.isNoDataPlan)) throw e; /* fall back to last 1-min close */ }
 
@@ -135,6 +141,33 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
           MfePct: enr.mfePct ?? '', MaePct: enr.maePct ?? '', MfeR: enr.mfeR ?? '', MaeR: enr.maeR ?? '', RBasis: enr.rBasis ?? '',
           EnrichStatus: status === 'OK' ? 'OK' : note, EnrichedAt: `${istDateKey(nowMs)} ${istTime(nowMs)}`,
         };
+        // market context at the first fill (the same facts the co-pilot shows), written by column name
+        const cfg = copilotSettings();
+        const setupCell = String(g.rows[0].o.Setup ?? '').trim().toLowerCase();
+        const initialStop = parseFloat(g.rows[0].o.InitialStop);
+        const ctx = computeFacts({
+          date, nowMs: fills[0].ts, price: avgEntry, direction, setup: setupCell === 'reversal' ? 'REVERSAL' : 'MOMENTUM',
+          stock1m: stockC, nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] }, daily: daily ?? { t: [], o: [], h: [], l: [], c: [], v: [] },
+          plannedStop: initialStop > 0 ? initialStop : undefined,
+          riskInr: cfg.riskInr, niftyDirPct: cfg.niftyDirPct, emaReachAtr: cfg.emaReachAtr, pocRows: cfg.pocRows,
+        });
+        // Nifty for relative strength: rebuild from the cached sessions of that day
+        const nDay = nifty.find((x) => x.date === date);
+        const nOpen = nDay?.bars[0]?.o, nAt = nDay?.bars.filter((b) => b.t * 1000 < Math.floor(fills[0].ts / 60000) * 60000).at(-1)?.c;
+        const stockDay = toSessions(stockC).find((x) => x.date === date);
+        const sOpen = stockDay && stockDay.bars.length ? stockDay.bars[0].o : undefined;
+        const rs = nOpen && nAt && sOpen && enr.nifty500AtEntryPct !== undefined ? Number(((avgEntry / sOpen - 1) * 100 - enr.nifty500AtEntryPct).toFixed(4)) : '';
+        const ctxMissing = ctx.missing.filter((m) => !m.startsWith('nifty') && !m.startsWith('room'));
+        const ctxVals: Record<string, string | number> = {
+          OrHigh: ctx.OrHigh ?? '', OrLow: ctx.OrLow ?? '', EntryVsOr: ctx.EntryVsOr ?? '',
+          PdhDistAtr: ctx.PdhDistAtr ?? '', PdlDistAtr: ctx.PdlDistAtr ?? '',
+          Ema200_5mAtr: ctx.Ema200_5mAtr ?? '', Ema200_10mAtr: ctx.Ema200_10mAtr ?? '', Ema200_1dAtr: ctx.Ema200_1dAtr ?? '',
+          RsVsNiftyPct: rs, ExtAdrPct: ctx.ExtAdrPct ?? '', PocDistAtr: ctx.PocDistAtr ?? '',
+          PullbackNo: ctx.PullbackNo ?? '', VolTrend: ctx.VolTrend ?? '',
+          ContextStatus: ctxMissing.length ? `PARTIAL: ${ctxMissing.join(', ')}`.slice(0, 200) : 'OK',
+        };
+        for (const k of MONTHLY_CONTEXT_COLS) if (!(k in ctxVals)) ctxVals[k] = '';
+
         // live columns: only fill when blank
         const fillIfBlank: Record<string, string | number> = {
           SecurityId: secId, EntryTime: istTime(fills[0].ts), ExitTime: istTime(fills[fills.length - 1].ts),
@@ -151,6 +184,7 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
           } else {
             for (const [k, v] of Object.entries(vals)) if (col(k) >= 0) updates.push({ range: `'${tab}'!${colLetter(col(k))}${r.rowNumber}`, values: [[v]] });
           }
+          for (const [k, v] of Object.entries(ctxVals)) if (col(k) >= 0) updates.push({ range: `'${tab}'!${colLetter(col(k))}${r.rowNumber}`, values: [[v]] });
           for (const [k, v] of Object.entries(fillIfBlank)) {
             const c = col(k);
             if (c >= 0 && !String(r.cells[c] ?? '').trim()) updates.push({ range: `'${tab}'!${colLetter(c)}${r.rowNumber}`, values: [[v]] });

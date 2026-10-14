@@ -36,6 +36,7 @@ const inFlight = new Set<string>();
  */
 export async function finalizeGroup(
   sheets: SheetsClient, g: TradeGroup, pnl: Pnl, meta: TradeMeta,
+  extra: Record<string, Cell | undefined> = {}, // e.g. the co-pilot's Ck... / Rc... columns for this trade
 ): Promise<'LOGGED' | 'DUPLICATE' | 'BUSY'> {
   if (inFlight.has(g.id)) return 'BUSY';
   inFlight.add(g.id);
@@ -63,6 +64,7 @@ export async function finalizeGroup(
       LastStop: meta.lastStop, StopMoves: meta.initialStop === undefined ? undefined : meta.stopMoves,
       TpFirst: meta.tpFirst, TpLast: meta.tpLast, ExitType: meta.exitType,
       DirFromFills: g.direction,
+      ...extra,
     };
     const rows = g.parts.map((p) => objectToRow(headers, {
       ...common,

@@ -52,6 +52,9 @@ interface TradeEntry {
     RiskInr?: string;
     ExitType?: string;
     Setup?: string;
+    CkVerdict?: string;
+    CkLines?: string;
+    RcLastLabel?: string;
     Nifty500First5Pct?: string;
     RvolAtEntry?: string;
     RvolDay5?: string;
@@ -485,7 +488,14 @@ export default function Journal() {
                                                 </button>
                                             );
                                         })}
+                                        {group.trades[0].CkVerdict && (
+                                            <span title={group.trades[0].CkLines || ''}
+                                                className={`ml-auto px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${group.trades[0].CkVerdict === 'WARNING' ? 'border-red-500/60 text-red-400' : group.trades[0].CkVerdict === 'SUPPORTS' ? 'border-emerald-500/60 text-emerald-400' : 'border-amber-500/60 text-amber-400'}`}>
+                                                Co-pilot: {group.trades[0].CkVerdict.toLowerCase()}{group.trades[0].RcLastLabel ? ` · then ${group.trades[0].RcLastLabel.toLowerCase().replace('_', ' ')}` : ''}
+                                            </span>
+                                        )}
                                     </div>
+                                    {group.trades[0].CkLines && <p className="-mt-2 mb-4 text-xs text-zinc-500">{group.trades[0].CkLines}</p>}
                                     <textarea
                                         className="w-full bg-zinc-900/30 border border-zinc-800/80 rounded-[24px] p-5 text-sm leading-loose text-zinc-300 min-h-[220px] md:min-h-[300px] resize-none focus:outline-none focus:ring-1 focus:ring-cyan-500/40 transition-all placeholder:text-zinc-700"
                                         placeholder="Document your setup, entry triggers, and exit rationale..."

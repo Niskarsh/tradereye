@@ -94,6 +94,17 @@ export class DhanClient {
     return parseCandles(raw);
   }
 
+  /**
+   * Last traded price for one instrument (Market Quote API, part of the Data API plan). Dhan wants the client id
+   * in a header for this one. Returns undefined when the price is not in the answer.
+   */
+  async ltp(clientId: string, segment: string, securityId: string): Promise<number | undefined> {
+    const raw = await this.req<any>('POST', '/marketfeed/ltp', { [segment]: [Number(securityId)] }, { 'client-id': clientId });
+    const node = raw?.data?.[segment]?.[String(securityId)] ?? raw?.data?.[segment]?.[Number(securityId)];
+    const p = Number(node?.last_price ?? node?.lastPrice ?? node?.LTP);
+    return Number.isFinite(p) && p > 0 ? p : undefined;
+  }
+
   /** Daily candles for [from, to) -- Dhan treats toDate as exclusive. Used for the official previous close. */
   async daily(p: { securityId: string; segment: string; instrument: string; from: string; to: string }): Promise<Candles> {
     const raw = await this.req<any>('POST', '/charts/historical', {
@@ -183,4 +194,14 @@ export async function lookupSecurityId(symbol: string, fetchImpl: typeof fetch =
 
 export function clientIdFromToken(token: string): string | undefined {
   return decodeJwt(token)?.dhanClientId;
+}
+
+/** NSE equity symbols starting with `prefix` (for the co-pilot's symbol box), shortest first. */
+export async function symbolsMatching(prefix: string, limit = 8, fetchImpl: typeof fetch = fetch): Promise<string[]> {
+  const p = prefix.trim().toUpperCase();
+  if (!p) return [];
+  await lookupSecurityId(p, fetchImpl); // loads the instrument list once
+  const out: string[] = [];
+  for (const s of masterCache?.keys() ?? []) if (s.startsWith(p)) out.push(s);
+  return out.sort((a, b) => a.length - b.length || a.localeCompare(b)).slice(0, limit);
 }

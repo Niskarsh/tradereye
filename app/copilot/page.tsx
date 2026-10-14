@@ -1,0 +1,132 @@
+"use client";
+import React, { useEffect, useState } from 'react';
+import { Loader2, Sparkles } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { useAuth } from '@/context/AuthContext';
+import { useCopilot, type Dir, type SetupT } from '@/components/copilot/useCopilot';
+import { FactsCard, MarketStrip, TodayChecks, VerdictCard } from '@/components/copilot/Cards';
+
+/**
+ * Co-pilot: tap direction, setup and a symbol to see the facts (no Claude); press Ask Claude for a read.
+ * Claude is only ever called from the Ask button.
+ */
+export default function CopilotPage() {
+  const { token, setToken } = useAuth();
+  const c = useCopilot(token);
+  const [symbol, setSymbol] = useState('');
+  const [stop, setStop] = useState('');
+  const [suggest, setSuggest] = useState<string[]>([]);
+
+  useEffect(() => {
+    const q = symbol.trim();
+    if (q.length < 2) { setSuggest([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/copilot/symbols?q=${encodeURIComponent(q)}`).then((x) => x.json());
+        setSuggest((r.symbols ?? []).filter((s: string) => s !== q.toUpperCase()));
+      } catch { setSuggest([]); }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [symbol]);
+
+  const go = (sym: string) => {
+    const s = sym.trim().toUpperCase();
+    if (!s) return;
+    setSymbol(s); setSuggest([]);
+    const st = parseFloat(stop);
+    c.runCheck(s, Number.isFinite(st) && st > 0 ? st : undefined);
+  };
+  const ready = !!c.direction && !!c.setup;
+  const held = c.check?.mode === 'MANAGE';
+  const canAsk = !!c.check && !c.read && c.busy === '' && (c.market?.asksLeft ?? 1) > 0;
+  const chips = c.market?.recentSymbols ?? [];
+
+  return (
+    <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-36">
+      <div className="max-w-xl mx-auto px-4 pt-2 space-y-4">
+        <header className="flex items-end justify-between border-b border-zinc-900 pb-3">
+          <div>
+            <h1 className="text-2xl font-black tracking-tighter">Co-pilot</h1>
+            <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">Facts first · Claude only when you ask</p>
+          </div>
+          {c.market && <p className="text-[10px] text-zinc-500">{c.market.asksLeft} asks left today</p>}
+        </header>
+
+        {!token && (
+          <div className="flex gap-2 p-2 bg-brand-card rounded-2xl">
+            <Input type="password" placeholder="Dhan Auth Token" value={token} onChange={(e) => setToken(e.target.value)}
+              className="bg-brand-card border-none h-10 text-xs focus-visible:ring-0 font-mono" />
+          </div>
+        )}
+
+        <MarketStrip m={c.market} err={c.marketErr} />
+
+        <div className="grid grid-cols-2 gap-2">
+          {(['LONG', 'SHORT'] as Dir[]).map((d) => (
+            <button key={d} onClick={() => c.setDirection(d)}
+              className={`h-16 rounded-2xl text-lg font-black tracking-tight border-2 ${c.direction === d ? (d === 'LONG' ? 'bg-data-green text-black border-data-green' : 'bg-data-red text-white border-data-red') : 'border-zinc-800 text-zinc-300'}`}>
+              {d}
+            </button>
+          ))}
+          {(['MOMENTUM', 'REVERSAL'] as SetupT[]).map((s) => (
+            <button key={s} onClick={() => c.setSetup(s)}
+              className={`h-14 rounded-2xl text-sm font-black tracking-wider border-2 ${c.setup === s ? 'bg-brand-accent text-black border-brand-accent' : 'border-zinc-800 text-zinc-300'}`}>
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {chips.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {chips.map((s) => (
+              <button key={s} onClick={() => go(s)} disabled={!ready || c.busy !== ''}
+                className={`h-10 px-4 rounded-xl text-sm font-bold border ${c.market?.openSymbols.includes(s) ? 'border-brand-accent text-brand-accent' : 'border-zinc-700 text-zinc-200'} disabled:opacity-40`}>
+                {s}{c.market?.openSymbols.includes(s) ? ' ●' : ''}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={(e) => { e.preventDefault(); go(symbol); }} className="space-y-2">
+          <div className="flex gap-2">
+            <Input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="Symbol"
+              autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+              className="h-12 flex-1 bg-brand-card border-zinc-800 text-base font-bold tracking-wide" />
+            <Input value={stop} onChange={(e) => setStop(e.target.value)} placeholder="Stop" inputMode="decimal"
+              className="h-12 w-28 bg-brand-card border-zinc-800 text-base font-mono" />
+            <button type="submit" disabled={!ready || !symbol || c.busy !== ''}
+              className="h-12 px-5 rounded-xl bg-zinc-100 text-black text-sm font-black disabled:opacity-40">
+              {c.busy === 'check' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Go'}
+            </button>
+          </div>
+          {suggest.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {suggest.map((s) => <button type="button" key={s} onClick={() => go(s)} disabled={!ready} className="h-9 px-3 rounded-lg bg-brand-card text-xs font-bold text-zinc-300 disabled:opacity-40">{s}</button>)}
+            </div>
+          )}
+          {!ready && <p className="text-[11px] text-zinc-500">Pick a direction and a setup first.</p>}
+        </form>
+
+        {c.error && <div className="rounded-2xl border border-data-red/40 bg-data-red/10 p-3 text-xs font-bold text-data-red">{c.error}</div>}
+
+        {c.read && <VerdictCard r={c.read} decision={c.decision} onDecide={c.decide} showDecision={!held} />}
+        {c.check && <FactsCard c={c.check} />}
+
+        <TodayChecks m={c.market} />
+      </div>
+
+      {c.check && (
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-900 bg-brand-bg/95 p-3 backdrop-blur">
+          <div className="max-w-xl mx-auto">
+            <button onClick={c.ask} disabled={!canAsk}
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-accent text-black text-base font-black uppercase tracking-tight disabled:opacity-40">
+              {c.busy === 'ask' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+              {c.read ? 'Asked · tap a symbol for a new check' : held ? 'Re-check my trade' : 'Ask Claude'}
+            </button>
+            {c.market && !c.market.hasApiKey && <p className="mt-1 text-center text-[10px] text-data-red">ANTHROPIC_API_KEY is not set in Vercel yet.</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -8,6 +8,7 @@ import { finalizeGroup, groupFillKeys, patchStopColumns } from './finalize';
 import { istDateKey, istDateTime, istTime } from './time';
 import type { OrderSnapIn, TradeGroup, TradeMeta, TrackedOrder } from './types';
 import type { LiveStatus } from './schema';
+import { checksForTrade } from '../copilot/store';
 
 export interface SyncDeps {
   dhan: { orders(): Promise<any[]>; trades(): Promise<any[]>; positions(): Promise<any[]> };
@@ -155,7 +156,13 @@ export async function runSync(deps: SyncDeps, opts: { includeRecent?: boolean; f
         }
       } else if (opts.finalize !== false) {
         try {
-          const r = await finalizeGroup(deps.sheets, g, computePnl(g), meta);
+          // co-pilot: copy the matching check onto the trade's rows (never blocks logging)
+          let link: Awaited<ReturnType<typeof checksForTrade>> | null = null;
+          try {
+            link = await checksForTrade(deps.sheets, { date: g.date, symbol: g.symbol, direction: g.direction, entryTs: g.entryTs, lastTs: g.lastTs });
+          } catch (e) { warnings.push(`Co-pilot checks not linked for ${g.symbol}: ${(e as Error).message}`); }
+          const r = await finalizeGroup(deps.sheets, g, computePnl(g), meta, link?.columns ?? {});
+          if (r === 'LOGGED' && link) await link.tag(g.id).catch((e: Error) => warnings.push(`Co-pilot checks not tagged for ${g.symbol}: ${e.message}`));
           finalized.push({ id: g.id, symbol: g.symbol, result: r });
           if (r === 'LOGGED') status = 'LOGGED';
           else if (r === 'DUPLICATE') { status = 'DUPLICATE'; note = 'Already in the sheet (logged by hand?), not written again'; }
