@@ -60,7 +60,7 @@ export const MONTHLY_CONTEXT_COLS = [
 export const MONTHLY_COPILOT_COLS = [
   'CkTime', 'CkNiftyState', 'CkNiftyFirst5Pct', 'CkNiftyNowPct', 'CkRvolDay',
   'CkEma200_5mAtr', 'CkEma200_10mAtr', 'CkEma200_1dAtr', 'CkEma200InPath',
-  'CkEntryVsOr', 'CkPdhDistAtr', 'CkPdlDistAtr', 'CkVwapSide', 'CkRsVsNiftyPct', 'CkRs15mPct', 'CkExtAdrPct',
+  'CkEntryVsOr', 'CkPdhDistAtr', 'CkPdlDistAtr', 'CkVwapSide', 'CkRsVsNiftyPct', 'CkRs20mPct', 'CkExtAdrPct',
   'CkPocDistAtr', 'CkPullbackNo', 'CkVolTrend', 'CkPushVsPullVol', 'CkClimax', 'CkFailedBreak',
   'CkStopVsAtr2', 'CkRoomVsStop', 'CkEstChargesInr', 'CkFirstTradeLost', 'CkSameSymbolStopped', 'CkMinSinceLoss',
   'CkId', 'CkVerdict', 'CkLines', 'CkWatch', 'CkDecision', 'CkPromptVersion', 'CkModel', 'CkCostInr',
@@ -104,7 +104,7 @@ export const COPILOT_CHECK_COLS = [
   // stock
   'RvolDay', 'Atr10m', 'Atr2', 'Ema200_5mAtr', 'Ema200_10mAtr', 'Ema200_1dAtr', 'Ema200InPath',
   'OrHigh', 'OrLow', 'EntryVsOr', 'PdhDistAtr', 'PdlDistAtr', 'VwapSide', 'VwapHeldMin',
-  'RsVsNiftyPct', 'Rs15mPct', 'ExtAdrPct', 'PocPrice', 'PocDistAtr', 'PullbackNo', 'VolTrend', 'PushVsPullVol',
+  'RsVsNiftyPct', 'Rs20mPct', 'ExtAdrPct', 'PocPrice', 'PocDistAtr', 'PullbackNo', 'VolTrend', 'PushVsPullVol',
   'Climax', 'FailedBreak',
   // plan
   'StopDist', 'StopVsAtr2', 'SizeQty', 'RiskInr', 'RoomAtr', 'RoomVsStop', 'EstChargesInr',
@@ -121,6 +121,8 @@ export const COPILOT_CHECK_COLS = [
   // what happened next (Backfill)
   'AfterMfeR30', 'AfterMaeR30', 'AfterHitStop',
   'Notes', 'PayloadJson',
+  // added later (land on the right of existing tabs)
+  'RoomTo', 'DayHigh', 'DayLow', 'Ema200_5m', 'Ema200_10m', 'Ema200_1d',
 ] as const;
 
 /** live-trades.Status values */

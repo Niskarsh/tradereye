@@ -94,7 +94,7 @@ const CK_FROM: Record<string, string> = {
   CkTime: 'Time', CkNiftyState: 'NiftyState', CkNiftyFirst5Pct: 'NiftyFirst5Pct', CkNiftyNowPct: 'NiftyNowPct', CkRvolDay: 'RvolDay',
   CkEma200_5mAtr: 'Ema200_5mAtr', CkEma200_10mAtr: 'Ema200_10mAtr', CkEma200_1dAtr: 'Ema200_1dAtr', CkEma200InPath: 'Ema200InPath',
   CkEntryVsOr: 'EntryVsOr', CkPdhDistAtr: 'PdhDistAtr', CkPdlDistAtr: 'PdlDistAtr', CkVwapSide: 'VwapSide',
-  CkRsVsNiftyPct: 'RsVsNiftyPct', CkRs15mPct: 'Rs15mPct', CkExtAdrPct: 'ExtAdrPct', CkPocDistAtr: 'PocDistAtr',
+  CkRsVsNiftyPct: 'RsVsNiftyPct', CkRs20mPct: 'Rs20mPct', CkExtAdrPct: 'ExtAdrPct', CkPocDistAtr: 'PocDistAtr',
   CkPullbackNo: 'PullbackNo', CkVolTrend: 'VolTrend', CkPushVsPullVol: 'PushVsPullVol', CkClimax: 'Climax', CkFailedBreak: 'FailedBreak',
   CkStopVsAtr2: 'StopVsAtr2', CkRoomVsStop: 'RoomVsStop', CkEstChargesInr: 'EstChargesInr', CkFirstTradeLost: 'FirstTradeLost',
   CkSameSymbolStopped: 'SameSymbolStopped', CkMinSinceLoss: 'MinSinceLoss', CkId: 'CheckId', CkVerdict: 'Verdict',

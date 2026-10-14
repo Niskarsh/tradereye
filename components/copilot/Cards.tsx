@@ -94,15 +94,17 @@ export function FactsCard({ c }: { c: CheckResp }) {
       <Group title="Stock">
         <Row label="Rvol (TradingView)" value={fmt(f.RvolDay, 3)} />
         <Row label="ATR 10m / 2x" value={`${fmt(f.Atr10m)} / ${fmt(f.Atr2)}`} />
-        <Row label="200 EMA 5m · 10m · 1D" value={`${fmt(f.Ema200_5mAtr)} · ${fmt(f.Ema200_10mAtr)} · ${fmt(f.Ema200_1dAtr)}`} hint="ATR, + above" />
-        <Row label="Opening range" value={f.OrHigh !== undefined ? `${f.EntryVsOr} ${fmt(f.OrLow)}–${fmt(f.OrHigh)}` : '–'} />
+        <Row label="200 EMA 5m · 10m · 1D" value={`${fmt(f.Ema200_5m)} · ${fmt(f.Ema200_10m)} · ${fmt(f.Ema200_1d)}`} />
+        <Row label="  distance" value={`${fmt(f.Ema200_5mAtr)} · ${fmt(f.Ema200_10mAtr)} · ${fmt(f.Ema200_1dAtr)}`} hint="ATR, + above" />
+        <Row label="Day high / low" value={`${fmt(f.DayHigh)} / ${fmt(f.DayLow)}`} />
+        <Row label="First 10-min candle" value={f.OrHigh !== undefined ? `${fmt(f.OrLow)}–${fmt(f.OrHigh)} · price ${String(f.EntryVsOr).toLowerCase()}` : '–'} />
         <Row label="Prev day high / low" value={`${fmt(f.PdhDistAtr)} / ${fmt(f.PdlDistAtr)}`} hint="ATR" />
         <Row label="VWAP control" value={f.VwapSide ? `${f.VwapSide.toLowerCase()} · ${fmt(f.VwapHeldMin)} min` : '–'} />
-        <Row label="vs Nifty (day / 15m)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs15mPct, 2, '%')}`} />
+        <Row label="vs Nifty (day / last 2 candles)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs20mPct, 2, '%')}`} />
         <Row label="Extension from open" value={f.ExtAdrPct !== undefined ? `${signed(f.ExtAdrPct, 0, '%')} of ADR` : '–'} />
         <Row label="POC" value={f.PocPrice !== undefined ? `${fmt(f.PocPrice)} (${fmt(f.PocDistAtr)} ATR)` : '–'} hint="approx." />
-        <Row label="Pullback no." value={fmt(f.PullbackNo)} />
-        <Row label="Volume trend / push÷pull" value={`${f.VolTrend?.toLowerCase() ?? '–'} / ${fmt(f.PushVsPullVol)}`} />
+        <Row label="Pullback no." value={fmt(f.PullbackNo)} hint="10m candles" />
+        <Row label="Volume trend / push÷pull" hint="10m" value={`${f.VolTrend?.toLowerCase() ?? '–'} / ${fmt(f.PushVsPullVol)}`} />
         <Row label="Climax / failed break" value={`${f.Climax || '–'} / ${f.FailedBreak || '–'}`} />
       </Group>
 
@@ -110,7 +112,8 @@ export function FactsCard({ c }: { c: CheckResp }) {
         <Group title="Plan">
           <Row label="Stop distance" value={`${fmt(f.StopDist)} (${fmt(f.StopVsAtr2)}× of 2ATR)`} />
           <Row label="Size / risk" value={`${fmt(f.SizeQty)} sh / ₹${fmt(f.RiskInr, 0)}`} />
-          <Row label="Room to next obstacle" value={f.RoomAtr !== undefined ? `${fmt(f.RoomAtr)} ATR · ${fmt(f.RoomVsStop)}× stop` : '–'} />
+          <Row label="Next obstacle" value={f.RoomTo ?? '–'} />
+        <Row label="  room" value={f.RoomAtr !== undefined ? `${fmt(f.RoomAtr)} ATR · ${fmt(f.RoomVsStop)}× stop` : '–'} />
           <Row label="Est. charges" value={f.EstChargesInr !== undefined ? `₹${fmt(f.EstChargesInr, 0)}` : '–'} />
         </Group>
       )}

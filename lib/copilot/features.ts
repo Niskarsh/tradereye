@@ -43,12 +43,14 @@ export interface Facts {
   OrHigh?: number; OrLow?: number; EntryVsOr?: 'ABOVE' | 'INSIDE' | 'BELOW';
   PdhDistAtr?: number; PdlDistAtr?: number;
   VwapSide?: 'BUYERS' | 'SELLERS'; VwapHeldMin?: number;
-  RsVsNiftyPct?: number; Rs15mPct?: number; ExtAdrPct?: number;
+  RsVsNiftyPct?: number; Rs20mPct?: number; ExtAdrPct?: number;
   PocPrice?: number; PocDistAtr?: number;
   PullbackNo?: number; VolTrend?: 'RISING' | 'FALLING' | 'FLAT'; PushVsPullVol?: number;
   Climax: string; FailedBreak: string;
   StopDist?: number; StopVsAtr2?: number; SizeQty?: number; RiskInr?: number;
-  RoomAtr?: number; RoomVsStop?: number; EstChargesInr?: number;
+  RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
+  /** Raw price levels, so the card can be read straight against the chart. */
+  Ema200_5m?: number; Ema200_10m?: number; Ema200_1d?: number; DayHigh?: number; DayLow?: number;
   /** Hard rules of yours that are broken (shown red on the page). */
   flags: string[];
   /** Values that could not be computed, and why. */
@@ -146,13 +148,13 @@ export function pullbackNumber(bars: Bar[], dir: 1 | -1, minDepth: number): numb
 }
 
 /** The most recent climax bar in `bars`: volume at least 3x `medianVol` and a wick of at least half its range. */
-export function climax(bars: Bar[], medianVol: number, nowSec: number): string {
+export function climax(bars: Bar[], medianVol: number, nowSec: number, barSec = 60): string {
   for (let i = bars.length - 1; i >= 0; i--) {
     const b = bars[i];
     const range = b.h - b.l;
     if (!(range > 0) || !(medianVol > 0) || b.v < 3 * medianVol) continue;
     const upper = b.h - Math.max(b.o, b.c), lower = Math.min(b.o, b.c) - b.l;
-    const ago = Math.max(0, Math.round((nowSec - (b.t + 60)) / 60));
+    const ago = Math.max(0, Math.round((nowSec - (b.t + barSec)) / 60));
     if (upper >= 0.5 * range) return `TOP ${ago}m ago`;
     if (lower >= 0.5 * range) return `BOTTOM ${ago}m ago`;
   }
@@ -160,10 +162,10 @@ export function climax(bars: Bar[], medianVol: number, nowSec: number): string {
 }
 
 /**
- * A failed break in the last `lookback` bars: a bar made a new high (low) beyond everything before it, and within 3
+ * A failed break in `window`: a bar made a new high (low) beyond everything before it, and within `within` more
  * bars a close came back inside, and price is still back inside now. `prior` = the bars before the window.
  */
-export function failedBreak(prior: Bar[], window: Bar[], price: number, which: 'HIGH' | 'LOW' | 'BOTH' = 'BOTH'): string {
+export function failedBreak(prior: Bar[], window: Bar[], price: number, which: 'HIGH' | 'LOW' | 'BOTH' = 'BOTH', within = 3): string {
   const all = [...prior, ...window];
   const off = prior.length;
   let found = '';
@@ -173,20 +175,16 @@ export function failedBreak(prior: Bar[], window: Bar[], price: number, which: '
     const before = all.slice(0, idx);
     const hi = Math.max(...before.map((b) => b.h)), lo = Math.min(...before.map((b) => b.l));
     const b = all[idx];
-    const next = all.slice(idx, Math.min(all.length, idx + 4));
+    const next = all.slice(idx, Math.min(all.length, idx + within + 1));
     if (which !== 'LOW' && b.h > hi && next.some((x) => x.c < hi) && price < hi) found = 'HIGH';
     if (which !== 'HIGH' && b.l < lo && next.some((x) => x.c > lo) && price > lo) found = 'LOW';
   }
   return found;
 }
 
-/** Running VWAP the way a 10-minute chart draws it, evaluated after each 1-minute bar. */
-function vwap10At(bars: Bar[], uptoIdx: number): number | undefined {
-  const tens = tenMinuteBars([{ date: '', bars: bars.slice(0, uptoIdx + 1) }]);
-  let pv = 0, vv = 0;
-  for (const t of tens) { pv += ((t.h + t.l + t.c) / 3) * t.v; vv += t.v; }
-  return vv > 0 ? pv / vv : undefined;
-}
+/** A 10-minute bar in the shape the helpers above take (t = bar start). */
+export const asBar = (b: Bar10): Bar => ({ t: b.start, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
+
 
 export function niftyState(first5: number | undefined, now: number | undefined, last10: number | undefined, th: number, asOfMin: number): NiftyState {
   if (asOfMin < SESSION_OPEN_MIN + 5) return 'OPENING';
@@ -253,19 +251,28 @@ export function computeFacts(inp: FactsInput): Facts {
     if (d * sign > 0 && Math.abs(d) <= inp.emaReachAtr) inPath.push(`${label} ${r2(Math.abs(d))}`);
     return r2(d);
   };
+  if (e5 !== undefined) f.Ema200_5m = r2(e5);
+  if (e10 !== undefined) f.Ema200_10m = r2(e10);
+  if (e1d !== undefined) f.Ema200_1d = r2(e1d);
   f.Ema200_5mAtr = emaDist(e5, '5m');
   f.Ema200_10mAtr = emaDist(e10, '10m');
   f.Ema200_1dAtr = emaDist(e1d, '1D');
   f.Ema200InPath = inPath.join(', ');
   if (inPath.length) f.flags.push(`200 EMA in the path within ${inp.emaReachAtr} ATR (${f.Ema200InPath})`);
 
-  // ---- opening range (the first 5-minute candle, complete only after 09:20)
-  const orBars = bars.filter((b) => minuteOf(b) < SESSION_OPEN_MIN + 5);
-  if (startsAtOpen && orBars.length >= 4 && asOfMin >= SESSION_OPEN_MIN + 5) {
+  // ---- the first 10-minute candle of the session (09:15-09:24, complete from 09:25), as on his 10-minute chart
+  // (the Nifty first-5-minute test above stays: that is his rule, not a chart candle)
+  const orBars = bars.filter((b) => minuteOf(b) < SESSION_OPEN_MIN + 10);
+  if (startsAtOpen && orBars.length >= 8 && asOfMin >= SESSION_OPEN_MIN + 10) {
     f.OrHigh = Math.max(...orBars.map((b) => b.h));
     f.OrLow = Math.min(...orBars.map((b) => b.l));
     f.EntryVsOr = price > f.OrHigh ? 'ABOVE' : price < f.OrLow ? 'BELOW' : 'INSIDE';
-  } else f.missing.push('opening range (needs the 09:15-09:19 candles, complete after 09:20)');
+  } else f.missing.push('first 10-min candle (09:15-09:24, complete from 09:25)');
+
+  // ---- today's 10-minute bars, as the chart shows them (the last one may still be forming)
+  const tens = tenMinuteBars([{ date: day.date, bars }]);
+  const tensDone = tens.filter((b) => b.end <= nowSec);
+  const tenBars = tens.map(asBar), doneBars = tensDone.map(asBar);
 
   // ---- previous day high / low (official daily candle)
   const n = daily.c.length;
@@ -277,24 +284,21 @@ export function computeFacts(inp: FactsInput): Facts {
   // ---- VWAP: who has been in control, and for how long
   if (enr.vwapDistPct !== undefined) {
     f.VwapSide = enr.vwapDistPct >= 0 ? 'BUYERS' : 'SELLERS';
-    let held = 0;
-    for (let i = bars.length - 1; i >= 0; i--) {
-      const v = vwap10At(bars, i);
-      if (v === undefined) break;
-      const side = bars[i].c >= v ? 'BUYERS' : 'SELLERS';
-      if (side !== f.VwapSide) break;
-      held++;
-    }
-    f.VwapHeldMin = held;
+    // how long price has closed on that side, counted in 10-minute candles (shown in minutes)
+    let held = 0, pv = 0, vv = 0;
+    const sides = tens.map((t) => { pv += ((t.h + t.l + t.c) / 3) * t.v; vv += t.v; return vv > 0 && t.c >= pv / vv ? 'BUYERS' : 'SELLERS'; });
+    for (let i = sides.length - 1; i >= 0 && sides[i] === f.VwapSide; i--) held++;
+    f.VwapHeldMin = held * 10;
   }
 
   // ---- relative strength vs Nifty 500
   const open = startsAtOpen ? bars[0].o : undefined;
   if (open !== undefined && f.NiftyNowPct !== undefined) f.RsVsNiftyPct = r4((price / open - 1) * 100 - f.NiftyNowPct);
-  if (bars.length > 15 && nBars.length > 15) {
-    const s15 = (bars[bars.length - 1].c / bars[bars.length - 16].c - 1) * 100;
-    const n15 = (nBars[nBars.length - 1].c / nBars[nBars.length - 16].c - 1) * 100;
-    f.Rs15mPct = r4(s15 - n15);
+  // last 20 minutes = the last two 10-minute candles
+  if (bars.length > 20 && nBars.length > 20) {
+    const s20 = (bars[bars.length - 1].c / bars[bars.length - 21].c - 1) * 100;
+    const n20 = (nBars[nBars.length - 1].c / nBars[nBars.length - 21].c - 1) * 100;
+    f.Rs20mPct = r4(s20 - n20);
   }
 
   // ---- extension from the open as a share of the 10-day average daily range
@@ -314,23 +318,25 @@ export function computeFacts(inp: FactsInput): Facts {
   // ---- move structure: pullbacks follow the trade for momentum, the stock's own run for reversal
   if (atr) {
     const legDir = (inp.setup === 'MOMENTUM' ? sign : -sign) as 1 | -1;
-    f.PullbackNo = pullbackNumber(bars, legDir, 0.5 * atr);
+    f.PullbackNo = pullbackNumber(tenBars, legDir, 0.5 * atr);
   }
 
   // ---- volume behaviour
-  const fives = nMinuteBars([{ date: day.date, bars }], 5).filter((b) => b.end <= nowSec);
-  if (fives.length >= 6) {
-    const last = fives.slice(-3).reduce((s, b) => s + b.v, 0), before = fives.slice(-6, -3).reduce((s, b) => s + b.v, 0);
+  // last two completed 10-minute candles vs the two before (needs four: from 09:55)
+  if (tensDone.length >= 4) {
+    const last = tensDone.slice(-2).reduce((s, b) => s + b.v, 0), before = tensDone.slice(-4, -2).reduce((s, b) => s + b.v, 0);
     if (before > 0) { const ratio = last / before; f.VolTrend = ratio > 1.2 ? 'RISING' : ratio < 0.8 ? 'FALLING' : 'FLAT'; }
-  }
-  const withBars = bars.filter((b) => (b.c - b.o) * sign > 0), againstBars = bars.filter((b) => (b.c - b.o) * sign < 0);
+  } else f.missing.push('volume trend (needs four completed 10-min candles, from 09:55)');
+  const withBars = tenBars.filter((b) => (b.c - b.o) * sign > 0), againstBars = tenBars.filter((b) => (b.c - b.o) * sign < 0);
   const avgV = (a: Bar[]) => (a.length ? a.reduce((s, b) => s + b.v, 0) / a.length : 0);
-  if (withBars.length >= 3 && againstBars.length >= 3 && avgV(againstBars) > 0) f.PushVsPullVol = r2(avgV(withBars) / avgV(againstBars));
+  if (withBars.length >= 2 && againstBars.length >= 2 && avgV(againstBars) > 0) f.PushVsPullVol = r2(avgV(withBars) / avgV(againstBars));
 
-  // ---- climax and failed break in the last 10 minutes
-  const med = median(bars.map((b) => b.v));
-  f.Climax = climax(bars.slice(-10), med, nowSec);
-  f.FailedBreak = failedBreak(bars.slice(0, -10), bars.slice(-10), price);
+  // ---- climax (last 3 completed 10-min candles, against the median 10-min volume of the last two sessions and
+  // today) and a failed break of the day's high/low (last 3 candles, closed back inside on that candle or the next)
+  const prevSessions = stock.filter((x) => x.date < inp.date).slice(-2);
+  const med = median([...tenMinuteBars(prevSessions).map((b) => b.v), ...tensDone.map((b) => b.v)]);
+  f.Climax = climax(doneBars.slice(-3), med, nowSec, 600);
+  f.FailedBreak = failedBreak(tenBars.slice(0, -3), tenBars.slice(-3), price, 'BOTH', 1);
 
   // ---- plan
   if (inp.plannedStop !== undefined && inp.plannedStop > 0) {
@@ -351,21 +357,33 @@ export function computeFacts(inp: FactsInput): Facts {
   }
 
   // ---- room to the next obstacle (reversal: distance to the POC, the target)
+  // Only real levels count: the day's high/low, the previous day's high/low and the 200 EMAs. The first 5-minute
+  // candle's edges are NOT obstacles (often a small candle, and usually already crossed). The level's name and price
+  // go to Claude and onto the card, so it can never be mislabelled.
+  const dayHi = Math.max(...bars.map((b) => b.h)), dayLo = Math.min(...bars.map((b) => b.l));
+  f.DayHigh = r2(dayHi); f.DayLow = r2(dayLo);
   if (atr) {
     let room: number | undefined;
     if (inp.setup === 'REVERSAL') {
-      if (poc !== undefined && (poc - price) * sign > 0) room = Math.abs(poc - price);
-      else room = 0;
+      if (poc !== undefined && (poc - price) * sign > 0) { room = Math.abs(poc - price); f.RoomTo = `POC ${r2(poc)}`; }
+      else { room = 0; f.RoomTo = poc !== undefined ? `POC ${r2(poc)} is behind the trade` : 'no POC'; }
     } else {
-      // the day's own high/low only counts when price is well away from it (at the extreme it IS the breakout)
-      const dayHi = Math.max(...bars.map((b) => b.h)), dayLo = Math.min(...bars.map((b) => b.l));
-      const levels = [
-        Math.abs(dayHi - price) > 0.5 * atr ? dayHi : NaN, Math.abs(price - dayLo) > 0.5 * atr ? dayLo : NaN,
-        n ? daily.h[n - 1] : NaN, n ? daily.l[n - 1] : NaN,
-        f.OrHigh ?? NaN, f.OrLow ?? NaN, e5 ?? NaN, e10 ?? NaN, e1d ?? NaN,
-      ].filter((x) => Number.isFinite(x) && (x - price) * sign > atr * 0.05);
-      if (levels.length) room = Math.min(...levels.map((x) => Math.abs(x - price)));
-      else f.missing.push('room: no level (day extreme, PDH/PDL, opening range, 200 EMA) in the trade\'s path');
+      // at the day's extreme (within 0.5 ATR) that level IS the breakout, not an obstacle
+      const levels: { name: string; px: number }[] = [
+        { name: 'day high', px: Math.abs(dayHi - price) > 0.5 * atr ? dayHi : NaN },
+        { name: 'day low', px: Math.abs(price - dayLo) > 0.5 * atr ? dayLo : NaN },
+        { name: 'prev day high', px: n ? daily.h[n - 1] : NaN },
+        { name: 'prev day low', px: n ? daily.l[n - 1] : NaN },
+        { name: '5m 200 EMA', px: e5 ?? NaN }, { name: '10m 200 EMA', px: e10 ?? NaN }, { name: 'daily 200 EMA', px: e1d ?? NaN },
+      ].filter((x) => Number.isFinite(x.px) && (x.px - price) * sign > atr * 0.05);
+      if (levels.length) {
+        const near = levels.reduce((a, b) => (Math.abs(b.px - price) < Math.abs(a.px - price) ? b : a));
+        room = Math.abs(near.px - price);
+        f.RoomTo = `${near.name} ${r2(near.px)}`;
+      } else {
+        const atExtreme = sign === 1 ? Math.abs(dayHi - price) <= 0.5 * atr : Math.abs(price - dayLo) <= 0.5 * atr;
+        f.RoomTo = atExtreme ? `none: price is at the day's ${sign === 1 ? 'high' : 'low'} (breakout)` : 'none in the data';
+      }
     }
     if (room !== undefined) {
       f.RoomAtr = r2(room / atr);
@@ -403,7 +421,6 @@ export function computeManageFacts(inp: ManageInput): ManageFacts {
   const day = toSessions(inp.stock1m).find((s) => s.date === inp.date);
   const bars = day ? day.bars.filter((b) => b.t * 1000 < asOfMs) : [];
   const since = bars.filter((b) => b.t * 1000 >= entryMin);
-  const before = bars.filter((b) => b.t * 1000 < entryMin);
 
   const ref = inp.initialStop ?? inp.currentStop;
   const dist = ref !== undefined && Math.abs(inp.avgEntry - ref) > 0 ? Math.abs(inp.avgEntry - ref) : inp.atr10m ? inp.atr10m * 2 : undefined;
@@ -417,15 +434,20 @@ export function computeManageFacts(inp: ManageInput): ManageFacts {
   }
   if (inp.currentStop !== undefined && inp.atr10m) out.StopDistAtr = r2(Math.abs(inp.price - inp.currentStop) / inp.atr10m);
 
-  const withV = since.filter((b) => (b.c - b.o) * sign > 0).reduce((s, b) => s + b.v, 0);
-  const againstV = since.filter((b) => (b.c - b.o) * sign < 0).reduce((s, b) => s + b.v, 0);
+  // candle-by-candle checks on the 10-minute chart: the candle he entered in, and every one after
+  const tens = tenMinuteBars([{ date: inp.date, bars }]);
+  const entryBarStart = Math.floor((entryMin / 1000 - (tens[0]?.start ?? 0)) / 600) * 600 + (tens[0]?.start ?? 0);
+  const sinceT = tens.filter((b) => b.start >= entryBarStart).map(asBar);
+  const beforeT = tens.filter((b) => b.start < entryBarStart).map(asBar);
+  const withV = sinceT.filter((b) => (b.c - b.o) * sign > 0).reduce((s, b) => s + b.v, 0);
+  const againstV = sinceT.filter((b) => (b.c - b.o) * sign < 0).reduce((s, b) => s + b.v, 0);
   if (withV > 0) out.CounterVolRatio = r2(againstV / withV);
-  else if (since.length >= 3) out.missing.push('counter-volume (no candle has moved your way yet)');
+  else if (sinceT.length >= 1) out.missing.push('counter-volume (no 10-min candle has closed your way yet)');
 
-  const med = median(bars.map((b) => b.v));
-  const c = climax(since, med, asOfMs / 1000);
+  const med = median(tens.map((b) => b.v));
+  const c = climax(sinceT, med, asOfMs / 1000, 600);
   if (c && ((sign === 1 && c.startsWith('TOP')) || (sign === -1 && c.startsWith('BOTTOM')))) out.ClimaxAgainst = c;
-  out.FailedExtreme = failedBreak(before, since, inp.price, sign === 1 ? 'HIGH' : 'LOW');
+  out.FailedExtreme = failedBreak(beforeT, sinceT, inp.price, sign === 1 ? 'HIGH' : 'LOW', 1);
 
   const nDay = toSessions(inp.nifty1m).find((s) => s.date === inp.date);
   const nBars = nDay ? nDay.bars.filter((b) => b.t * 1000 < asOfMs) : [];
