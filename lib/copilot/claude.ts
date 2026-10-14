@@ -1,4 +1,4 @@
-import { GIVE_READ_TOOL, SYSTEM_PROMPT, VERDICTS, type Verdict } from './prompt';
+import { READ_SCHEMA, SYSTEM_PROMPT, VERDICTS, type Verdict } from './prompt';
 
 /**
  * One call to the Claude Messages API (plain fetch, no SDK). The API key is read on the server only and is never
@@ -16,7 +16,7 @@ const PRICES: Record<string, [number, number, number, number]> = {
 };
 
 export interface ClaudeRead {
-  verdict: Verdict; lines: string[]; watch: string;
+  verdict: Verdict | 'RAW'; lines: string[]; watch: string;
   model: string; inTokens: number; outTokens: number; costInr: number; latencyMs: number;
 }
 
@@ -42,12 +42,10 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
   const model = o.model || DEFAULT_MODEL;
   const body = {
     model,
-    max_tokens: 400,
+    max_tokens: 800,
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    tools: [GIVE_READ_TOOL],
-    // Some models reject a forced tool_choice ("tool"/"any"), so let the model choose; the system prompt tells it
-    // to answer only through give_read, and a plain JSON reply is accepted as a fallback.
-    tool_choice: { type: 'auto' },
+    // structured outputs: the reply is guaranteed to be JSON that matches READ_SCHEMA
+    output_config: { format: { type: 'json_schema', schema: READ_SCHEMA } },
     messages: [{ role: 'user', content: message }],
   };
   const t0 = now();
@@ -81,15 +79,23 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
       if (res.status === 429) throw new ClaudeError(429, 'Claude is rate limiting. Try again in a few seconds.');
       throw new ClaudeError(res.status || 502, `Claude error: ${msg}`);
     }
-    const content: { type: string; name?: string; input?: unknown; text?: string }[] = json?.content ?? [];
-    const block = content.find((c) => c.type === 'tool_use' && c.name === 'give_read');
-    const input = (block?.input ?? parseReadFromText(content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n'))) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const verdict = VERDICTS.includes(input.verdict) ? (input.verdict as Verdict) : undefined;
-    if (!verdict) throw new ClaudeError(502, 'Claude answered in an unexpected shape.');
-    const lines = (Array.isArray(input.lines) ? input.lines : []).map((l: unknown) => String(l)).filter(Boolean).slice(0, 3);
+    const content: { type: string; text?: string }[] = json?.content ?? [];
+    const replyText = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
+    const parsed = parseReadFromText(replyText);
+    const v = String(parsed.verdict ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+    let verdict: Verdict | 'RAW' = (VERDICTS as readonly string[]).includes(v) ? (v as Verdict) : 'RAW';
+    let lines = (Array.isArray(parsed.lines) ? parsed.lines : []).map((l: unknown) => String(l)).filter(Boolean).slice(0, 3);
+    let watch = String(parsed.watch ?? '');
+    // Never throw away a paid answer: if it did not parse, show Claude's text as it is.
+    if (verdict === 'RAW' || !lines.length) {
+      verdict = 'RAW';
+      const why = json?.stop_reason === 'max_tokens' ? ' (cut off: answer too long)' : json?.stop_reason === 'refusal' ? ' (Claude declined)' : '';
+      lines = [replyText ? replyText.slice(0, 800) : `Claude returned no text${why}.`];
+      watch = why ? why.trim() : '';
+    }
     const u = json?.usage ?? {};
     return {
-      verdict, lines, watch: String(input.watch ?? ''), model,
+      verdict, lines, watch, model,
       inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
       outTokens: u.output_tokens ?? 0,
       costInr: costInr(model, u, o.usdInr ?? 88),
