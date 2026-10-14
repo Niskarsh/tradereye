@@ -5,7 +5,7 @@ import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1.6';
+export const PROMPT_VERSION = 'copilot-v1.7';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -42,9 +42,14 @@ Look in this order and stop when you have the three most important things:
 He trades from the 10-minute chart: every candle-based fact (pullbacks, volume trend, push/pull volume, climax, failed break, VWAP control) is measured on 10-minute candles, and the candle lines are 10-minute candles (the last one may still be forming). They are there so you can confirm or question the facts (for example, the last three candles are wicks against him). Do not re-describe candles he can see on his own chart.
 
 VERDICT
-- WARNING: one of his own rules is broken, or two strong facts point against this trade.
-- SUPPORTS: the setup's key evidence is present and nothing material is against it.
-- MIXED: anything else. Do not hide in MIXED; if the case is clear, say SUPPORTS or WARNING.
+Most real trades have one or two things against them; that alone is NOT a warning. Judge the setup's core conditions:
+- Momentum core: Nifty moving his way (TRENDING in his direction), the stock busier than usual (RvolBusy YES), VWAP control on his side, and room to the next obstacle (RoomAtr of about 1 or more).
+- Reversal core: the stock genuinely stretched from the POC with room back to it, not busier than usual (RvolBusy NO), and Nifty not pushing hard in the stock's direction.
+- WARNING: one of his own rules is broken (anything in FLAGS), or a core condition is clearly missing (for example momentum while Nifty is FLAT, FLIPPED or moving against him, or almost no room to the next obstacle).
+- SUPPORTS: the core conditions are present and FLAGS is none, even if one or two smaller things are against; name the most important of those in a line.
+- MIXED: the core conditions are only partly there, or they are there but one strong sign cuts against them (a climax against him, a failed break, volume fading on his pushes).
+Use each label when it fits; do not lean toward WARNING to be safe.
+If StopAssumed is YES he has not typed his stop: StopDist is only his 2x ATR cap, his real stop is usually much tighter, so never judge the trade on stop size or risk; judge room in ATR.
 (These three are for ENTRY. MANAGE uses HOLD_STEADY / WEAKENING / WARNING as defined above.)
 
 WRITING
@@ -86,6 +91,7 @@ export interface MessageInput {
   behaviour: Behaviour;
   todayTrades: { symbol: string; direction: string; netPnl: number; exitType: string }[];
   stock1m: Candles; nifty1m: Candles; date: string; asOfMs: number;
+  live?: boolean;          // false = the session is closed (a practice read at the close)
 }
 
 const fmt = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(2) : n.toPrecision(5).replace(/\.?0+$/, ''));
@@ -122,6 +128,7 @@ export function buildMessage(m: MessageInput): string {
   });
   const parts = [
     `Mode ${m.mode} · ${m.time} IST · ${m.direction} · ${m.setup} · ${m.symbol} · price ${m.price} · risk limit ${m.riskInr} INR`,
+    ...(m.live === false ? ['TEST READ: the session is closed and this is a practice read as of the close. Judge the setup as if it were live; do not mention the time or that it is late.'] : []),
     `FACTS ${JSON.stringify(compact(facts as Record<string, unknown>))}`,
   ];
   if (m.manage) { const { missing: mm, ...mf } = m.manage; parts.push(`IN_TRADE ${JSON.stringify(compact(mf as Record<string, unknown>))}`); if (mm.length) missing.push(...mm); }

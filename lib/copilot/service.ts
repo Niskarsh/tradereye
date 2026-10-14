@@ -202,7 +202,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   const todayTrades = trades.filter((t) => t.date === sess.date).map((t) => ({ symbol: t.symbol, direction: t.direction, netPnl: t.netPnl, exitType: t.exitType }));
   const payload = buildMessage({
     mode, time: time.slice(0, 5), direction, setup: req.setup, symbol, riskInr: s.riskInr, price,
-    facts, manage, behaviour, todayTrades, stock1m, nifty1m, date: sess.date, asOfMs: sess.asOfMs,
+    facts, manage, behaviour, todayTrades, stock1m, nifty1m, date: sess.date, asOfMs: sess.asOfMs, live: sess.live,
   });
 
   const { flags, missing, ...plain } = facts;

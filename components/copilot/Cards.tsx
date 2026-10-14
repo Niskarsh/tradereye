@@ -111,10 +111,10 @@ export function FactsCard({ c }: { c: CheckResp }) {
 
       {c.mode === 'ENTRY' && (
         <Group title="Plan">
-          <Row label="Stop distance" value={`${fmt(f.StopDist)} (${fmt(f.StopVsAtr2)}× of 2ATR)`} />
+          <Row label="Stop distance" value={f.StopAssumed ? `${fmt(f.StopDist)} (2×ATR cap: type your stop)` : `${fmt(f.StopDist)} (${fmt(f.StopVsAtr2)}× of 2ATR)`} />
           <Row label="Size / risk" value={`${fmt(f.SizeQty)} sh / ₹${fmt(f.RiskInr, 0)}`} />
           <Row label="Next obstacle" value={f.RoomTo ?? '–'} />
-        <Row label="  room" value={f.RoomAtr !== undefined ? `${fmt(f.RoomAtr)} ATR · ${fmt(f.RoomVsStop)}× stop` : '–'} />
+        <Row label="  room" value={f.RoomAtr !== undefined ? `${fmt(f.RoomAtr)} ATR${f.RoomVsStop !== undefined ? ` · ${fmt(f.RoomVsStop)}× stop` : ''}` : '–'} />
           <Row label="Est. charges" value={f.EstChargesInr !== undefined ? `₹${fmt(f.EstChargesInr, 0)}` : '–'} />
         </Group>
       )}

@@ -52,6 +52,8 @@ export interface Facts {
   PullbackNo?: number; VolTrend?: 'RISING' | 'FALLING' | 'FLAT'; PushVsPullVol?: number;
   Climax: string; FailedBreak: string;
   StopDist?: number; StopVsAtr2?: number; SizeQty?: number; RiskInr?: number;
+  /** YES when he typed no stop: StopDist is then his 2x ATR cap (worst case), not his real stop. */
+  StopAssumed?: 'YES';
   RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
   /** Raw price levels, so the card can be read straight against the chart. */
   Ema200_5m?: number; Ema200_10m?: number; Ema200_1d?: number; DayHigh?: number; DayLow?: number;
@@ -356,7 +358,7 @@ export function computeFacts(inp: FactsInput): Facts {
     if (wrongSide) f.flags.push('Stop is on the wrong side of the price');
     else f.StopDist = r2(Math.abs(price - inp.plannedStop));
   }
-  if (f.StopDist === undefined && f.Atr2) f.StopDist = r2(f.Atr2);
+  if (f.StopDist === undefined && f.Atr2) { f.StopDist = r2(f.Atr2); f.StopAssumed = 'YES'; }
   if (f.StopDist && f.Atr2) {
     f.StopVsAtr2 = r2(f.StopDist / f.Atr2);
     if (f.StopVsAtr2 > 1.0001) f.flags.push('Stop wider than 2x ATR');
@@ -399,7 +401,8 @@ export function computeFacts(inp: FactsInput): Facts {
     }
     if (room !== undefined) {
       f.RoomAtr = r2(room / atr);
-      if (f.StopDist) f.RoomVsStop = r2(room / f.StopDist);
+      // against an assumed 2x ATR stop the ratio is meaningless (his real stops are much tighter): room in ATR only
+      if (f.StopDist && !f.StopAssumed) f.RoomVsStop = r2(room / f.StopDist);
     }
   }
   return f;

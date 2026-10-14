@@ -447,3 +447,24 @@ test('his record in a setup is not sent to Claude below 10 trades', () => {
   assert.doesNotMatch(mk(6), /SetupWinRate|SetupAvgPnl/);
   assert.match(mk(12), /"SetupTrades":12/);
 });
+
+test('no stop typed: the 2x ATR cap is marked as assumed and not used for the room ratio', () => {
+  const assumed = computeFacts(base());
+  assert.equal(assumed.StopAssumed, 'YES');
+  assert.equal(assumed.RoomVsStop, undefined);
+  const real = computeFacts(base({ plannedStop: 303.9, daily: dailyFlat(800, 306) }));
+  assert.equal(real.StopAssumed, undefined);
+  assert.ok(real.RoomVsStop !== undefined, `room ${real.RoomAtr} / to ${real.RoomTo}`);
+});
+
+test('a closed-session check is marked as a practice read, and the verdict rules do not default to WARNING', () => {
+  const inp = base();
+  const msg = buildMessage({
+    mode: 'ENTRY', time: '15:30', direction: 'SHORT', setup: 'MOMENTUM', symbol: 'X', riskInr: 300, price: 304.6, facts: computeFacts(inp),
+    behaviour: computeBehaviour([], { today: inp.date, nowMs: inp.nowMs, symbol: 'X', direction: 'SHORT', setup: 'MOMENTUM', openPositions: 0 }),
+    todayTrades: [], stock1m: inp.stock1m, nifty1m: inp.nifty1m, date: inp.date, asOfMs: inp.nowMs, live: false,
+  });
+  assert.match(msg, /TEST READ/);
+  assert.match(SYSTEM_PROMPT, /that alone is NOT a warning/);
+  assert.match(SYSTEM_PROMPT, /StopAssumed is YES/);
+});
