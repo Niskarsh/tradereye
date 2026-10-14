@@ -59,7 +59,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export function FactsCard({ c, onUseStop }: { c: CheckResp; onUseStop?: (stop: number) => void }) {
+export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?: (stop: number) => void; onTryAlt?: (a: AltResp) => void }) {
   const f = c.facts, b = c.behaviour, m = c.manage;
   return (
     <div className="space-y-3">
@@ -73,6 +73,34 @@ export function FactsCard({ c, onUseStop }: { c: CheckResp; onUseStop?: (stop: n
         </ul>
       )}
       {c.notes.length > 0 && <p className="text-[11px] text-zinc-500">{c.notes.join(' ')}</p>}
+
+      {c.mode === 'ENTRY' && (
+        <section className="rounded-2xl border border-zinc-800 bg-brand-card px-4 py-3 space-y-2">
+          {f.SetupByMove && f.SetupByMove !== c.setup && (
+            <p className="text-xs font-bold text-brand-accent">
+              By today&apos;s move this {c.direction.toLowerCase()} is a {f.SetupByMove.toLowerCase()} trade, not a {c.setup.toLowerCase()}.
+            </p>
+          )}
+          <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Fits the data now</p>
+          {c.fitsNow.length === 0
+            ? <p className="text-xs text-zinc-400">No setup has its core conditions met right now.{f.CoreMissing ? ` Yours is missing: ${f.CoreMissing}.` : ''}</p>
+            : (
+              <div className="flex flex-wrap gap-2">
+                {c.fitsNow.map((x) => {
+                  const mine = x.direction === c.direction && x.setup === c.setup;
+                  return (
+                    <button key={`${x.setup}${x.direction}`} disabled={mine || !onTryAlt}
+                      onClick={() => onTryAlt?.({ direction: x.direction, setup: x.setup, stop: x.stop, reason: '' })}
+                      className={`rounded-xl border px-3 py-2 text-left text-xs ${mine ? 'border-data-green/60 text-data-green' : 'border-zinc-700 text-zinc-200'}`}>
+                      <span className="font-black">{x.setup.toLowerCase()} {x.direction.toLowerCase()}{mine ? ' (yours)' : ''}</span>
+                      <span className="block font-mono text-[10px] text-zinc-400">{x.stop !== undefined ? `stop ${x.stop.toFixed(2)} · ` : ''}room {x.roomAtr ?? '–'} ATR</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+        </section>
+      )}
 
       {m && (
         <Group title="In trade">

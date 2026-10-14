@@ -22,6 +22,7 @@ export interface CheckResp {
   checkId: string; mode: 'ENTRY' | 'MANAGE'; date: string; time: string; live: boolean;
   symbol: string; direction: Dir; setup: SetupT; price: number; priceSource: string;
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; notes: string[]; asksLeft: number;
+  fitsNow: { direction: Dir; setup: SetupT; stop?: number; roomTo?: string; roomAtr?: number }[];
 }
 
 export interface AltResp { direction: Dir; setup: SetupT; stop?: number; reason: string }

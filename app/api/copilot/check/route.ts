@@ -31,8 +31,8 @@ export async function POST(req: Request) {
     await appendCheck(sheets, r.date, r.row);
     remember(r.checkId, r.row, r.payload);
     const { rows } = await readChecks(sheets, r.date).catch(() => ({ rows: [] as { o: Record<string, string> }[] }));
-    const { payload, row, ...card } = r;
-    void payload; void row;
+    const { payload, row, alternatives, ...card } = r;
+    void payload; void row; void alternatives;
     return NextResponse.json({ ...card, asksLeft: Math.max(0, settings().dailyLimit - askedToday(rows, r.date)) });
   } catch (e) {
     if (e instanceof Error && !('status' in e) && /not in Dhan|No price/.test(e.message)) return NextResponse.json({ error: 'NOT_FOUND', message: e.message }, { status: 404 });
