@@ -61,7 +61,7 @@ function relVolume(sessions: Session[], date: string, toMinExcl: number): number
  * 10 sessions. Early in the day this is small (about 0.1 at 09:20 on a normal day), which is why a
  * ">0.1 at the open" rule means "busier than usual". Needs >= 5 prior sessions.
  */
-function relVolumeDay(sessions: Session[], date: string, toMinExcl: number): number | undefined {
+export function relVolumeDay(sessions: Session[], date: string, toMinExcl: number): number | undefined {
   if (toMinExcl <= SESSION_OPEN_MIN) return undefined;
   const today = sessions.find((s) => s.date === date);
   if (!today) return undefined;
@@ -89,9 +89,9 @@ export function volumeDiagnostics(sessions: Session[], date: string, entryMinOfD
   return { today: today ? one(today) : undefined, priors: sessions.filter((x) => x.date < date).slice(-10).map(one) };
 }
 
-interface Bar10 { start: number; end: number; o: number; h: number; l: number; c: number; v: number }
+export interface Bar10 { start: number; end: number; o: number; h: number; l: number; c: number; v: number }
 
-function tenMinuteBars(sessions: Session[]): Bar10[] {
+export function tenMinuteBars(sessions: Session[]): Bar10[] {
   const out: Bar10[] = [];
   for (const s of sessions) {
     const buckets = new Map<number, Bar[]>();
@@ -114,7 +114,7 @@ function tenMinuteBars(sessions: Session[]): Bar10[] {
 }
 
 /** Wilder ATR(14) over consecutive bars (previous close carries across days), NaN until 14 bars exist. */
-function wilderAtr(bars: Bar10[], n = 14): number[] {
+export function wilderAtr(bars: Bar10[], n = 14): number[] {
   const out: number[] = [];
   const a = 1 / n;
   let prev = NaN;

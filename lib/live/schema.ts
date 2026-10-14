@@ -46,7 +46,28 @@ export const MONTHLY_ENRICH_COLS = [
   'Setup',             // left blank for you to fill in (momentum / reversal) whenever you like
 ] as const;
 
-export const MONTHLY_EXTRA = [...MONTHLY_LIVE_COLS, ...MONTHLY_ENRICH_COLS] as const;
+/**
+ * Market context at your actual first fill, filled by Backfill for every trade (also ones logged before the co-pilot
+ * existed). They land to the right of Setup on existing sheets, so they are always written by column name.
+ */
+export const MONTHLY_CONTEXT_COLS = [
+  'OrHigh', 'OrLow', 'EntryVsOr', 'PdhDistAtr', 'PdlDistAtr',
+  'Ema200_5mAtr', 'Ema200_10mAtr', 'Ema200_1dAtr', 'RsVsNiftyPct', 'ExtAdrPct', 'PocDistAtr',
+  'PullbackNo', 'VolTrend', 'ContextStatus',
+] as const;
+
+/** Co-pilot: the entry check (Ck...) and a summary of in-trade re-checks (Rc...), copied on when the trade is logged. */
+export const MONTHLY_COPILOT_COLS = [
+  'CkTime', 'CkNiftyState', 'CkNiftyFirst5Pct', 'CkNiftyNowPct', 'CkRvolDay',
+  'CkEma200_5mAtr', 'CkEma200_10mAtr', 'CkEma200_1dAtr', 'CkEma200InPath',
+  'CkEntryVsOr', 'CkPdhDistAtr', 'CkPdlDistAtr', 'CkVwapSide', 'CkRsVsNiftyPct', 'CkRs15mPct', 'CkExtAdrPct',
+  'CkPocDistAtr', 'CkPullbackNo', 'CkVolTrend', 'CkPushVsPullVol', 'CkClimax', 'CkFailedBreak',
+  'CkStopVsAtr2', 'CkRoomVsStop', 'CkEstChargesInr', 'CkFirstTradeLost', 'CkSameSymbolStopped', 'CkMinSinceLoss',
+  'CkId', 'CkVerdict', 'CkLines', 'CkWatch', 'CkDecision', 'CkPromptVersion', 'CkModel', 'CkCostInr',
+  'RcCount', 'RcLastTime', 'RcLastLabel', 'RcLastLines', 'RcLastWatch', 'RcCostInr',
+] as const;
+
+export const MONTHLY_EXTRA = [...MONTHLY_LIVE_COLS, ...MONTHLY_ENRICH_COLS, ...MONTHLY_CONTEXT_COLS, ...MONTHLY_COPILOT_COLS] as const;
 export const MONTHLY_ALL = [...MONTHLY_BASE, ...MONTHLY_EXTRA] as const;
 
 /* ---- tabs used only by live capture (created automatically; analytics ignores them) ---------- */
@@ -68,6 +89,38 @@ export const LIVE_TRADE_COLS = [
   'GroupId', 'Date', 'Symbol', 'SecurityId', 'Direction', 'Status', 'NetQty', 'AvgCost', 'RealizedGross', 'Adds',
   'EntryTime', 'LastTime', 'InitialStop', 'LastStop', 'StopMoves', 'TpLast', 'RiskInr', 'FillCount', 'FillKeys',
   'FinalizedAt', 'UpdatedAt', 'Note',
+] as const;
+
+/**
+ * One row per co-pilot check (taken or skipped), in a tab per month: "october-2026-checks".
+ * Journal and Stats read only tabs named exactly "october-2026", so they never see it.
+ */
+export const checksTabTitle = (monthTitle: string) => `${monthTitle}-checks`;
+
+export const COPILOT_CHECK_COLS = [
+  'CheckId', 'Date', 'Time', 'CreatedAt', 'Symbol', 'SecurityId', 'Direction', 'Setup', 'Mode', 'PlannedStop', 'Ltp', 'LtpSource',
+  // market
+  'NiftyFirst5Pct', 'NiftyNowPct', 'NiftyLast10Pct', 'NiftyState',
+  // stock
+  'RvolDay', 'Atr10m', 'Atr2', 'Ema200_5mAtr', 'Ema200_10mAtr', 'Ema200_1dAtr', 'Ema200InPath',
+  'OrHigh', 'OrLow', 'EntryVsOr', 'PdhDistAtr', 'PdlDistAtr', 'VwapSide', 'VwapHeldMin',
+  'RsVsNiftyPct', 'Rs15mPct', 'ExtAdrPct', 'PocPrice', 'PocDistAtr', 'PullbackNo', 'VolTrend', 'PushVsPullVol',
+  'Climax', 'FailedBreak',
+  // plan
+  'StopDist', 'StopVsAtr2', 'SizeQty', 'RiskInr', 'RoomAtr', 'RoomVsStop', 'EstChargesInr',
+  // you
+  'TradesToday', 'PnlToday', 'FirstTradeLost', 'SameSymbolStopped', 'MinSinceLoss', 'SetupTrades', 'SetupWinRate', 'SetupAvgPnl',
+  // in trade (MANAGE rows only)
+  'AvgEntry', 'CurrentStop', 'OpenR', 'BestR', 'GivebackR', 'StopDistAtr', 'CounterVolRatio', 'ClimaxAgainst', 'FailedExtreme',
+  'NiftySinceEntryPct', 'MinInTrade', 'StopMoves',
+  // Claude
+  'Status', 'Model', 'PromptVersion', 'Verdict', 'Line1', 'Line2', 'Line3', 'Watch',
+  'InTokens', 'OutTokens', 'CostInr', 'LatencyMs', 'Error',
+  // you, after
+  'Decision', 'TradeGroupId',
+  // what happened next (Backfill)
+  'AfterMfeR30', 'AfterMaeR30', 'AfterHitStop',
+  'Notes', 'PayloadJson',
 ] as const;
 
 /** live-trades.Status values */

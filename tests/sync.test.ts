@@ -127,3 +127,38 @@ test('a quiet poll costs 2 Sheets reads on a warm client (it used to cost 9), so
   assert.equal(await reads({ includeRecent: false }), 2);
   assert.ok(await reads({ includeRecent: true }) <= 4);   // + the activity log
 });
+
+test('co-pilot: the entry check made before the trade is copied onto its rows and tagged with the trade id', async () => {
+  const s = setup((f) => {
+    f.addTab('october-2026', [[...MONTHLY_BASE]]);
+    f.addTab('october-2026-checks', [
+      ['CheckId', 'Date', 'Time', 'Symbol', 'Direction', 'Mode', 'Verdict', 'Line1', 'Line2', 'Line3', 'Watch', 'RvolDay', 'Decision', 'TradeGroupId'],
+      ['C-old', T, '09:01:00', 'ABC', 'LONG', 'ENTRY', 'SUPPORTS', 'too early', '', '', '', '0.2', '', ''],
+      ['C-1', T, '09:18:40', 'ABC', 'LONG', 'ENTRY', 'WARNING', 'Daily 200 EMA close above', 'Volume fading', '', 'A close above PDH', '0.14', 'TOOK', ''],
+      ['C-short', T, '09:19:00', 'ABC', 'SHORT', 'ENTRY', 'MIXED', 'x', '', '', '', '', '', ''],
+    ]);
+  });
+  s.dhan.t = [trade('1', 'BUY', 10, 100, '09:20:00'), trade('2', 'SELL', 10, 101, '09:40:00')];
+  s.at('09:41:00');
+  const r = await s.run();
+  assert.deepEqual(r.finalized.map((x) => x.result), ['LOGGED']);
+  const rows = s.f.table('october-2026');
+  assert.equal(rows.length, 2);
+  for (const x of rows) {
+    assert.equal(x.CkId, 'C-1'); assert.equal(x.CkVerdict, 'WARNING'); assert.equal(x.CkDecision, 'TOOK');
+    assert.equal(x.CkLines, 'Daily 200 EMA close above | Volume fading'); assert.equal(x.CkRvolDay, '0.14');
+  }
+  const checks = s.f.table('october-2026-checks');
+  assert.equal(checks.find((c) => c.CheckId === 'C-1')!.TradeGroupId, rows[0].TradeGroupId);
+  assert.equal(checks.find((c) => c.CheckId === 'C-short')!.TradeGroupId, '');
+  assert.equal(checks.find((c) => c.CheckId === 'C-old')!.TradeGroupId, '');
+});
+
+test('co-pilot: no checks tab is fine, the trade is still logged', async () => {
+  const s = setup((f) => f.addTab('october-2026', [[...MONTHLY_BASE]]));
+  s.dhan.t = [trade('1', 'BUY', 10, 100, '09:20:00'), trade('2', 'SELL', 10, 101, '09:40:00')];
+  s.at('09:41:00');
+  const r = await s.run();
+  assert.deepEqual(r.finalized.map((x) => x.result), ['LOGGED']);
+  assert.equal(s.f.table('october-2026')[0].CkId, '');
+});

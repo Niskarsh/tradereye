@@ -106,6 +106,10 @@ export async function GET(request: Request) {
             MaePct: row.get('MaePct') || '',
             MfeR: row.get('MfeR') || '',
             MaeR: row.get('MaeR') || '',
+            // co-pilot (blank when the trade had no check)
+            CkVerdict: row.get('CkVerdict') || '',
+            CkLines: row.get('CkLines') || '',
+            RcLastLabel: row.get('RcLastLabel') || '',
             sheetTitle: title
           }));
         } catch (sheetError) {

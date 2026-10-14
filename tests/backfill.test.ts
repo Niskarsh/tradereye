@@ -55,6 +55,9 @@ test('plan lists trades that need data; run fills columns, keeps Setup/comment, 
     assert.equal(r.Direction, 'SHORT'); assert.equal(r.NetPnL, '0');
   }
   assert.equal(rows[0].AvgEntry, '102'); assert.equal(rows[0].AvgExit, '100'); assert.equal(rows[0].RBasis, '2ATR');
+  // market context at the first fill (co-pilot facts), written by name
+  for (const r of rows) { assert.notEqual(r.ContextStatus, ''); assert.notEqual(r.OrHigh, ''); assert.notEqual(r.EntryVsOr, ''); assert.notEqual(r.PdhDistAtr, ''); }
+  assert.equal(rows[0].Setup, 'momentum');
   assert.equal((await planBackfill(f.client())).pending, 0);
   assert.equal((await planBackfill(f.client(), { redo: true })).pending, 1);
 });
@@ -124,4 +127,11 @@ test('inspect returns raw volumes per session for a trade', async () => {
   const f = sheetWithTrade();
   const r = await inspectVolume({ dhan: dhan() as any, sheets: f.client(), lookupSecurityId: async () => '11' }, { tab: 'october-2026', groupId: 'TRD-1' });
   assert.equal(r.symbol, 'ABC'); assert.ok(r.today && r.today.window5 > 0 && r.priors.length === 10 && r.priors[0].dayTotal > 0);
+});
+
+test('a trade enriched before the context columns existed is planned again (context only missing)', async () => {
+  const f = new FakeSheets();
+  f.addTab('october-2026', [[...MONTHLY_BASE, 'EnrichStatus'],
+    ['TRD-1', DAY, 'ABC', 'LONG', 'BUY', '100', '10', '0', '0', '0', 'WIN', '09:25:00', '1200', 'YES', '1', '', '', 'OK']]);
+  assert.equal((await planBackfill(f.client())).pending, 1);
 });

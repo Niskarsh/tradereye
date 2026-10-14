@@ -55,6 +55,20 @@ export default function BackfillPage() {
     try { setInspect(JSON.stringify(await postWithToken('/api/backfill/inspect', token, { tab: it.tab, groupId: it.groupId }))); }
     catch (e) { setInspect((e as Error).message); }
   };
+  // co-pilot: "what happened next" for checks older than 30 minutes
+  const [oc, setOc] = useState<{ pending: number; done: number } | null>(null);
+  const [ocBusy, setOcBusy] = useState(false);
+  const runOutcomes = async () => {
+    setOcBusy(true); setMsg('');
+    let done = 0;
+    try {
+      for (let i = 0; i < 50; i++) {
+        const r = await postWithToken<{ pending: number; done: number; skipped: number }>('/api/copilot/outcomes', token, { run: true });
+        done += r.done; setOc({ pending: r.pending, done });
+        if (!r.pending || (r.done === 0 && r.skipped === 0)) break;
+      }
+    } catch (e) { setMsg((e as Error).message); } finally { setOcBusy(false); }
+  };
   const total = plan?.items.length ?? 0;
   const bad = results.filter((r) => r.status !== 'OK');
 
@@ -63,7 +77,7 @@ export default function BackfillPage() {
       <div className="max-w-4xl mx-auto px-4 pt-2 space-y-8">
         <header className="space-y-0.5 border-b border-zinc-900 pb-6">
           <h1 className="text-2xl font-black tracking-tighter">Backfill Market Data</h1>
-          <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">Stock: relative volume, ATR, excursions • Nifty 500: first-5-min and at-entry move</p>
+          <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">Stock: relative volume, ATR, excursions, market context • Nifty 500: first-5-min and at-entry move</p>
         </header>
 
         <p className="text-sm text-zinc-400">
@@ -116,6 +130,17 @@ export default function BackfillPage() {
             {inspect && <textarea readOnly value={inspect} className="w-full h-40 bg-brand-card rounded-xl p-3 text-[10px] font-mono text-zinc-300" onFocus={(e) => e.currentTarget.select()} />}
           </section>
         )}
+
+        <section className="bg-brand-card rounded-3xl border border-zinc-800 p-6 space-y-3">
+          <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Co-pilot checks: what happened next</h2>
+          <p className="text-xs text-zinc-400">For every check older than 30 minutes, taken or skipped: the best and worst move in R over the next 30 minutes, and whether the stop would have been hit.</p>
+          <div className="flex items-center gap-4">
+            <Button onClick={runOutcomes} disabled={!token || ocBusy} className="h-10 bg-brand-accent hover:bg-brand-accent/90 text-black font-black uppercase tracking-tighter">
+              {ocBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-3 h-3 mr-2" />}Fill check outcomes
+            </Button>
+            {oc && <span className="text-xs text-zinc-400">{oc.done} filled · {oc.pending} left</span>}
+          </div>
+        </section>
 
         {msg && <div className="p-4 bg-brand-card border border-zinc-800 rounded-2xl text-xs font-bold text-brand-accent">{msg}</div>}
 
