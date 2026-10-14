@@ -230,18 +230,37 @@ test('the message stays small and never carries a token', () => {
   assert.ok(SYSTEM_PROMPT.includes('HOLD_STEADY') && SYSTEM_PROMPT.includes('Never tell him to buy'));
 });
 
-test('Claude: reads the forced tool answer, retries once when overloaded, explains a bad key', async () => {
-  let calls = 0;
-  const good = { content: [{ type: 'tool_use', name: 'give_read', input: { verdict: 'WARNING', lines: ['one', 'two', 'three', 'four'], watch: 'w' } }], usage: { input_tokens: 4000, output_tokens: 200, cache_read_input_tokens: 2500 } };
-  const f = (async () => { calls++; return calls === 1 ? new Response(JSON.stringify({ error: { type: 'overloaded_error' } }), { status: 529 }) : new Response(JSON.stringify(good), { status: 200 }); }) as typeof fetch;
+test('Claude: sends a structured-output schema (no tools), reads the JSON, retries once when overloaded, explains a bad key', async () => {
+  let calls = 0; let sent: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const good = { content: [{ type: 'text', text: JSON.stringify({ verdict: 'WARNING', lines: ['one', 'two', 'three', 'four'], watch: 'w' }) }], stop_reason: 'end_turn', usage: { input_tokens: 4000, output_tokens: 200, cache_read_input_tokens: 2500 } };
+  const f = (async (_u: unknown, init: { body: string }) => {
+    calls++; sent = JSON.parse(init.body);
+    return calls === 1 ? new Response(JSON.stringify({ error: { type: 'overloaded_error' } }), { status: 529 }) : new Response(JSON.stringify(good), { status: 200 });
+  }) as unknown as typeof fetch;
   const r = await askClaude('msg', { apiKey: 'k', fetchImpl: f, sleep: async () => {} });
   assert.equal(calls, 2);
+  assert.equal(sent.tools, undefined); assert.equal(sent.tool_choice, undefined);
+  assert.equal(sent.output_config.format.type, 'json_schema');
+  const schema = sent.output_config.format.schema;
+  assert.equal(schema.additionalProperties, false);
+  assert.doesNotMatch(JSON.stringify(schema), /maxItems|minLength|maximum/); // unsupported keywords would be a 400
   assert.equal(r.verdict, 'WARNING');
   assert.equal(r.lines.length, 3);
   assert.equal(r.inTokens, 6500);
   assert.equal(r.costInr, costInr('claude-sonnet-5-5', good.usage, 88));
   const bad = (async () => new Response(JSON.stringify({ error: { type: 'authentication_error', message: 'x' } }), { status: 401 })) as typeof fetch;
   await assert.rejects(askClaude('m', { apiKey: 'k', fetchImpl: bad }), /ANTHROPIC_API_KEY/);
+});
+
+test('Claude: an answer that does not parse is shown as text, never thrown away', async () => {
+  const f = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'Volume is fading into the high.' }], stop_reason: 'end_turn', usage: {} }), { status: 200 })) as typeof fetch;
+  const r = await askClaude('m', { apiKey: 'k', fetchImpl: f });
+  assert.equal(r.verdict, 'RAW'); assert.deepEqual(r.lines, ['Volume is fading into the high.']);
+  const cutoff = (async () => new Response(JSON.stringify({ content: [], stop_reason: 'max_tokens', usage: {} }), { status: 200 })) as typeof fetch;
+  const c = await askClaude('m', { apiKey: 'k', fetchImpl: cutoff });
+  assert.equal(c.verdict, 'RAW'); assert.match(c.lines[0], /cut off/);
+  const lower = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: '{"verdict":"hold steady","lines":["a"],"watch":"b"}' }], usage: {} }), { status: 200 })) as typeof fetch;
+  assert.equal((await askClaude('m', { apiKey: 'k', fetchImpl: lower })).verdict, 'HOLD_STEADY');
 });
 
 test('a steady trend is not counted as many pullbacks, and the breakout high is not an obstacle', () => {
@@ -278,13 +297,3 @@ test('outcomes are planned only for checks older than 30 minutes and written int
   assert.notEqual(row.AfterMfeR30, ''); assert.equal(row.AfterHitStop, 'NO');
 });
 
-test('Claude: does not force a tool, and accepts a plain JSON answer when no tool is called', async () => {
-  let sent: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const f = (async (_u: unknown, init: { body: string }) => {
-    sent = JSON.parse(init.body);
-    return new Response(JSON.stringify({ content: [{ type: 'text', text: 'Here: {"verdict":"MIXED","lines":["a"],"watch":"b"}' }], usage: {} }), { status: 200 });
-  }) as unknown as typeof fetch;
-  const r = await askClaude('m', { apiKey: 'k', fetchImpl: f });
-  assert.equal(sent.tool_choice.type, 'auto');
-  assert.equal(r.verdict, 'MIXED'); assert.deepEqual(r.lines, ['a']); assert.equal(r.watch, 'b');
-});

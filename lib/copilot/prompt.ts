@@ -6,7 +6,7 @@ import type { Facts, ManageFacts } from './features';
 import { nMinuteBars } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1.1';
+export const PROMPT_VERSION = 'copilot-v1.2';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -55,23 +55,25 @@ WRITING
 - Use only facts in this message. If something you need is missing and it matters, say "no data on X".
 - No hedging words (may, might, could potentially) unless the data is truly split. No praise, no disclaimers, no restating his setup back to him.
 
-Answer only by calling the give_read tool, once. If you cannot call it, reply with only this JSON and nothing else: {"verdict": "...", "lines": ["..."], "watch": "..."}`;
+Reply with the JSON object only: verdict, lines (at most 3), watch.`;
 
 export const VERDICTS = ['SUPPORTS', 'MIXED', 'WARNING', 'HOLD_STEADY', 'WEAKENING'] as const;
 export type Verdict = typeof VERDICTS[number];
 
-export const GIVE_READ_TOOL = {
-  name: 'give_read',
-  description: 'Your read of the trade, shown to the trader on his phone.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      verdict: { type: 'string', enum: [...VERDICTS] },
-      lines: { type: 'array', items: { type: 'string' }, maxItems: 3 },
-      watch: { type: 'string' },
-    },
-    required: ['verdict', 'lines', 'watch'],
+/**
+ * Structured output schema (Messages API output_config.format). The API guarantees the reply is JSON matching it.
+ * Only supported keywords are used: no maxItems (the "at most 3 lines" rule lives in the prompt and is enforced
+ * when parsing), additionalProperties must be false.
+ */
+export const READ_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: [...VERDICTS] },
+    lines: { type: 'array', items: { type: 'string' }, description: 'At most 3 short lines, most important first.' },
+    watch: { type: 'string' },
   },
+  required: ['verdict', 'lines', 'watch'],
+  additionalProperties: false,
 } as const;
 
 export interface MessageInput {

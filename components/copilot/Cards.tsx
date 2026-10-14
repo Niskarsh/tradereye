@@ -133,14 +133,15 @@ const TONE: Record<string, string> = {
   MIXED: 'bg-brand-accent/10 border-brand-accent/50 text-brand-accent',
   WEAKENING: 'bg-brand-accent/10 border-brand-accent/50 text-brand-accent',
   WARNING: 'bg-data-red/15 border-data-red/50 text-data-red',
+  RAW: 'bg-brand-card border-zinc-700 text-zinc-200',
 };
-const LABEL: Record<string, string> = { SUPPORTS: 'Supports', HOLD_STEADY: 'Hold steady', MIXED: 'Mixed', WEAKENING: 'Weakening', WARNING: 'Warning' };
+const LABEL: Record<string, string> = { SUPPORTS: 'Supports', HOLD_STEADY: 'Hold steady', MIXED: 'Mixed', WEAKENING: 'Weakening', WARNING: 'Warning', RAW: "Claude's reply" };
 
 export function VerdictCard({ r, decision, onDecide, showDecision }: { r: ReadResp; decision: string; onDecide: (d: 'TOOK' | 'SKIPPED') => void; showDecision: boolean }) {
   return (
     <div className={`rounded-2xl border p-4 space-y-3 ${TONE[r.verdict] ?? TONE.MIXED}`}>
       <p className="text-2xl font-black tracking-tight">{LABEL[r.verdict] ?? r.verdict}</p>
-      <ol className="space-y-1.5 text-sm text-zinc-100">{r.lines.map((l, i) => <li key={i} className="leading-snug">{l}</li>)}</ol>
+      <ol className="space-y-1.5 text-sm text-zinc-100">{r.lines.map((l, i) => <li key={i} className="leading-snug whitespace-pre-wrap">{l}</li>)}</ol>
       {r.watch && <p className="text-sm text-zinc-300"><span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mr-2">Watch</span>{r.watch}</p>}
       <p className="text-[10px] text-zinc-500">{(r.latencyMs / 1000).toFixed(1)}s · ₹{r.costInr.toFixed(2)} · {r.model}</p>
       {showDecision && (
