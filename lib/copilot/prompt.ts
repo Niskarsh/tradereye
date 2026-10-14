@@ -5,7 +5,7 @@ import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1.8';
+export const PROMPT_VERSION = 'copilot-v1.9';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -41,6 +41,10 @@ Look in this order and stop when you have the three most important things:
 
 He trades from the 10-minute chart: every candle-based fact (pullbacks, volume trend, push/pull volume, climax, failed break, VWAP control) is measured on 10-minute candles, and the candle lines are 10-minute candles (the last one may still be forming). They are there so you can confirm or question the facts (for example, the last three candles are wicks against him). Do not re-describe candles he can see on his own chart.
 
+WHAT KIND OF TRADE
+- Momentum and reversal are judged on TODAY's move on the 10-minute chart, not the daily chart: with today's move = momentum, against it back toward the POC = reversal. SetupByMove says which one his trade really is; if it differs from his Setup, say so in a line.
+- CoreMet / CoreMissing are the app's own check of the setup's core conditions; when CoreMet is NO the trade is not the setup he named (it is also in FLAGS). Never argue with it.
+
 VERDICT
 Most real trades have one or two things against them; that alone is NOT a warning. Judge the setup's core conditions:
 - Momentum core: Nifty moving his way (TRENDING in his direction), the stock busier than usual (RvolBusy YES), VWAP control on his side, and room to the next obstacle (RoomAtr of about 1 or more).
@@ -54,7 +58,7 @@ If StopAssumed is YES he has not typed his stop: StopDist is only his 2x ATR cap
 
 BETTER FIT
 - The ALT lines read the other setups on the same stock from the same data, each with a stop taken from the 10-minute chart.
-- When your verdict is MIXED or WARNING, set alternative to the ALT setup that clearly fits his playbook better: its core conditions met and its flags none. Use its stop exactly as written in its ALT line; never invent a stop, and never give a target. reason: under 12 words, the main thing that makes it fit.
+- When your verdict is MIXED or WARNING, set alternative to an ALT marked CORE MET with flags none (if several, the one with the most room). Only those are candidates. Use its stop exactly as written in its ALT line; never invent a stop, and never give a target. reason: under 12 words, the main thing that makes it fit.
 - If no ALT is clearly better, or your verdict is SUPPORTS, or Mode is MANAGE: direction NONE, setup NONE, stop 0, reason empty. Doing nothing is a valid answer; do not force one.
 
 WRITING
@@ -62,6 +66,7 @@ WRITING
 - Each line names the thing to look at, so he learns where to look.
 - One watch line, under 12 words: the single thing in the next few minutes that would show this read is wrong.
 - Use only facts in this message. If something you need is missing and it matters, say "no data on X".
+- Never quote raw volume numbers; describe volume with the ratios and words given (PushVsPullVol, VolTrend, RvolBusy).
 - No hedging words (may, might, could potentially) unless the data is truly split. No praise, no disclaimers, no restating his setup back to him.
 
 Reply with the JSON object only: verdict, lines (at most 3), watch, alternative.`;
@@ -160,6 +165,8 @@ export function buildMessage(m: MessageInput): string {
       `VWAP ${x.VwapSide?.toLowerCase() ?? '-'}`, `EMA in path ${x.Ema200InPath || '-'}`,
       `flags ${x.flags.length ? x.flags.join('; ') : 'none'}`,
     ];
+    // at the END: the line must start with "ALT <setup> <direction>: stop N" (checkAlternative reads the stop there)
+    bits.push(x.CoreMet === 'YES' ? 'CORE MET' : `core missing: ${x.CoreMissing || '-'}`);
     parts.push(`ALT ${a.setup} ${a.direction}: ${bits.join(' · ')}`);
   }
   parts.push(`YOU ${JSON.stringify(you)}`);

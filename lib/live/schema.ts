@@ -125,6 +125,7 @@ export const COPILOT_CHECK_COLS = [
   'RoomTo', 'DayHigh', 'DayLow', 'Ema200_5m', 'Ema200_10m', 'Ema200_1d',
   'RvolSameTime', 'RvolBusy',
   'StopIdea', 'AltDirection', 'AltSetup', 'AltStop', 'AltReason',
+  'MoveToday', 'SetupByMove', 'CoreMet', 'CoreMissing', 'FitsNow',
 ] as const;
 
 /** live-trades.Status values */

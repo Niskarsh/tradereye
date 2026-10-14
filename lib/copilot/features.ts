@@ -62,6 +62,12 @@ export interface Facts {
   RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
   /** Raw price levels, so the card can be read straight against the chart. */
   Ema200_5m?: number; Ema200_10m?: number; Ema200_1d?: number; DayHigh?: number; DayLow?: number;
+  /** Today's move on the 10-minute chart (from the open, in % of the average daily range): UP / DOWN / FLAT. */
+  MoveToday?: 'UP' | 'DOWN' | 'FLAT';
+  /** What this trade is by today's move: with it = MOMENTUM, against it = REVERSAL. */
+  SetupByMove?: 'MOMENTUM' | 'REVERSAL';
+  /** Whether the chosen setup's core conditions are there (computed by the app, not by Claude). */
+  CoreMet?: 'YES' | 'NO'; CoreMissing?: string;
   /** Hard rules of yours that are broken (shown red on the page). */
   flags: string[];
   /** Values that could not be computed, and why. */
@@ -420,7 +426,51 @@ export function computeFacts(inp: FactsInput): Facts {
       if (f.StopDist && !f.StopAssumed) f.RoomVsStop = r2(room / f.StopDist);
     }
   }
+  // ---- what kind of trade this is by TODAY's move, and whether the setup's core conditions are there
+  if (f.ExtAdrPct !== undefined) {
+    f.MoveToday = f.ExtAdrPct >= 10 ? 'UP' : f.ExtAdrPct <= -10 ? 'DOWN' : 'FLAT';
+    if (f.MoveToday !== 'FLAT') f.SetupByMove = (f.ExtAdrPct * sign > 0) ? 'MOMENTUM' : 'REVERSAL';
+  }
+  const core = coreCheck(f, inp.setup, inp.direction);
+  f.CoreMet = core.missing.length ? 'NO' : 'YES';
+  f.CoreMissing = core.missing.join('; ');
   return f;
+}
+
+/**
+ * The core of each setup, decided by the app (so the label can never be argued away):
+ *  Momentum = with today's move: the stock moving his way today (at least 10% of the average daily range),
+ *    Nifty 500 not against him, VWAP control on his side, and room to the next obstacle (0.5 ATR or more,
+ *    or price breaking out at the day's extreme).
+ *  Reversal = against today's move, back to the POC: the stock moved at least 30% of its daily range the
+ *    other way, the POC at least 1 ATR away in his direction, not busier than usual, and Nifty not pushing
+ *    hard in the stock's direction.
+ */
+export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missing: string[] } {
+  const sign = direction === 'LONG' ? 1 : -1;
+  const up = direction === 'LONG';
+  const missing: string[] = [];
+  const ext = f.ExtAdrPct;
+  const n = f.NiftyState;
+  if (setup === 'MOMENTUM') {
+    if (ext === undefined) missing.push('today\'s move unknown');
+    else if (ext * sign < 10) missing.push(`stock not moving ${up ? 'up' : 'down'} today (${ext > 0 ? '+' : ''}${ext}% of daily range)`);
+    if (n === 'OPENING' || n === 'UNKNOWN' || n === undefined) missing.push('Nifty direction not known yet');
+    else if (n === 'FLAT' || n === 'FLIPPED') missing.push(`Nifty 500 ${n.toLowerCase()}`);
+    else if (up ? n.endsWith('_DOWN') : n.endsWith('_UP')) missing.push(`Nifty 500 moving ${up ? 'down' : 'up'}`);
+    if (f.VwapSide && f.VwapSide !== (up ? 'BUYERS' : 'SELLERS')) missing.push(`${f.VwapSide.toLowerCase()} in control (VWAP)`);
+    const breakout = (f.RoomTo ?? '').startsWith('none: price is at the day');
+    if (!breakout && f.RoomAtr !== undefined && f.RoomAtr < 0.5) missing.push(`little room: ${f.RoomTo} ${f.RoomAtr} ATR away`);
+  } else {
+    if (ext === undefined) missing.push('today\'s move unknown');
+    else if (ext * sign > -30) missing.push(`no ${up ? 'down' : 'up'}-move to fade (${ext > 0 ? '+' : ''}${ext}% of daily range today)`);
+    const toPoc = f.PocDistAtr !== undefined ? f.PocDistAtr * sign : undefined;
+    if (toPoc === undefined) missing.push('POC unknown');
+    else if (toPoc < 1) missing.push(`POC ${toPoc <= 0 ? 'is behind the trade' : `only ${r2(toPoc)} ATR away`}`);
+    if (f.RvolBusy === 'YES') missing.push('busier than usual');
+    if (up ? n === 'TRENDING_DOWN' : n === 'TRENDING_UP') missing.push(`Nifty 500 pushing ${up ? 'down' : 'up'}`);
+  }
+  return { missing };
 }
 
 /* ----------------------------------------------------------------------------------------------------------- */

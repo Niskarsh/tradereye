@@ -4,7 +4,7 @@ import type { Candles } from '../lib/dhan';
 import { computeEnrichment, toSessions } from '../lib/live/enrich';
 import {
   climax, computeFacts, computeManageFacts, ema, failedBreak, hasSuspectGap, nMinuteBars, niftyState, pointOfControl, pullbackNumber,
-  type FactsInput,
+  type Facts, type FactsInput,
 } from '../lib/copilot/features';
 import { computeBehaviour, summarizeTrades, chargeRate } from '../lib/copilot/behaviour';
 import { matchChecks, monthlyColumns } from '../lib/copilot/store';
@@ -507,4 +507,56 @@ test('Claude: an alternative of NONE is no suggestion', async () => {
   const body2 = { ...body, alternative: { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' } };
   const f2 = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body2) }], usage: {} }), { status: 200 })) as typeof fetch;
   assert.deepEqual((await askClaude('m', { apiKey: 'k', fetchImpl: f2 })).alternative, { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' });
+});
+
+/* ---- what kind of trade it is by today's move, and the app's own core check ------------------------------------ */
+import { coreCheck } from '../lib/copilot/features';
+
+test('ETERNAL-shaped day: a short is momentum by today\'s move; reversal short has nothing to fade', () => {
+  // opens 320.5, slides to ~315 by 11:00, then drifts 315-315.6; Nifty 500 down all morning
+  const fall = day('2026-10-14', (m) => {
+    const c = m < 100 ? 320.5 - m * 0.055 : 315.3 + Math.sin(m / 7) * 0.3;
+    return { o: c + 0.05, h: c + 0.25, l: c - 0.25, c, v: 1000 };
+  }, 300);
+  const niftyDown = day('2026-10-14', (m) => ({ o: 24000 - m * 0.4, h: 24002 - m * 0.4, l: 23996 - m * 0.4, c: 23998 - m * 0.4 }), 300);
+  const daily = dailyFlat(800, 330); // average daily range 6 (h-l), 200 EMAs far above
+  const at = IST('2026-10-14', '14:10:20');
+  const facts = (direction: 'LONG' | 'SHORT', setup: 'MOMENTUM' | 'REVERSAL') =>
+    computeFacts(base({ date: '2026-10-14', nowMs: at, price: 315.5, direction, setup, stock1m: merge(...calm, fall), nifty1m: niftyDown, daily }));
+
+  const ms = facts('SHORT', 'MOMENTUM');
+  assert.equal(ms.MoveToday, 'DOWN');
+  assert.equal(ms.SetupByMove, 'MOMENTUM');
+  const rs = facts('SHORT', 'REVERSAL');
+  assert.equal(rs.SetupByMove, 'MOMENTUM'); // a short on a falling stock is with the move, whatever the toggle says
+  assert.equal(rs.CoreMet, 'NO');
+  assert.match(rs.CoreMissing!, /no up-move to fade/);
+  const ml = facts('LONG', 'MOMENTUM');
+  assert.equal(ml.CoreMet, 'NO');
+  assert.match(ml.CoreMissing!, /not moving up today/);
+});
+
+test('core check rules, one by one', () => {
+  const f = (o: Partial<Facts>) => ({ NiftyState: 'TRENDING_DOWN', Ema200InPath: '', Climax: '', FailedBreak: '', flags: [], missing: [], ...o }) as Facts;
+  // momentum short: with the move, Nifty down, sellers, room
+  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1.5, RoomTo: 'day low 314.05' }), 'MOMENTUM', 'SHORT').missing, []);
+  // breakout at the day's low counts as room
+  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomTo: "none: price is at the day's low (breakout)" }), 'MOMENTUM', 'SHORT').missing, []);
+  // Nifty against / flat
+  assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'TRENDING_UP' }), 'MOMENTUM', 'SHORT').missing.join(), /Nifty 500 moving up/);
+  assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'FLAT' }), 'MOMENTUM', 'SHORT').missing.join(), /flat/);
+  // reversal long: down 50% of range, POC 1.5 ATR above, not busy, Nifty not trending down
+  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 1.5, RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
+  assert.match(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 0.4, RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
+  assert.match(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 1.5, RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
+});
+
+test('end to end: the check lists the setups that fit now, without asking Claude', async () => {
+  const r = await buildCheck({ dhan: fakeDhan(), sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-18', '01:58:00') }, { direction: 'SHORT', setup: 'REVERSAL', symbol: 'X' });
+  assert.ok(Array.isArray(r.fitsNow));
+  for (const x of r.fitsNow) { const a = [...r.alternatives, { direction: r.direction, setup: r.setup, facts: r.facts }].find((y) => y.direction === x.direction && y.setup === x.setup)!; assert.equal(a.facts.CoreMet, 'YES'); assert.equal(a.facts.flags.length, 0); }
+  assert.match(r.payload, /^ALT [A-Z]+ [A-Z]+: stop \d.*(CORE MET|core missing)/m);
+  // and a suggestion for any of those setups survives the stop check
+  const first = r.alternatives[0];
+  assert.ok(checkAlternative({ direction: first.direction, setup: first.setup, stop: 1, reason: '' }, r.payload)?.stop === first.facts.StopIdea);
 });

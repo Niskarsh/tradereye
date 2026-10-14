@@ -82,7 +82,11 @@ export interface CheckResult {
   symbol: string; direction: Direction; setup: Setup; price: number; priceSource: 'LTP' | 'LAST_CANDLE';
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; row: CheckRow; payload: string; notes: string[];
   alternatives: Alternative[];
+  fitsNow: FitNow[];
 }
+
+/** A setup the data fits right now (core conditions met, no flags), with the stop from the 10-minute chart. */
+export interface FitNow { direction: Direction; setup: Setup; stop?: number; roomTo?: string; roomAtr?: number }
 
 /** Another setup on the same stock, read from the same data, for the "better fit" suggestion. */
 export interface Alternative { direction: Direction; setup: Setup; facts: Facts }
@@ -169,8 +173,8 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   const ruleFlags = (fx: Facts, b: Behaviour, setup: Setup, dir: Direction) => {
     if (b.FirstTradeLost) fx.flags.push('First trade of the day lost and nothing else is open');
     if (b.SameSymbolStopped) fx.flags.push(`Stopped out of ${symbol} ${dir} earlier today`);
-    if (setup === 'REVERSAL' && fx.RvolBusy === 'YES') fx.flags.push(`Reversal on a stock busier than usual (${fx.RvolBasis}: ${fx.RvolBasis?.startsWith('open') ? fx.RvolDay : fx.RvolSameTime})`);
-    if (setup === 'MOMENTUM' && (fx.NiftyState === 'FLAT' || fx.NiftyState === 'FLIPPED')) fx.flags.push(`Momentum while Nifty 500 is ${fx.NiftyState}`);
+    // the setup's core conditions, decided by the app (includes "reversal on a busy stock" and "momentum while Nifty is flat")
+    if (fx.CoreMet === 'NO') fx.flags.push(`Not a ${setup.toLowerCase()} ${dir.toLowerCase()}: ${fx.CoreMissing}`);
   };
   if (mode === 'ENTRY') ruleFlags(facts, behaviour, req.setup, direction);
 
@@ -220,6 +224,14 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
     });
   }
 
+  // setups whose core conditions are met with no flags, read by the app alone (no Claude needed)
+  const fitsNow: FitNow[] = mode === 'ENTRY'
+    ? [{ direction, setup: req.setup, facts }, ...alternatives]
+      .filter((a) => a.facts.CoreMet === 'YES' && a.facts.flags.length === 0)
+      .sort((a, b) => (b.facts.RoomAtr ?? 0) - (a.facts.RoomAtr ?? 0))
+      .map((a) => ({ direction: a.direction, setup: a.setup, stop: a.facts.StopIdea, roomTo: a.facts.RoomTo, roomAtr: a.facts.RoomAtr }))
+    : [];
+
   const time = istTime(sess.asOfMs);
   const checkId = `C${sess.date.replace(/-/g, '')}-${time.replace(/:/g, '')}-${symbol}-${Math.random().toString(36).slice(2, 6)}`;
   const todayTrades = trades.filter((t) => t.date === sess.date).map((t) => ({ symbol: t.symbol, direction: t.direction, netPnl: t.netPnl, exitType: t.exitType }));
@@ -237,6 +249,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
     TradesToday: behaviour.TradesToday, PnlToday: behaviour.PnlToday, FirstTradeLost: behaviour.FirstTradeLost ? 'YES' : 'NO',
     SameSymbolStopped: behaviour.SameSymbolStopped ? 'YES' : 'NO', MinSinceLoss: behaviour.MinSinceLoss ?? '',
     SetupTrades: behaviour.SetupTrades, SetupWinRate: behaviour.SetupWinRate ?? '', SetupAvgPnl: behaviour.SetupAvgPnl ?? '',
+    FitsNow: fitsNow.map((x) => `${x.setup} ${x.direction}${x.stop !== undefined ? ` stop ${x.stop}` : ''}`).join(' | '),
     Status: 'FACTS', PromptVersion: PROMPT_VERSION,
     Notes: [...flags.map((x) => `FLAG ${x}`), ...missing.map((x) => `MISSING ${x}`), ...notes].join('; ').slice(0, 1000),
     PayloadJson: payload.slice(0, 45_000),
@@ -248,7 +261,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   }
   for (const k of Object.keys(row)) if ((row as Record<string, unknown>)[k] === undefined) (row as Record<string, unknown>)[k] = '';
 
-  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives };
+  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives, fitsNow };
 }
 
 /** Today's market strip: Nifty 500 state and your day so far. */
