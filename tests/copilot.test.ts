@@ -468,3 +468,43 @@ test('a closed-session check is marked as a practice read, and the verdict rules
   assert.match(SYSTEM_PROMPT, /that alone is NOT a warning/);
   assert.match(SYSTEM_PROMPT, /StopAssumed is YES/);
 });
+
+/* ---- better fit: other setups with a stop from the 10-minute chart --------------------------------------------- */
+import { checkAlternative } from '../lib/copilot/claude';
+import { READ_SCHEMA } from '../lib/copilot/prompt';
+
+test('stop from the 10-minute chart: beyond the last two candles, on the right side, capped at 2x ATR', () => {
+  const long = computeFacts(base({ nowMs: IST('2026-10-12', '09:45:20'), price: 309.2 }));
+  assert.ok(long.StopIdea! < 309.2, `long stop ${long.StopIdea}`);
+  assert.ok(long.StopIdeaAtr! >= 0.25 && long.StopIdeaAtr! <= 2);
+  const short = computeFacts(base({ nowMs: IST('2026-10-12', '09:45:20'), price: 309.2, direction: 'SHORT' }));
+  assert.ok(short.StopIdea! > 309.2, `short stop ${short.StopIdea}`);
+});
+
+test('end to end: a check carries the three other setups, and the message lists them with their stops', async () => {
+  const r = await buildCheck({ dhan: fakeDhan(), sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-17', '01:58:00') }, { direction: 'SHORT', setup: 'REVERSAL', symbol: 'ETERNAL' });
+  assert.equal(r.alternatives.length, 3);
+  assert.ok(!r.alternatives.some((a) => a.direction === 'SHORT' && a.setup === 'REVERSAL'));
+  assert.match(r.payload, /^ALT MOMENTUM SHORT: stop \d/m);
+  assert.match(r.payload, /^ALT REVERSAL LONG: stop \d/m);
+});
+
+test('a suggested alternative keeps the app stop and is dropped if it is not one of the computed setups', () => {
+  const msg = 'FLAGS none\nALT MOMENTUM SHORT: stop 316.4 (0.93 ATR) · room to day low 314.05 1.5 ATR\nALT REVERSAL LONG: stop 314.2 (0.5 ATR)';
+  assert.deepEqual(checkAlternative({ direction: 'SHORT', setup: 'MOMENTUM', stop: 999, reason: 'r' }, msg), { direction: 'SHORT', setup: 'MOMENTUM', stop: 316.4, reason: 'r' });
+  assert.equal(checkAlternative({ direction: 'LONG', setup: 'MOMENTUM', stop: 310, reason: 'r' }, msg), undefined);
+  assert.equal(checkAlternative(undefined, msg), undefined);
+  // the schema stays within what structured outputs accept
+  const alt = (READ_SCHEMA as any).properties.alternative; // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal(alt.additionalProperties, false);
+  assert.deepEqual([...READ_SCHEMA.required], ['verdict', 'lines', 'watch', 'alternative']);
+});
+
+test('Claude: an alternative of NONE is no suggestion', async () => {
+  const body = { verdict: 'MIXED', lines: ['a'], watch: 'b', alternative: { direction: 'NONE', setup: 'NONE', stop: 0, reason: '' } };
+  const f = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body) }], usage: {} }), { status: 200 })) as typeof fetch;
+  assert.equal((await askClaude('m', { apiKey: 'k', fetchImpl: f })).alternative, undefined);
+  const body2 = { ...body, alternative: { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' } };
+  const f2 = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body2) }], usage: {} }), { status: 200 })) as typeof fetch;
+  assert.deepEqual((await askClaude('m', { apiKey: 'k', fetchImpl: f2 })).alternative, { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' });
+});

@@ -139,8 +139,9 @@ export default function CopilotPage() {
 
         {c.error && <div className="rounded-2xl border border-data-red/40 bg-data-red/10 p-3 text-xs font-bold text-data-red">{c.error}</div>}
 
-        {c.read && <VerdictCard r={c.read} decision={c.decision} onDecide={c.decide} showDecision={!held} />}
-        {c.check && <FactsCard c={c.check} />}
+        {c.read && <VerdictCard r={c.read} decision={c.decision} onDecide={c.decide} showDecision={!held}
+          onTryAlt={(a) => { c.setDirection(a.direction); c.setSetup(a.setup); setStop(a.stop !== undefined ? String(a.stop) : ''); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
+        {c.check && <FactsCard c={c.check} onUseStop={held ? undefined : (st) => { setStop(String(st)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
 
         <TodayChecks m={c.market} />
       </div>

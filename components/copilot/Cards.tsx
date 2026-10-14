@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import type { CheckResp, MarketResp, ReadResp } from './useCopilot';
+import type { AltResp, CheckResp, MarketResp, ReadResp } from './useCopilot';
 
 const fmt = (v: unknown, digits = 2): string => {
   if (v === undefined || v === null || v === '') return '–';
@@ -59,7 +59,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export function FactsCard({ c }: { c: CheckResp }) {
+export function FactsCard({ c, onUseStop }: { c: CheckResp; onUseStop?: (stop: number) => void }) {
   const f = c.facts, b = c.behaviour, m = c.manage;
   return (
     <div className="space-y-3">
@@ -116,6 +116,10 @@ export function FactsCard({ c }: { c: CheckResp }) {
           <Row label="Next obstacle" value={f.RoomTo ?? '–'} />
         <Row label="  room" value={f.RoomAtr !== undefined ? `${fmt(f.RoomAtr)} ATR${f.RoomVsStop !== undefined ? ` · ${fmt(f.RoomVsStop)}× stop` : ''}` : '–'} />
           <Row label="Est. charges" value={f.EstChargesInr !== undefined ? `₹${fmt(f.EstChargesInr, 0)}` : '–'} />
+          {f.StopIdea !== undefined && (
+            <Row label="Stop from the 10m chart" hint="past the last 2 candles"
+              value={<span>{fmt(f.StopIdea)} ({fmt(f.StopIdeaAtr)} ATR){onUseStop && <button onClick={() => onUseStop(f.StopIdea!)} className="ml-2 rounded-md border border-zinc-700 px-2 text-[10px] font-black uppercase text-zinc-300">Use</button>}</span>} />
+          )}
         </Group>
       )}
 
@@ -146,13 +150,28 @@ const TONE: Record<string, string> = {
 };
 const LABEL: Record<string, string> = { SUPPORTS: 'Supports', HOLD_STEADY: 'Hold steady', MIXED: 'Mixed', WEAKENING: 'Weakening', WARNING: 'Warning', RAW: "Claude's reply" };
 
-export function VerdictCard({ r, decision, onDecide, showDecision }: { r: ReadResp; decision: string; onDecide: (d: 'TOOK' | 'SKIPPED') => void; showDecision: boolean }) {
+export function VerdictCard({ r, decision, onDecide, showDecision, onTryAlt }: { r: ReadResp; decision: string; onDecide: (d: 'TOOK' | 'SKIPPED') => void; showDecision: boolean; onTryAlt?: (a: AltResp) => void }) {
   return (
     <div className={`rounded-2xl border p-4 space-y-3 ${TONE[r.verdict] ?? TONE.MIXED}`}>
       <p className="text-2xl font-black tracking-tight">{LABEL[r.verdict] ?? r.verdict}</p>
       <ol className="space-y-1.5 text-sm text-zinc-100">{r.lines.map((l, i) => <li key={i} className="leading-snug whitespace-pre-wrap">{l}</li>)}</ol>
       {r.watch && <p className="text-sm text-zinc-300"><span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mr-2">Watch</span>{r.watch}</p>}
       <p className="text-[10px] text-zinc-500">{(r.latencyMs / 1000).toFixed(1)}s · ₹{r.costInr.toFixed(2)} · {r.model}</p>
+      {r.alternative && (
+        <div className="rounded-xl border border-zinc-700 bg-black/20 p-3 space-y-2">
+          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Better fit</p>
+          <p className="text-sm font-black text-zinc-100">
+            {r.alternative.setup.toLowerCase()} {r.alternative.direction.toLowerCase()}
+            {r.alternative.stop !== undefined && <span className="font-mono font-normal text-zinc-300"> · stop {r.alternative.stop.toFixed(2)}</span>}
+          </p>
+          {r.alternative.reason && <p className="text-xs text-zinc-300">{r.alternative.reason}</p>}
+          {onTryAlt && (
+            <button onClick={() => onTryAlt(r.alternative!)} className="h-9 w-full rounded-lg bg-zinc-100 text-black text-xs font-black uppercase tracking-wider">
+              Set this up (then press Go)
+            </button>
+          )}
+        </div>
+      )}
       {showDecision && (
         <div className="flex gap-2 pt-1">
           {(['TOOK', 'SKIPPED'] as const).map((d) => (

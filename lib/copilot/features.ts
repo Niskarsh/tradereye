@@ -52,6 +52,11 @@ export interface Facts {
   PullbackNo?: number; VolTrend?: 'RISING' | 'FALLING' | 'FLAT'; PushVsPullVol?: number;
   Climax: string; FailedBreak: string;
   StopDist?: number; StopVsAtr2?: number; SizeQty?: number; RiskInr?: number;
+  /**
+   * A stop taken from the 10-minute chart: just beyond the last two 10-min candles' high (short) or low (long)
+   * plus 0.1 ATR, at least 0.25 ATR from price, capped at his 2x ATR. Used for the "better fit" suggestion.
+   */
+  StopIdea?: number; StopIdeaAtr?: number; StopIdeaCapped?: 'YES';
   /** YES when he typed no stop: StopDist is then his 2x ATR cap (worst case), not his real stop. */
   StopAssumed?: 'YES';
   RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
@@ -351,6 +356,16 @@ export function computeFacts(inp: FactsInput): Facts {
   const med = median([...tenMinuteBars(prevSessions).map((b) => b.v), ...tensDone.map((b) => b.v)]);
   f.Climax = climax(doneBars.slice(-3), med, nowSec, 600);
   f.FailedBreak = failedBreak(tenBars.slice(0, -3), tenBars.slice(-3), price, 'BOTH', 1);
+
+  // ---- a stop from the 10-minute chart (for the "better fit" suggestion; never instead of his own stop)
+  if (atr && tenBars.length) {
+    const recent = tenBars.slice(-3); // the last two completed candles and the one forming
+    let idea = sign === -1 ? Math.max(...recent.map((b) => b.h)) + 0.1 * atr : Math.min(...recent.map((b) => b.l)) - 0.1 * atr;
+    if ((idea - price) * -sign < 0.25 * atr) idea = price - sign * 0.25 * atr; // price beyond those candles: a minimum distance
+    if (Math.abs(idea - price) > 2 * atr) { idea = price - sign * 2 * atr; f.StopIdeaCapped = 'YES'; }
+    f.StopIdea = r2(idea);
+    f.StopIdeaAtr = r2(Math.abs(idea - price) / atr);
+  }
 
   // ---- plan
   if (inp.plannedStop !== undefined && inp.plannedStop > 0) {

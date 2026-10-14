@@ -5,7 +5,7 @@ import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v1.7';
+export const PROMPT_VERSION = 'copilot-v1.8';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -52,6 +52,11 @@ Use each label when it fits; do not lean toward WARNING to be safe.
 If StopAssumed is YES he has not typed his stop: StopDist is only his 2x ATR cap, his real stop is usually much tighter, so never judge the trade on stop size or risk; judge room in ATR.
 (These three are for ENTRY. MANAGE uses HOLD_STEADY / WEAKENING / WARNING as defined above.)
 
+BETTER FIT
+- The ALT lines read the other setups on the same stock from the same data, each with a stop taken from the 10-minute chart.
+- When your verdict is MIXED or WARNING, set alternative to the ALT setup that clearly fits his playbook better: its core conditions met and its flags none. Use its stop exactly as written in its ALT line; never invent a stop, and never give a target. reason: under 12 words, the main thing that makes it fit.
+- If no ALT is clearly better, or your verdict is SUPPORTS, or Mode is MANAGE: direction NONE, setup NONE, stop 0, reason empty. Doing nothing is a valid answer; do not force one.
+
 WRITING
 - Exactly the 2 or 3 things that matter most, most important first. Each line is short and to the point: under 12 words, plain English, with the number that matters. Example: "Daily 200 EMA 0.4 ATR above: little room."
 - Each line names the thing to look at, so he learns where to look.
@@ -59,7 +64,7 @@ WRITING
 - Use only facts in this message. If something you need is missing and it matters, say "no data on X".
 - No hedging words (may, might, could potentially) unless the data is truly split. No praise, no disclaimers, no restating his setup back to him.
 
-Reply with the JSON object only: verdict, lines (at most 3), watch.`;
+Reply with the JSON object only: verdict, lines (at most 3), watch, alternative.`;
 
 export const VERDICTS = ['SUPPORTS', 'MIXED', 'WARNING', 'HOLD_STEADY', 'WEAKENING'] as const;
 export type Verdict = typeof VERDICTS[number];
@@ -75,8 +80,19 @@ export const READ_SCHEMA = {
     verdict: { type: 'string', enum: [...VERDICTS] },
     lines: { type: 'array', items: { type: 'string' }, description: 'At most 3 short lines, most important first.' },
     watch: { type: 'string' },
+    alternative: {
+      type: 'object',
+      properties: {
+        direction: { type: 'string', enum: ['LONG', 'SHORT', 'NONE'] },
+        setup: { type: 'string', enum: ['MOMENTUM', 'REVERSAL', 'NONE'] },
+        stop: { type: 'number', description: 'Exactly the stop from that ALT line; 0 when NONE.' },
+        reason: { type: 'string' },
+      },
+      required: ['direction', 'setup', 'stop', 'reason'],
+      additionalProperties: false,
+    },
   },
-  required: ['verdict', 'lines', 'watch'],
+  required: ['verdict', 'lines', 'watch', 'alternative'],
   additionalProperties: false,
 } as const;
 
@@ -92,6 +108,8 @@ export interface MessageInput {
   todayTrades: { symbol: string; direction: string; netPnl: number; exitType: string }[];
   stock1m: Candles; nifty1m: Candles; date: string; asOfMs: number;
   live?: boolean;          // false = the session is closed (a practice read at the close)
+  /** The other setups on the same stock (ENTRY only), each with a stop from the 10-minute chart. */
+  alternatives?: { direction: string; setup: string; facts: Facts }[];
 }
 
 const fmt = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(2) : n.toPrecision(5).replace(/\.?0+$/, ''));
@@ -133,6 +151,17 @@ export function buildMessage(m: MessageInput): string {
   ];
   if (m.manage) { const { missing: mm, ...mf } = m.manage; parts.push(`IN_TRADE ${JSON.stringify(compact(mf as Record<string, unknown>))}`); if (mm.length) missing.push(...mm); }
   parts.push(`FLAGS ${flags.length ? flags.join('; ') : 'none'}`);
+  for (const a of m.alternatives ?? []) {
+    const x = a.facts;
+    const bits = [
+      x.StopIdea !== undefined ? `stop ${x.StopIdea} (${x.StopIdeaAtr} ATR${x.StopIdeaCapped ? ', capped at 2x ATR' : ''})` : 'stop -',
+      `room to ${x.RoomTo ?? '-'}${x.RoomAtr !== undefined ? ` ${x.RoomAtr} ATR` : ''}${x.RoomVsStop !== undefined ? ` (${x.RoomVsStop}x stop)` : ''}`,
+      `push/pull ${x.PushVsPullVol ?? '-'}`, `pullback ${x.PullbackNo ?? '-'}`, `busy ${x.RvolBusy ?? '-'}`,
+      `VWAP ${x.VwapSide?.toLowerCase() ?? '-'}`, `EMA in path ${x.Ema200InPath || '-'}`,
+      `flags ${x.flags.length ? x.flags.join('; ') : 'none'}`,
+    ];
+    parts.push(`ALT ${a.setup} ${a.direction}: ${bits.join(' · ')}`);
+  }
   parts.push(`YOU ${JSON.stringify(you)}`);
   parts.push(`TODAY ${m.todayTrades.length ? m.todayTrades.map((t) => `${t.symbol} ${t.direction} ${t.netPnl} ${t.exitType || '-'}`).join(' | ') : 'none'}`);
   if (missing.length) parts.push(`MISSING ${missing.join('; ')}`);

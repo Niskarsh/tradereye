@@ -17,6 +17,8 @@ const PRICES: Record<string, [number, number, number, number]> = {
 
 export interface ClaudeRead {
   verdict: Verdict | 'RAW'; lines: string[]; watch: string;
+  /** A setup that fits the data better (only with MIXED / WARNING), with the app's own stop for it. */
+  alternative?: Alt;
   model: string; inTokens: number; outTokens: number; costInr: number; latencyMs: number;
 }
 
@@ -99,9 +101,10 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
       lines = [replyText ? replyText.slice(0, 800) : `Claude returned no text${why}.`];
       watch = why ? why.trim() : '';
     }
+    const alternative = verdict === 'RAW' ? undefined : readAlternative(parsed.alternative);
     const u = json?.usage ?? {};
     return {
-      verdict, lines, watch, model,
+      verdict, lines, watch, model, alternative,
       inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
       outTokens: u.output_tokens ?? 0,
       costInr: costInr(model, u, o.usdInr ?? 88),
@@ -144,4 +147,26 @@ export function salvageRead(text: string): Record<string, unknown> {
   const w = text.match(/"watch"\s*:\s*"((?:[^"\\]|\\.)*)"/);
   if (w) { try { out.watch = JSON.parse(`"${w[1]}"`); } catch { /* ignore */ } }
   return out;
+}
+
+export interface Alt { direction: 'LONG' | 'SHORT'; setup: 'MOMENTUM' | 'REVERSAL'; stop?: number; reason: string }
+
+function readAlternative(raw: unknown): Alt | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  const direction = String(o.direction ?? '').toUpperCase(), setup = String(o.setup ?? '').toUpperCase();
+  if ((direction !== 'LONG' && direction !== 'SHORT') || (setup !== 'MOMENTUM' && setup !== 'REVERSAL')) return undefined;
+  const stop = Number(o.stop);
+  return { direction, setup, stop: Number.isFinite(stop) && stop > 0 ? stop : undefined, reason: String(o.reason ?? '') } as Alt;
+}
+
+/**
+ * Keeps a suggested alternative only if it is one of the setups the app computed (an ALT line in the message), and
+ * always replaces its stop with the app's own stop for that setup, so a stop can never be made up.
+ */
+export function checkAlternative(alt: Alt | undefined, message: string): Alt | undefined {
+  if (!alt) return undefined;
+  const m = message.match(new RegExp(`^ALT ${alt.setup} ${alt.direction}: stop (\\d+(?:\\.\\d+)?)`, 'm'));
+  if (!m) return undefined;
+  return { ...alt, stop: Number(m[1]) };
 }
