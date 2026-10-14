@@ -311,3 +311,41 @@ test('risk per trade: 300 by default, changed from the app and read back from th
   assert.equal(await getRiskInr(f.client(), 70_000), 350); // after the 60 s cache, read from the sheet
   await assert.rejects(setRiskInr(f.client(), -5), /positive/);
 });
+
+/* ---- cut-off replies and thinking --------------------------------------------------------------------------- */
+import { salvageRead } from '../lib/copilot/claude';
+
+test('a reply cut off mid-JSON still shows its complete lines, not raw JSON', async () => {
+  const cut = '{"verdict":"WARNING","lines":["Re-entry: AEQUS short already stopped you out today for -157.","Room to PDL is 0.18 ATR against a 2.84 stop: RoomVsStop 0.09.","Nifty state unknown and';
+  const s = salvageRead(cut);
+  assert.equal(s.verdict, 'WARNING');
+  assert.deepEqual(s.lines, ['Re-entry: AEQUS short already stopped you out today for -157.', 'Room to PDL is 0.18 ATR against a 2.84 stop: RoomVsStop 0.09.']);
+  const f = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: cut }], stop_reason: 'max_tokens', usage: {} }), { status: 200 })) as typeof fetch;
+  const r = await askClaude('m', { apiKey: 'k', fetchImpl: f });
+  assert.equal(r.verdict, 'WARNING');
+  assert.equal(r.lines.length, 2);
+  assert.match(r.watch, /cut short/);
+});
+
+test('up-front thinking is off by default (between_tools) and on only when asked', async () => {
+  const bodies: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const f = (async (_u: unknown, init: { body: string }) => { bodies.push(JSON.parse(init.body)); return new Response(JSON.stringify({ content: [{ type: 'text', text: '{"verdict":"MIXED","lines":["a"],"watch":"b"}' }], usage: {} }), { status: 200 }); }) as unknown as typeof fetch;
+  await askClaude('m', { apiKey: 'k', fetchImpl: f });
+  await askClaude('m', { apiKey: 'k', fetchImpl: f, thinking: 'on' });
+  assert.deepEqual(bodies[0].thinking, { type: 'between_tools' }); assert.equal(bodies[0].max_tokens, 1000);
+  assert.equal(bodies[1].thinking, undefined); assert.equal(bodies[1].max_tokens, 4000);
+  assert.equal(bodies[0].output_config.format.type, 'json_schema');
+});
+
+test('a check reads Nifty 500 from a week of candles (the request that fixes "Nifty state unknown")', () => {
+  const week = merge(
+    day('2026-10-08', () => ({ o: 24000, h: 24010, l: 23990, c: 24000 })),
+    day('2026-10-09', () => ({ o: 24000, h: 24010, l: 23990, c: 24000 })),
+    niftyUp,
+  );
+  const f = computeFacts(base({ nifty1m: week, nowMs: IST('2026-10-12', '09:45:20') })); // 15m strength needs 15+ minutes
+  assert.notEqual(f.NiftyState, 'UNKNOWN');
+  assert.ok(f.NiftyFirst5Pct !== undefined && f.NiftyNowPct !== undefined && f.RsVsNiftyPct !== undefined && f.Rs15mPct !== undefined);
+  // and an empty answer from Dhan is what produced UNKNOWN before
+  assert.equal(computeFacts(base({ nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] } })).NiftyState, 'UNKNOWN');
+});

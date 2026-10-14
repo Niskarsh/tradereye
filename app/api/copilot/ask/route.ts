@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
     const found = { title, rowNumber: hit.rowNumber, headers, o: hit.o };
     try {
-      const r = await askClaude(payload, { apiKey, model: s.model, usdInr: s.usdInr });
+      const r = await askClaude(payload, { apiKey, model: s.model, usdInr: s.usdInr, thinking: s.thinking });
       await updateCheck(sheets, found, {
         Status: 'ASKED', Model: r.model, Verdict: r.verdict, Line1: r.lines[0] ?? '', Line2: r.lines[1] ?? '', Line3: r.lines[2] ?? '',
         Watch: r.watch, InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '',

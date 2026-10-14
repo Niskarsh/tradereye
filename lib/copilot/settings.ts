@@ -9,5 +9,6 @@ export function settings() {
     dailyLimit: Math.round(n(process.env.COPILOT_DAILY_LIMIT, 25)),
     model: process.env.COPILOT_MODEL?.trim() || 'claude-sonnet-5-5',
     usdInr: n(process.env.COPILOT_USD_INR, 88),
+    thinking: (process.env.COPILOT_THINKING?.trim().toLowerCase() === 'on' ? 'on' : 'off') as 'on' | 'off',
   };
 }
