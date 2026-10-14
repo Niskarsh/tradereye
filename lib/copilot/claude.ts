@@ -45,7 +45,9 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
     max_tokens: 400,
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     tools: [GIVE_READ_TOOL],
-    tool_choice: { type: 'tool', name: 'give_read' },
+    // Some models reject a forced tool_choice ("tool"/"any"), so let the model choose; the system prompt tells it
+    // to answer only through give_read, and a plain JSON reply is accepted as a fallback.
+    tool_choice: { type: 'auto' },
     messages: [{ role: 'user', content: message }],
   };
   const t0 = now();
@@ -79,8 +81,9 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
       if (res.status === 429) throw new ClaudeError(429, 'Claude is rate limiting. Try again in a few seconds.');
       throw new ClaudeError(res.status || 502, `Claude error: ${msg}`);
     }
-    const block = (json?.content ?? []).find((c: { type: string; name?: string }) => c.type === 'tool_use' && c.name === 'give_read');
-    const input = block?.input ?? {};
+    const content: { type: string; name?: string; input?: unknown; text?: string }[] = json?.content ?? [];
+    const block = content.find((c) => c.type === 'tool_use' && c.name === 'give_read');
+    const input = (block?.input ?? parseReadFromText(content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n'))) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const verdict = VERDICTS.includes(input.verdict) ? (input.verdict as Verdict) : undefined;
     if (!verdict) throw new ClaudeError(502, 'Claude answered in an unexpected shape.');
     const lines = (Array.isArray(input.lines) ? input.lines : []).map((l: unknown) => String(l)).filter(Boolean).slice(0, 3);
@@ -94,4 +97,17 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
     };
   }
   throw new ClaudeError(529, 'Claude is overloaded right now. Try again in a moment.');
+}
+
+/** Fallback when the model answers in text: the first {...} that holds a verdict. */
+export function parseReadFromText(text: string): Record<string, unknown> {
+  const start = text.indexOf('{');
+  if (start < 0) return {};
+  for (let end = text.lastIndexOf('}'); end > start; end = text.lastIndexOf('}', end - 1)) {
+    try {
+      const o = JSON.parse(text.slice(start, end + 1));
+      if (o && typeof o === 'object' && 'verdict' in o) return o as Record<string, unknown>;
+    } catch { /* try a shorter span */ }
+  }
+  return {};
 }
