@@ -5,6 +5,7 @@ import { marketStrip, recentTrades } from '@/lib/copilot/service';
 import { computeBehaviour } from '@/lib/copilot/behaviour';
 import { askedToday, readChecks } from '@/lib/copilot/store';
 import { settings } from '@/lib/copilot/settings';
+import { getRiskInr } from '@/lib/copilot/userSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +17,11 @@ export async function POST(req: Request) {
     const sheets = getSheetsClient();
     const now = Date.now();
     const market = await marketStrip({ dhan: g.dhan, sheets });
-    const [trades, positions, checks] = await Promise.all([
+    const [trades, positions, checks, riskInr] = await Promise.all([
       recentTrades(sheets, market.date, now).catch(() => []),
       g.dhan.positions().catch(() => [] as { netQty?: unknown; tradingSymbol?: unknown }[]),
       readChecks(sheets, market.date).catch(() => ({ rows: [] as { o: Record<string, string> }[] })),
+      getRiskInr(sheets),
     ]);
     const open = positions.filter((p) => Number(p.netQty) !== 0);
     const you = computeBehaviour(trades, { today: market.date, nowMs: now, symbol: '', direction: 'LONG', setup: 'MOMENTUM', openPositions: open.length });
@@ -32,7 +34,7 @@ export async function POST(req: Request) {
       market, you: { TradesToday: you.TradesToday, PnlToday: you.PnlToday, FirstTradeLost: you.FirstTradeLost, OpenPositions: you.OpenPositions },
       openSymbols: open.map((p) => String(p.tradingSymbol ?? '').toUpperCase()),
       asksLeft: Math.max(0, settings().dailyLimit - askedToday(checks.rows, market.date)),
-      checks: today, recentSymbols, hasApiKey: !!process.env.ANTHROPIC_API_KEY?.trim(),
+      checks: today, recentSymbols, riskInr, hasApiKey: !!process.env.ANTHROPIC_API_KEY?.trim(),
     });
   } catch (e) {
     return errorResponse(e);

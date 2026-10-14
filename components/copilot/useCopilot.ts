@@ -14,6 +14,7 @@ export interface MarketResp {
   asksLeft: number;
   checks: { checkId: string; time: string; symbol: string; direction: string; setup: string; mode: string; verdict: string; decision: string; tradeGroupId: string }[];
   recentSymbols: string[];
+  riskInr: number;
   hasApiKey: boolean;
 }
 
@@ -81,5 +82,13 @@ export function useCopilot(token: string) {
     catch (e) { setError((e as Error).message); setDecision(''); }
   }, [token, check, loadMarket]);
 
-  return { market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
+  const saveRisk = useCallback(async (riskInr: number) => {
+    if (!token) return;
+    try {
+      const r = await postWithToken<{ riskInr: number }>('/api/copilot/settings', token, { riskInr });
+      setMarket((m) => (m ? { ...m, riskInr: r.riskInr } : m));
+    } catch (e) { setError((e as Error).message); }
+  }, [token]);
+
+  return { saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
 }

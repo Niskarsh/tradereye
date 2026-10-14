@@ -40,6 +40,8 @@ interface TradeEntry {
     Price: string;
     Qty: string;
     NetPnL: string;
+    GrossPnL?: string;
+    TotalCharges?: string;
     'Time (IST)': string;
     Comment: string;
     ExchTradeId: string;
@@ -453,7 +455,13 @@ export default function Journal() {
                                     const f = group.trades[0];
                                     const r2 = (v?: string) => (v === undefined || v === '' || isNaN(Number(v)) ? '' : String(Number(Number(v).toFixed(2))));
                                     const pct = (v?: string) => (r2(v) === '' ? '' : `${r2(v)}%`);
+                                    const inr = (v?: string, signed = false) => {
+                                        if (v === undefined || v === '' || isNaN(Number(v))) return '';
+                                        const n = Number(v);
+                                        return `${signed && n > 0 ? '+' : n < 0 ? '-' : ''}₹${Math.abs(n).toFixed(2)}`;
+                                    };
                                     const items: [string, string | undefined][] = [
+                                        ['P&L before charges', inr(f.GrossPnL, true)], ['Charges', inr(f.TotalCharges)],
                                         ['Rvol first 5m', r2(f.RvolDay5)], ['Rvol at entry', r2(f.RvolDayAtEntry)], ['ATR 10m', r2(f.Atr10m)],
                                         ['MFE', pct(f.MfePct)], ['MAE', pct(f.MaePct)],
                                         ['Stop', f.InitialStop], ['Risk ₹', f.RiskInr], ['Exit', f.ExitType],
