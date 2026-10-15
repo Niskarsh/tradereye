@@ -470,7 +470,8 @@ test('a closed-session check is marked as a practice read, and the verdict rules
 });
 
 /* ---- better fit: other setups with a stop from the 10-minute chart --------------------------------------------- */
-import { checkAlternative } from '../lib/copilot/claude';
+import { checkScenarios } from '../lib/copilot/claude';
+import { coreCheck } from '../lib/copilot/features';
 import { READ_SCHEMA } from '../lib/copilot/prompt';
 
 test('stop from the 10-minute chart: beyond the last two candles, on the right side, capped at 2x ATR', () => {
@@ -489,28 +490,49 @@ test('end to end: a check carries the three other setups, and the message lists 
   assert.match(r.payload, /^ALT REVERSAL LONG: stop \d/m);
 });
 
-test('a suggested alternative keeps the app stop and is dropped if it is not one of the computed setups', () => {
-  const msg = 'FLAGS none\nALT MOMENTUM SHORT: stop 316.4 (0.93 ATR) · room to day low 314.05 1.5 ATR\nALT REVERSAL LONG: stop 314.2 (0.5 ATR)';
-  assert.deepEqual(checkAlternative({ direction: 'SHORT', setup: 'MOMENTUM', stop: 999, reason: 'r' }, msg), { direction: 'SHORT', setup: 'MOMENTUM', stop: 316.4, reason: 'r' });
-  assert.equal(checkAlternative({ direction: 'LONG', setup: 'MOMENTUM', stop: 310, reason: 'r' }, msg), undefined);
-  assert.equal(checkAlternative(undefined, msg), undefined);
+test('scenarios: SETUP only for a CORE MET alternative with the app stop; WAIT keeps the app stop; stand aside allowed', () => {
+  const msg = [
+    'Mode ENTRY · 09:40 IST · LONG · MOMENTUM · AEQUS · price 257.25 · risk limit 300 INR',
+    'FACTS {"StopIdea":255.3,"RoomTo":"VWAP 258.33"}',
+    'FLAGS none',
+    'ALT MOMENTUM SHORT: stop 258.9 (0.8 ATR) · room to day low 254.6 1.3 ATR · core missing: Nifty 500 moving up',
+    'ALT REVERSAL LONG: stop 254.4 (1.4 ATR) · room to VWAP 258.33 0.54 ATR · core missing: target VWAP 258.33 only 0.54 ATR away',
+    'ALT REVERSAL SHORT: stop 259.1 (0.9 ATR) · room to - · CORE MET',
+  ].join('\n');
+  const out = checkScenarios([
+    { kind: 'SETUP', setup: 'REVERSAL', direction: 'SHORT', stop: 999, why: 'a', trigger: 't' },  // CORE MET: kept, stop from the app
+    { kind: 'SETUP', setup: 'MOMENTUM', direction: 'SHORT', stop: 258, why: 'b', trigger: 't' },  // not core met: dropped
+    { kind: 'WAIT', setup: 'REVERSAL', direction: 'LONG', stop: 1, why: 'c', trigger: 'pullback first' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'LONG', stop: 0, why: 'd', trigger: 'close above VWAP' }, // his own setup: StopIdea
+    { kind: 'WAIT', why: 'nothing fits', trigger: '' },
+  ], msg);
+  assert.deepEqual(out.map((x) => [x.kind, x.setup ?? '-', x.direction ?? '-', x.stop]), [
+    ['SETUP', 'REVERSAL', 'SHORT', 259.1], ['WAIT', 'REVERSAL', 'LONG', 254.4], ['WAIT', 'MOMENTUM', 'LONG', 255.3],
+  ]);
+  const aside = checkScenarios([{ kind: 'WAIT', why: 'nothing fits', trigger: '' }], msg);
+  assert.deepEqual(aside.map((x) => [x.kind, x.setup, x.stop]), [['WAIT', undefined, undefined]]);
   // the schema stays within what structured outputs accept
-  const alt = (READ_SCHEMA as any).properties.alternative; // eslint-disable-line @typescript-eslint/no-explicit-any
-  assert.equal(alt.additionalProperties, false);
-  assert.deepEqual([...READ_SCHEMA.required], ['verdict', 'lines', 'watch', 'alternative']);
+  const sc = (READ_SCHEMA as any).properties.scenarios; // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal(sc.items.additionalProperties, false);
+  assert.doesNotMatch(JSON.stringify(READ_SCHEMA), /maxItems|minLength|maximum/);
+  assert.deepEqual([...READ_SCHEMA.required], ['verdict', 'lines', 'watch', 'scenarios']);
 });
 
-test('Claude: an alternative of NONE is no suggestion', async () => {
-  const body = { verdict: 'MIXED', lines: ['a'], watch: 'b', alternative: { direction: 'NONE', setup: 'NONE', stop: 0, reason: '' } };
+test('Claude: scenarios are read from the reply (setup NONE = stand aside), at most 3', async () => {
+  const body = { verdict: 'MIXED', lines: ['a'], watch: 'b', scenarios: [
+    { kind: 'WAIT', setup: 'NONE', direction: 'NONE', stop: 0, why: 'nothing fits', trigger: '' },
+    { kind: 'SETUP', setup: 'REVERSAL', direction: 'LONG', stop: 254.4, why: 'w', trigger: 't' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'LONG', stop: 0, why: 'w', trigger: 't' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'SHORT', stop: 0, why: 'w', trigger: 't' },
+  ] };
   const f = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body) }], usage: {} }), { status: 200 })) as typeof fetch;
-  assert.equal((await askClaude('m', { apiKey: 'k', fetchImpl: f })).alternative, undefined);
-  const body2 = { ...body, alternative: { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' } };
-  const f2 = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body2) }], usage: {} }), { status: 200 })) as typeof fetch;
-  assert.deepEqual((await askClaude('m', { apiKey: 'k', fetchImpl: f2 })).alternative, { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' });
+  const r = await askClaude('m', { apiKey: 'k', fetchImpl: f });
+  assert.equal(r.scenarios.length, 3);
+  assert.equal(r.scenarios[0].setup, undefined);
+  assert.deepEqual([r.scenarios[1].setup, r.scenarios[1].direction, r.scenarios[1].stop], ['REVERSAL', 'LONG', 254.4]);
+  assert.match(SYSTEM_PROMPT, /hypothesis, not a fact/);
+  assert.match(SYSTEM_PROMPT, /Never write field names/);
 });
-
-/* ---- what kind of trade it is by today's move, and the app's own core check ------------------------------------ */
-import { coreCheck } from '../lib/copilot/features';
 
 test('ETERNAL-shaped day: a short is momentum by today\'s move; reversal short has nothing to fade', () => {
   // opens 320.5, slides to ~315 by 11:00, then drifts 315-315.6; Nifty 500 down all morning
@@ -530,7 +552,7 @@ test('ETERNAL-shaped day: a short is momentum by today\'s move; reversal short h
   const rs = facts('SHORT', 'REVERSAL');
   assert.equal(rs.SetupByMove, 'MOMENTUM'); // a short on a falling stock is with the move, whatever the toggle says
   assert.equal(rs.CoreMet, 'NO');
-  assert.match(rs.CoreMissing!, /no up-move to fade/);
+  assert.match(rs.CoreMissing!, /no up-move to fade|not stretched up/);
   const ml = facts('LONG', 'MOMENTUM');
   assert.equal(ml.CoreMet, 'NO');
   assert.match(ml.CoreMissing!, /not moving up today/);
@@ -546,9 +568,9 @@ test('core check rules, one by one', () => {
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'TRENDING_UP' }), 'MOMENTUM', 'SHORT').missing.join(), /Nifty 500 moving up/);
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'FLAT' }), 'MOMENTUM', 'SHORT').missing.join(), /flat/);
   // reversal long: down 50% of range, POC 1.5 ATR above, not busy, Nifty not trending down
-  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 1.5, RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
-  assert.match(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 0.4, RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
-  assert.match(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 1.5, RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
+  assert.deepEqual(coreCheck(f({ Stretch: 'STRETCHED', StretchDir: 'DOWN', StretchRunPct: 80, StretchVwapAtr: 1.1, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
+  assert.match(coreCheck(f({ Stretch: 'STRETCHED', StretchDir: 'DOWN', StretchRunPct: 80, StretchVwapAtr: 1.1, RoomAtr: 0.4, RoomTo: 'POC 256.6', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
+  assert.match(coreCheck(f({ Stretch: 'STRETCHED', StretchDir: 'DOWN', StretchRunPct: 80, StretchVwapAtr: 1.1, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
 });
 
 test('end to end: the check lists the setups that fit now, without asking Claude', async () => {
@@ -558,5 +580,140 @@ test('end to end: the check lists the setups that fit now, without asking Claude
   assert.match(r.payload, /^ALT [A-Z]+ [A-Z]+: stop \d.*(CORE MET|core missing)/m);
   // and a suggestion for any of those setups survives the stop check
   const first = r.alternatives[0];
-  assert.ok(checkAlternative({ direction: first.direction, setup: first.setup, stop: 1, reason: '' }, r.payload)?.stop === first.facts.StopIdea);
+  assert.equal(checkScenarios([{ kind: 'WAIT', setup: first.setup, direction: first.direction, stop: 1, why: '', trigger: '' }], r.payload)[0].stop, first.facts.StopIdea);
+});
+
+test('AEQUS 15 Oct 09:26: an opening flush is a reversal long aiming at VWAP, not at the POC under it', () => {
+  // previous day traded 262-268; today flushes 264.95 -> 255.5 in the first 10 minutes, then holds 255.8-256.8
+  const prev = day('2026-10-14', (m) => ({ o: 265 + Math.sin(m / 20), h: 266 + Math.sin(m / 20), l: 264 + Math.sin(m / 20), c: 265 + Math.sin(m / 20), v: 1000 }));
+  const flush = day('2026-10-15', (m) => {
+    if (m < 10) { const c = 264.5 - m * 0.95; return { o: c + 0.4, h: m === 0 ? 264.95 : c + 0.5, l: m === 9 ? 255.5 : c - 0.4, c, v: 3000 }; }
+    return { o: 256.2, h: 256.8, l: 255.8, c: 256.35, v: 1500 }; // rvol ~0.09 at 09:26, as on the day
+  }, 12);
+  const niftyFlat = day('2026-10-15', (m) => ({ o: 24000, h: 24004, l: 23996, c: 24000 + (m % 2) }), 12);
+  const daily = dailyFlat(800, 265); daily.h.fill(275); daily.l.fill(257); // ADR ~18, so -8.5 is about -47%
+  const f = computeFacts(base({ date: '2026-10-15', nowMs: IST('2026-10-15', '09:26:40'), price: 256.35, direction: 'LONG', setup: 'REVERSAL', stock1m: merge(...calm, prev, flush), nifty1m: niftyFlat, daily, plannedStop: 255.55 }));
+  assert.ok(f.PocPrice! < 258, `today's POC ${f.PocPrice} sits on the flush`);
+  assert.ok(f.Vwap! > 257, `vwap ${f.Vwap}`);
+  assert.match(f.RoomTo!, /^VWAP|^2-day POC/);
+  assert.ok(f.RoomAtr! >= 0.75, `room ${f.RoomAtr} ATR to ${f.RoomTo}`);
+  assert.equal(f.SetupByMove, 'REVERSAL');
+  assert.ok(f.RvolDay! < 0.1, `rvol ${f.RvolDay}`);
+  assert.equal(f.CoreMet, 'YES', f.CoreMissing);
+});
+
+test('follow-up reversal scenario gets the app target (VWAP / POC); momentum gets none; own setup reads RoomTo', () => {
+  const msg = [
+    'Mode ENTRY · 09:54 IST · LONG · MOMENTUM · ANGELONE · price 310.95 · risk limit 300 INR',
+    'FACTS {"StopIdea":307.1,"RoomTo":"day high 313.35"}',
+    'FLAGS none',
+    'ALT REVERSAL SHORT: stop 313.8 (1.4 ATR) · room to VWAP 309.78 0.57 ATR · core missing: busier than usual',
+    'ALT MOMENTUM SHORT: stop 313.8 (1.4 ATR) · room to day low 306.8 2 ATR · core missing: stock not moving down today',
+  ].join('\n');
+  const out = checkScenarios([
+    { kind: 'WAIT', setup: 'REVERSAL', direction: 'SHORT', stop: 0, target: 999, why: 'push may stall', trigger: 'a 10-min close back below 311.45' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'SHORT', stop: 0, target: 300, why: 'x', trigger: 'y' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'LONG', stop: 0, target: 320, why: 'x', trigger: 'a close above 313.35' },
+  ], msg);
+  assert.deepEqual(out.map((x) => [x.setup, x.direction, x.stop, x.target]), [
+    ['REVERSAL', 'SHORT', 313.8, 309.78], ['MOMENTUM', 'SHORT', 313.8, undefined], ['MOMENTUM', 'LONG', 307.1, undefined],
+  ]);
+  const own = checkScenarios([{ kind: 'WAIT', setup: 'REVERSAL', direction: 'LONG', stop: 0, why: '', trigger: '' }],
+    'Mode ENTRY · 09:26 IST · LONG · REVERSAL · AEQUS · price 256.35\nFACTS {"StopIdea":255.31,"RoomTo":"VWAP 258.33"}');
+  assert.deepEqual([own[0].stop, own[0].target], [255.31, 258.33]);
+  assert.match(SYSTEM_PROMPT, /FOLLOW-UP/);
+});
+
+test('Nifty: the opening state stays your first-5-minute rule; the current trend is reported separately', () => {
+  // opens flat, then rises steadily from 09:30
+  const n = day('2026-10-12', (m) => { const c = m < 15 ? 24000 : 24000 + (m - 15) * 3; return { o: c, h: c + 2, l: c - 2, c }; }, 60);
+  const f = computeFacts(base({ nifty1m: n, nowMs: IST('2026-10-12', '10:12:20') }));
+  assert.equal(f.NiftyState, 'FLAT');       // the open, his rule
+  assert.equal(f.NiftyNowTrend, 'RISING');  // from 09:30: the day's move (+0.4%)
+  // before 09:30 the day rule is not used
+  assert.equal(computeFacts(base({ nifty1m: n, nowMs: IST('2026-10-12', '09:28:20') })).NiftyNowTrend, undefined);
+});
+
+test('momentum Nifty check: first-5-min rule before 09:30, the whole day from 09:30', () => {
+  const f = (o: Partial<Facts>) => ({ NiftyState: 'FLAT', Ema200InPath: '', Climax: '', FailedBreak: '', flags: [], missing: [], ExtAdrPct: 40, VwapSide: 'BUYERS', RoomAtr: 1, RoomTo: 'day high 313.35', ...o }) as Facts;
+  assert.match(coreCheck(f({}), 'MOMENTUM', 'LONG').missing.join(), /flat/);                         // 09:25, flat open
+  assert.deepEqual(coreCheck(f({ NiftyNowTrend: 'RISING' }), 'MOMENTUM', 'LONG').missing, []);       // ANGELONE 09:54: up on the day
+  assert.match(coreCheck(f({ NiftyNowTrend: 'FLAT' }), 'MOMENTUM', 'LONG').missing.join(), /flat on the day/);
+  assert.match(coreCheck(f({ NiftyState: 'TRENDING_UP', NiftyNowTrend: 'FALLING' }), 'MOMENTUM', 'LONG').missing.join(), /falling on the day/);
+});
+
+/* ---- his pending orders in Dhan ---------------------------------------------------------------------------------- */
+import { pendingPlan } from '../lib/copilot/pending';
+import { normalizeOrder } from '../lib/live/orders';
+
+const ord = (o: Record<string, unknown>) => normalizeOrder({ orderId: String(Math.random()), tradingSymbol: 'ANGELONE', securityId: '11', exchangeSegment: 'NSE_EQ', productType: 'INTRADAY', orderStatus: 'PENDING', quantity: 100, filledQty: 0, ...o })!;
+
+test('pending orders: entry, stop and target from separate orders; wrong-side levels dropped', () => {
+  const p = pendingPlan([
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.5, createTime: '2026-10-15 09:50:00' }),
+    ord({ transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 307.9, createTime: '2026-10-15 09:50:10' }),
+    ord({ transactionType: 'SELL', orderType: 'LIMIT', price: 315, createTime: '2026-10-15 09:50:20' }),
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 100, tradingSymbol: 'OTHER', securityId: '99' }), // another stock
+  ], 'ANGELONE', '11')!;
+  assert.deepEqual([p.direction, p.entry, p.stop, p.target], ['LONG', 309.5, 307.9, 315]);
+  const bad = pendingPlan([
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.5, createTime: '2026-10-15 09:50:00' }),
+    ord({ transactionType: 'SELL', orderType: 'STOP_LOSS', triggerPrice: 311, price: 310.9, createTime: '2026-10-15 09:50:10' }), // above a long entry
+  ], 'ANGELONE', '11')!;
+  assert.equal(bad.stop, undefined);
+  assert.equal(pendingPlan([ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.5, orderStatus: 'CANCELLED' })], 'ANGELONE', '11'), undefined);
+});
+
+test('pending orders: bracket legs, and exit orders while in the position', () => {
+  const bo = pendingPlan([
+    ord({ transactionType: 'SELL', orderType: 'LIMIT', price: 312, legName: 'ENTRY_LEG', productType: 'BO' }),
+    ord({ transactionType: 'BUY', orderType: 'STOP_LOSS_MARKET', triggerPrice: 313.4, legName: 'STOP_LOSS_LEG', productType: 'BO' }),
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.8, legName: 'TARGET_LEG', productType: 'BO' }),
+  ], 'ANGELONE', '11')!;
+  assert.deepEqual([bo.direction, bo.entry, bo.stop, bo.target], ['SHORT', 312, 313.4, 309.8]);
+  const held = pendingPlan([
+    ord({ transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 308.2 }),
+    ord({ transactionType: 'SELL', orderType: 'LIMIT', price: 316 }),
+  ], 'ANGELONE', '11', 'LONG')!;
+  assert.deepEqual([held.stop, held.target], [308.2, 316]);
+});
+
+test('end to end: the check is judged at his pending entry with his stop, and gets reward:risk', async () => {
+  const d = { ...fakeDhan(), async orders() {
+    return [
+      { orderId: 'E', tradingSymbol: 'X', securityId: '11', transactionType: 'BUY', orderType: 'LIMIT', price: 263.6, orderStatus: 'PENDING', createTime: '2026-10-14 15:00:00' },
+      { orderId: 'S', tradingSymbol: 'X', securityId: '11', transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 263.0, orderStatus: 'PENDING', createTime: '2026-10-14 15:00:05' },
+      { orderId: 'T', tradingSymbol: 'X', securityId: '11', transactionType: 'SELL', orderType: 'LIMIT', price: 265.4, orderStatus: 'PENDING', createTime: '2026-10-14 15:00:09' },
+    ];
+  } };
+  const r = await buildCheck({ dhan: d, sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-19', '01:58:00') }, { direction: 'SHORT', setup: 'REVERSAL', symbol: 'X' });
+  assert.equal(r.direction, 'LONG'); // his order is a buy
+  assert.ok(r.notes.some((n) => /pending order is LONG/.test(n)));
+  assert.equal(r.facts.PendingEntry, 263.6);
+  assert.equal(r.facts.StopDist, 0.6);
+  assert.equal(r.facts.RewardRisk, 3);
+  assert.equal(r.pending?.target, 265.4);
+});
+
+test('stretch is measured against the stock\'s own last 20 days; reversal needs it the other way', () => {
+  const f = (o: Partial<Facts>) => ({ NiftyState: 'FLAT', Ema200InPath: '', Climax: '', FailedBreak: '', flags: [], missing: [], RoomAtr: 1.2, RoomTo: 'VWAP 309.78', RvolBusy: 'NO', ...o }) as Facts;
+  // stretched up -> reversal short ok; reversal long not
+  const up = { Stretch: 'STRETCHED', StretchDir: 'UP', StretchRunPct: 85, StretchVwapAtr: 1.2 } as Partial<Facts>;
+  assert.deepEqual(coreCheck(f(up), 'REVERSAL', 'SHORT').missing, []);
+  assert.match(coreCheck(f(up), 'REVERSAL', 'LONG').missing.join(), /no down-move to fade/);
+  // up on the day but not stretched for THIS stock
+  assert.match(coreCheck(f({ Stretch: 'NONE', StretchDir: 'UP', StretchRunPct: 40, StretchVwapAtr: 0.4 }), 'REVERSAL', 'SHORT').missing.join(), /not stretched up: run bigger than 40%/);
+  // his read: Nifty still pushing the stock's way (last 20 min) = not yet; turning against it = fine
+  assert.match(coreCheck(f({ ...up, NiftyVsStock: 'WITH_STOCK' }), 'REVERSAL', 'SHORT').missing.join(), /still pushing up/);
+  assert.deepEqual(coreCheck(f({ ...up, NiftyVsStock: 'AGAINST_STOCK', NiftyState: 'TRENDING_UP' }), 'REVERSAL', 'SHORT').missing, []);
+});
+
+test('stretch numbers: a run bigger than every recent day and far from VWAP is very stretched', () => {
+  // prior days ran 0.5 from open at most; today runs +6 steadily from 300
+  const daily = dailyFlat(800, 300); daily.h.fill(300.5); daily.l.fill(299.5);
+  const f = computeFacts(base({ daily, nowMs: IST('2026-10-12', '09:45:20'), price: 309.2 }));
+  assert.equal(f.StretchDir, 'UP');
+  assert.equal(f.StretchRunPct, 100);
+  assert.ok(f.StretchVwapAtr! > 0.75, `vwap atr ${f.StretchVwapAtr}`);
+  assert.notEqual(f.Stretch, 'NONE');
 });

@@ -16,19 +16,24 @@ const STATE_TEXT: Record<string, string> = {
 };
 const stateTone = (s: string) => (s.startsWith('TRENDING') ? 'text-data-green' : s === 'FLIPPED' ? 'text-data-red' : s.startsWith('FADING') ? 'text-brand-accent' : 'text-zinc-300');
 
-export function MarketStrip({ m, err }: { m: MarketResp | null; err: string }) {
+export function MarketStrip({ m, err, onRefresh }: { m: MarketResp | null; err: string; onRefresh?: () => void }) {
   if (!m) return <div className="rounded-2xl bg-brand-card p-4 text-xs text-zinc-500">{err || 'Loading market…'}</div>;
   const k = m.market;
   return (
     <div className="rounded-2xl bg-brand-card p-4 space-y-2">
       <div className="flex items-baseline justify-between gap-3">
         <div>
-          <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Nifty 500 {k.live ? '' : `· ${k.date} close`}</p>
-          <p className={`text-xl font-black tracking-tight ${stateTone(k.state)}`}>{STATE_TEXT[k.state] ?? k.state}</p>
+          <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Nifty 500 {k.live ? `· ${k.asOf.slice(0, 5)}` : `· ${k.date} close`}
+            {onRefresh && <button onClick={onRefresh} className="ml-2 text-zinc-400 underline decoration-dotted underline-offset-2">refresh</button>}
+          </p>
+          <p className={`text-xl font-black tracking-tight ${stateTone(k.state)}`}>
+            <span className="text-xs font-bold text-zinc-500 mr-1">Open</span>{STATE_TEXT[k.state] ?? k.state}
+            {k.nowTrend && <><span className="text-xs font-bold text-zinc-500 mx-1">· Day</span><span className={k.nowTrend === 'RISING' ? 'text-data-green' : k.nowTrend === 'FALLING' ? 'text-data-red' : 'text-zinc-300'}>{k.nowTrend.toLowerCase()}</span></>}
+          </p>
         </div>
         <div className="text-right font-mono text-xs text-zinc-400 leading-5">
           <div>first 5m {signed(k.first5, 2, '%')}</div>
-          <div>now {signed(k.nowPct, 2, '%')} · 10m {signed(k.last10, 2, '%')}</div>
+          <div>day {signed(k.nowPct, 2, '%')} · 10m {signed(k.last10, 2, '%')}</div>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-400">
@@ -59,12 +64,19 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?: (stop: number) => void; onTryAlt?: (a: AltResp) => void }) {
+export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c: CheckResp; onUseStop?: (stop: number) => void; onTryAlt?: (a: AltResp) => void; onRefresh?: () => void; refreshing?: boolean }) {
   const f = c.facts, b = c.behaviour, m = c.manage;
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between">
-        <p className="text-lg font-black tracking-tight">{c.symbol} <span className="text-sm text-zinc-400">{c.direction} · {c.setup.toLowerCase()} · {c.mode === 'MANAGE' ? 'in trade' : 'entry'}</span></p>
+        <p className="text-lg font-black tracking-tight">{c.symbol} <span className="text-sm text-zinc-400">{c.direction} · {c.setup.toLowerCase()} · {c.mode === 'MANAGE' ? 'in trade' : 'entry'}</span>
+          {onRefresh && (
+            <button onClick={onRefresh} disabled={refreshing} title="Fetch fresh data for this stock (no Claude)"
+              className="ml-2 align-middle rounded-lg border border-zinc-700 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-300 disabled:opacity-40">
+              {refreshing ? '…' : '↻ Refresh'}
+            </button>
+          )}
+        </p>
         <p className="font-mono text-sm text-zinc-300">₹{c.price.toFixed(2)} <span className="text-[10px] text-zinc-600">{c.priceSource === 'LTP' ? 'live' : 'last candle'} {c.time.slice(0, 5)}</span></p>
       </div>
       {f.flags.length > 0 && (
@@ -102,9 +114,12 @@ export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?
         </section>
       )}
 
+      <details className="group">
+        <summary className="cursor-pointer select-none text-[10px] font-black uppercase tracking-widest text-zinc-500">Show the numbers</summary>
+        <div className="mt-3 space-y-3">
       {m && (
         <Group title="In trade">
-          <Row label="Avg entry / stop now" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)}`} />
+          <Row label="Avg entry / stop / target" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)} / ${fmt(m.CurrentTarget)}`} hint="from Dhan" />
           <Row label="Open R / best R" value={`${fmt(m.OpenR)} / ${fmt(m.BestR)}`} hint={m.GivebackR !== undefined ? `gave back ${fmt(m.GivebackR)}R` : undefined} />
           <Row label="Stop distance" value={`${fmt(m.StopDistAtr)} ATR`} />
           <Row label="Counter-volume" value={fmt(m.CounterVolRatio)} hint="against ÷ with" />
@@ -115,7 +130,8 @@ export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?
       )}
 
       <Group title="Market">
-        <Row label="Nifty 500" value={STATE_TEXT[f.NiftyState] ?? f.NiftyState} />
+        <Row label="Nifty 500 open / day" value={`${STATE_TEXT[f.NiftyState] ?? f.NiftyState} / ${f.NiftyNowTrend?.toLowerCase() ?? 'from 09:30'}`} hint="day decides from 09:30" />
+        <Row label="Nifty last 20m vs the stock" value={f.NiftyVsStock ? `${f.NiftyVsStock === 'AGAINST_STOCK' ? 'turning against it' : f.NiftyVsStock === 'WITH_STOCK' ? 'with it' : 'flat'} (${signed(f.Nifty20mPct, 2, '%')})` : 'from 09:30'} />
         <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
       </Group>
 
@@ -130,8 +146,11 @@ export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?
         <Row label="Prev day high / low" value={`${fmt(f.PdhDistAtr)} / ${fmt(f.PdlDistAtr)}`} hint="ATR" />
         <Row label="VWAP control" value={f.VwapSide ? `${f.VwapSide.toLowerCase()} · ${fmt(f.VwapHeldMin)} min` : '–'} />
         <Row label="vs Nifty (day / last 2 candles)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs20mPct, 2, '%')}`} />
+        <Row label="Stretch" value={f.Stretch ? `${f.Stretch === 'NONE' ? 'not stretched' : f.Stretch === 'VERY_STRETCHED' ? 'very stretched' : 'stretched'} ${f.StretchDir?.toLowerCase() ?? ''}` : '–'}
+          hint={f.StretchRunPct !== undefined ? `run > ${f.StretchRunPct}% of last 20 days · ${fmt(f.StretchVwapAtr)} ATR from VWAP` : undefined} />
         <Row label="Extension from open" value={f.ExtAdrPct !== undefined ? `${signed(f.ExtAdrPct, 0, '%')} of ADR` : '–'} />
-        <Row label="POC" value={f.PocPrice !== undefined ? `${fmt(f.PocPrice)} (${fmt(f.PocDistAtr)} ATR)` : '–'} hint="approx." />
+        <Row label="POC today / 2-day" value={`${fmt(f.PocPrice)} / ${fmt(f.Poc2d)}`} hint="approx." />
+        <Row label="VWAP" value={fmt(f.Vwap)} />
         <Row label="Pullback no." value={fmt(f.PullbackNo)} hint="10m candles" />
         <Row label="Volume trend / push÷pull" hint="10m" value={`${f.VolTrend?.toLowerCase() ?? '–'} / ${fmt(f.PushVsPullVol)}`} />
         <Row label="Climax / failed break" value={`${f.Climax || '–'} / ${f.FailedBreak || '–'}`} />
@@ -139,6 +158,12 @@ export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?
 
       {c.mode === 'ENTRY' && (
         <Group title="Plan">
+          {(f.PendingEntry !== undefined || f.PendingStop !== undefined || f.PendingTarget !== undefined) && (
+            <Row label="Your Dhan orders" value={`entry ${fmt(f.PendingEntry)} · stop ${fmt(f.PendingStop)} · target ${fmt(f.PendingTarget)}`} />
+          )}
+          {f.RewardRisk !== undefined && (
+            <Row label="Reward : risk" value={`${fmt(f.RewardRisk)} : 1${f.TargetPastObstacle ? ' · target past the next obstacle' : ''}`} />
+          )}
           <Row label="Stop distance" value={f.StopAssumed ? `${fmt(f.StopDist)} (2×ATR cap: type your stop)` : `${fmt(f.StopDist)} (${fmt(f.StopVsAtr2)}× of 2ATR)`} />
           <Row label="Size / risk" value={`${fmt(f.SizeQty)} sh / ₹${fmt(f.RiskInr, 0)}`} />
           <Row label="Next obstacle" value={f.RoomTo ?? '–'} />
@@ -164,6 +189,8 @@ export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?
           <ul className="mt-1 list-disc pl-5">{f.missing.map((x) => <li key={x}>{x}</li>)}</ul>
         </details>
       )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -185,19 +212,26 @@ export function VerdictCard({ r, decision, onDecide, showDecision, onTryAlt }: {
       <ol className="space-y-1.5 text-sm text-zinc-100">{r.lines.map((l, i) => <li key={i} className="leading-snug whitespace-pre-wrap">{l}</li>)}</ol>
       {r.watch && <p className="text-sm text-zinc-300"><span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mr-2">Watch</span>{r.watch}</p>}
       <p className="text-[10px] text-zinc-500">{(r.latencyMs / 1000).toFixed(1)}s · ₹{r.costInr.toFixed(2)} · {r.model}</p>
-      {r.alternative && (
-        <div className="rounded-xl border border-zinc-700 bg-black/20 p-3 space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Better fit</p>
-          <p className="text-sm font-black text-zinc-100">
-            {r.alternative.setup.toLowerCase()} {r.alternative.direction.toLowerCase()}
-            {r.alternative.stop !== undefined && <span className="font-mono font-normal text-zinc-300"> · stop {r.alternative.stop.toFixed(2)}</span>}
-          </p>
-          {r.alternative.reason && <p className="text-xs text-zinc-300">{r.alternative.reason}</p>}
-          {onTryAlt && (
-            <button onClick={() => onTryAlt(r.alternative!)} className="h-9 w-full rounded-lg bg-zinc-100 text-black text-xs font-black uppercase tracking-wider">
-              Set this up (then press Go)
-            </button>
-          )}
+      {r.scenarios?.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Other ways to play it</p>
+          {r.scenarios.map((sc, i) => (
+            <div key={i} className="rounded-xl border border-zinc-700 bg-black/20 p-3 space-y-1">
+              <p className="text-sm font-black text-zinc-100">
+                {sc.setup ? `${sc.kind === 'WAIT' ? 'Wait: ' : ''}${sc.setup.toLowerCase()} ${sc.direction!.toLowerCase()}` : 'Stand aside'}
+                {sc.stop !== undefined && <span className="font-mono font-normal text-zinc-300"> · stop {sc.stop.toFixed(2)}</span>}
+                {sc.target !== undefined && <span className="font-mono font-normal text-zinc-300"> · target {sc.target.toFixed(2)}</span>}
+              </p>
+              {sc.why && <p className="text-xs text-zinc-300">{sc.why}</p>}
+              {sc.trigger && <p className="text-xs text-zinc-400"><span className="font-black text-zinc-500">{sc.kind === 'WAIT' ? 'Enter when: ' : 'Working if: '}</span>{sc.trigger}</p>}
+              {sc.setup && onTryAlt && (
+                <button onClick={() => onTryAlt({ direction: sc.direction!, setup: sc.setup!, stop: sc.stop, reason: sc.why })}
+                  className="mt-1 h-8 w-full rounded-lg bg-zinc-100 text-black text-[10px] font-black uppercase tracking-wider">
+                  Set this up (then press Go)
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       )}
       {showDecision && (

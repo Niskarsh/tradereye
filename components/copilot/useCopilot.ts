@@ -8,7 +8,7 @@ export type Dir = 'LONG' | 'SHORT';
 export type SetupT = 'MOMENTUM' | 'REVERSAL';
 
 export interface MarketResp {
-  market: { date: string; live: boolean; asOf: string; first5?: number; nowPct?: number; last10?: number; state: string };
+  market: { date: string; live: boolean; asOf: string; first5?: number; nowPct?: number; last10?: number; last30?: number; nowTrend?: string; state: string };
   you: { TradesToday: number; PnlToday: number; FirstTradeLost: boolean; OpenPositions: number };
   openSymbols: string[];
   asksLeft: number;
@@ -23,10 +23,12 @@ export interface CheckResp {
   symbol: string; direction: Dir; setup: SetupT; price: number; priceSource: string;
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; notes: string[]; asksLeft: number;
   fitsNow: { direction: Dir; setup: SetupT; stop?: number; roomTo?: string; roomAtr?: number }[];
+  pending?: { direction?: Dir; entry?: number; stop?: number; target?: number; source: string };
 }
 
 export interface AltResp { direction: Dir; setup: SetupT; stop?: number; reason: string }
-export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number; alternative?: AltResp }
+export interface ScenarioResp { kind: 'SETUP' | 'WAIT'; setup?: SetupT; direction?: Dir; stop?: number; target?: number; why: string; trigger: string }
+export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number; scenarios: ScenarioResp[] }
 
 const MARKET_EVERY_MS = 60_000;
 
@@ -56,7 +58,8 @@ export function useCopilot(token: string) {
 
   const runCheck = useCallback(async (symbol: string, plannedStop?: number) => {
     if (!token || !direction || !setup || !symbol) return;
-    setBusy('check'); setError(''); setRead(null); setDecision(''); setCheck(null);
+    // keep the current card on screen until the fresh one arrives (refresh), then replace it
+    setBusy('check'); setError(''); setRead(null); setDecision('');
     try {
       const r = await postWithToken<CheckResp>('/api/copilot/check', token, { direction, setup, symbol, plannedStop });
       setCheck(r);

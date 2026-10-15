@@ -19,6 +19,14 @@ export default function CopilotPage() {
   const [editRisk, setEditRisk] = useState(false);
   const [riskDraft, setRiskDraft] = useState('');
   const stopRef = useRef<HTMLInputElement>(null);
+
+  // orders already placed in Dhan: fill the Stop box (if empty) and follow the order's direction
+  useEffect(() => {
+    const p = c.check?.pending;
+    if (!p || c.check?.mode !== 'ENTRY') return;
+    if (p.stop !== undefined) setStop((cur) => (cur ? cur : String(p.stop)));
+    if (p.direction && p.direction !== c.direction) c.setDirection(p.direction);
+  }, [c.check]); // eslint-disable-line react-hooks/exhaustive-deps
   const picked = useRef('');
 
   useEffect(() => {
@@ -89,7 +97,7 @@ export default function CopilotPage() {
           </div>
         )}
 
-        <MarketStrip m={c.market} err={c.marketErr} />
+        <MarketStrip m={c.market} err={c.marketErr} onRefresh={c.reload} />
 
         <div className="grid grid-cols-2 gap-2">
           {(['LONG', 'SHORT'] as Dir[]).map((d) => (
@@ -141,7 +149,9 @@ export default function CopilotPage() {
 
         {c.read && <VerdictCard r={c.read} decision={c.decision} onDecide={c.decide} showDecision={!held}
           onTryAlt={(a) => { c.setDirection(a.direction); c.setSetup(a.setup); setStop(a.stop !== undefined ? String(a.stop) : ''); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
-        {c.check && <FactsCard c={c.check} onUseStop={held ? undefined : (st) => { setStop(String(st)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+        {c.check && <FactsCard c={c.check} refreshing={c.busy !== ''}
+          onRefresh={() => { const st = parseFloat(stop); c.runCheck(c.check!.symbol, Number.isFinite(st) && st > 0 ? st : undefined); c.reload(); }}
+          onUseStop={held ? undefined : (st) => { setStop(String(st)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
           onTryAlt={(a) => { c.setDirection(a.direction); c.setSetup(a.setup); setStop(a.stop !== undefined ? String(a.stop) : ''); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
 
         <TodayChecks m={c.market} />

@@ -17,8 +17,8 @@ const PRICES: Record<string, [number, number, number, number]> = {
 
 export interface ClaudeRead {
   verdict: Verdict | 'RAW'; lines: string[]; watch: string;
-  /** A setup that fits the data better (only with MIXED / WARNING), with the app's own stop for it. */
-  alternative?: Alt;
+  /** Other ways to play it (only with MIXED / WARNING), each with the app's own stop. */
+  scenarios: Scenario[];
   model: string; inTokens: number; outTokens: number; costInr: number; latencyMs: number;
 }
 
@@ -101,10 +101,10 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
       lines = [replyText ? replyText.slice(0, 800) : `Claude returned no text${why}.`];
       watch = why ? why.trim() : '';
     }
-    const alternative = verdict === 'RAW' ? undefined : readAlternative(parsed.alternative);
+    const scenarios = verdict === 'RAW' ? [] : readScenarios(parsed.scenarios);
     const u = json?.usage ?? {};
     return {
-      verdict, lines, watch, model, alternative,
+      verdict, lines, watch, model, scenarios,
       inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
       outTokens: u.output_tokens ?? 0,
       costInr: costInr(model, u, o.usdInr ?? 88),
@@ -149,24 +149,66 @@ export function salvageRead(text: string): Record<string, unknown> {
   return out;
 }
 
-export interface Alt { direction: 'LONG' | 'SHORT'; setup: 'MOMENTUM' | 'REVERSAL'; stop?: number; reason: string }
+export interface Scenario {
+  kind: 'SETUP' | 'WAIT';
+  setup?: 'MOMENTUM' | 'REVERSAL';
+  direction?: 'LONG' | 'SHORT';
+  stop?: number;
+  /** Reversal only: the app's own target (VWAP / POC) for that setup. */
+  target?: number;
+  why: string;
+  trigger: string;
+}
 
-function readAlternative(raw: unknown): Alt | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const o = raw as Record<string, unknown>;
-  const direction = String(o.direction ?? '').toUpperCase(), setup = String(o.setup ?? '').toUpperCase();
-  if ((direction !== 'LONG' && direction !== 'SHORT') || (setup !== 'MOMENTUM' && setup !== 'REVERSAL')) return undefined;
-  const stop = Number(o.stop);
-  return { direction, setup, stop: Number.isFinite(stop) && stop > 0 ? stop : undefined, reason: String(o.reason ?? '') } as Alt;
+function readScenarios(raw: unknown): Scenario[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Scenario[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const kind = String(o.kind ?? '').toUpperCase() === 'SETUP' ? 'SETUP' : 'WAIT';
+    const setup = String(o.setup ?? '').toUpperCase(), direction = String(o.direction ?? '').toUpperCase();
+    const hasSetup = (setup === 'MOMENTUM' || setup === 'REVERSAL') && (direction === 'LONG' || direction === 'SHORT');
+    const stop = Number(o.stop);
+    out.push({
+      kind: kind as Scenario['kind'],
+      ...(hasSetup ? { setup: setup as Scenario['setup'], direction: direction as Scenario['direction'] } : {}),
+      stop: Number.isFinite(stop) && stop > 0 ? stop : undefined,
+      target: Number(o.target) > 0 ? Number(o.target) : undefined,
+      why: String(o.why ?? ''), trigger: String(o.trigger ?? ''),
+    });
+  }
+  return out.slice(0, 3);
 }
 
 /**
- * Keeps a suggested alternative only if it is one of the setups the app computed (an ALT line in the message), and
- * always replaces its stop with the app's own stop for that setup, so a stop can never be made up.
+ * Keeps only scenarios the data supports, and never a made-up stop:
+ *  SETUP must be an ALT line marked CORE MET; its stop is replaced by the stop in that line.
+ *  WAIT with a setup takes the stop from its ALT line, or StopIdea when it is his own setup; otherwise no stop.
+ *  WAIT without a setup is "stand aside".
  */
-export function checkAlternative(alt: Alt | undefined, message: string): Alt | undefined {
-  if (!alt) return undefined;
-  const m = message.match(new RegExp(`^ALT ${alt.setup} ${alt.direction}: stop (\\d+(?:\\.\\d+)?)`, 'm'));
-  if (!m) return undefined;
-  return { ...alt, stop: Number(m[1]) };
+export function checkScenarios(list: Scenario[], message: string): Scenario[] {
+  const header = message.match(/^Mode \w+ · [^·]+ · (LONG|SHORT) · (MOMENTUM|REVERSAL) ·/m);
+  const ownStop = message.match(/"StopIdea":(\d+(?:\.\d+)?)/);
+  const ownTarget = message.match(/"RoomTo":"(?:VWAP|POC|2-day POC) (\d+(?:\.\d+)?)"/);
+  // reversal target from an ALT line: "room to VWAP 309.78 ..." / "room to POC 266.1 ..." / "room to 2-day POC ..."
+  const altTarget = (line: string) => line.match(/room to (?:VWAP|POC|2-day POC) (\d+(?:\.\d+)?)/)?.[1];
+  const out: Scenario[] = [];
+  for (const sc of list) {
+    if (!sc.setup || !sc.direction) {
+      if (sc.kind === 'WAIT') out.push({ ...sc, stop: undefined, target: undefined });
+      continue;
+    }
+    const line = message.match(new RegExp(`^ALT ${sc.setup} ${sc.direction}: stop (\\d+(?:\\.\\d+)?).*$`, 'm'));
+    const own = header && header[1] === sc.direction && header[2] === sc.setup;
+    if (sc.kind === 'SETUP') {
+      if (!line || !/CORE MET/.test(line[0])) continue;
+      const t = sc.setup === 'REVERSAL' ? altTarget(line[0]) : undefined;
+      out.push({ ...sc, stop: Number(line[1]), target: t ? Number(t) : undefined });
+    } else {
+      const t = sc.setup !== 'REVERSAL' ? undefined : line ? altTarget(line[0]) : own && ownTarget ? ownTarget[1] : undefined;
+      out.push({ ...sc, stop: line ? Number(line[1]) : own && ownStop ? Number(ownStop[1]) : undefined, target: t ? Number(t) : undefined });
+    }
+  }
+  return out.slice(0, 3);
 }
