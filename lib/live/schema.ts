@@ -127,6 +127,7 @@ export const COPILOT_CHECK_COLS = [
   'StopIdea', 'AltDirection', 'AltSetup', 'AltStop', 'AltReason',
   'MoveToday', 'SetupByMove', 'CoreMet', 'CoreMissing', 'FitsNow',
   'Poc2d', 'Vwap', 'Scenarios',
+  'NiftyNowTrend', 'PendingEntry', 'PendingStop', 'PendingTarget', 'RewardRisk', 'TargetPastObstacle', 'CurrentTarget',
 ] as const;
 
 /** live-trades.Status values */

@@ -641,3 +641,56 @@ test('momentum Nifty check: first-5-min rule before 09:30, the whole day from 09
   assert.match(coreCheck(f({ NiftyNowTrend: 'FLAT' }), 'MOMENTUM', 'LONG').missing.join(), /flat on the day/);
   assert.match(coreCheck(f({ NiftyState: 'TRENDING_UP', NiftyNowTrend: 'FALLING' }), 'MOMENTUM', 'LONG').missing.join(), /falling on the day/);
 });
+
+/* ---- his pending orders in Dhan ---------------------------------------------------------------------------------- */
+import { pendingPlan } from '../lib/copilot/pending';
+import { normalizeOrder } from '../lib/live/orders';
+
+const ord = (o: Record<string, unknown>) => normalizeOrder({ orderId: String(Math.random()), tradingSymbol: 'ANGELONE', securityId: '11', exchangeSegment: 'NSE_EQ', productType: 'INTRADAY', orderStatus: 'PENDING', quantity: 100, filledQty: 0, ...o })!;
+
+test('pending orders: entry, stop and target from separate orders; wrong-side levels dropped', () => {
+  const p = pendingPlan([
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.5, createTime: '2026-10-15 09:50:00' }),
+    ord({ transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 307.9, createTime: '2026-10-15 09:50:10' }),
+    ord({ transactionType: 'SELL', orderType: 'LIMIT', price: 315, createTime: '2026-10-15 09:50:20' }),
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 100, tradingSymbol: 'OTHER', securityId: '99' }), // another stock
+  ], 'ANGELONE', '11')!;
+  assert.deepEqual([p.direction, p.entry, p.stop, p.target], ['LONG', 309.5, 307.9, 315]);
+  const bad = pendingPlan([
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.5, createTime: '2026-10-15 09:50:00' }),
+    ord({ transactionType: 'SELL', orderType: 'STOP_LOSS', triggerPrice: 311, price: 310.9, createTime: '2026-10-15 09:50:10' }), // above a long entry
+  ], 'ANGELONE', '11')!;
+  assert.equal(bad.stop, undefined);
+  assert.equal(pendingPlan([ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.5, orderStatus: 'CANCELLED' })], 'ANGELONE', '11'), undefined);
+});
+
+test('pending orders: bracket legs, and exit orders while in the position', () => {
+  const bo = pendingPlan([
+    ord({ transactionType: 'SELL', orderType: 'LIMIT', price: 312, legName: 'ENTRY_LEG', productType: 'BO' }),
+    ord({ transactionType: 'BUY', orderType: 'STOP_LOSS_MARKET', triggerPrice: 313.4, legName: 'STOP_LOSS_LEG', productType: 'BO' }),
+    ord({ transactionType: 'BUY', orderType: 'LIMIT', price: 309.8, legName: 'TARGET_LEG', productType: 'BO' }),
+  ], 'ANGELONE', '11')!;
+  assert.deepEqual([bo.direction, bo.entry, bo.stop, bo.target], ['SHORT', 312, 313.4, 309.8]);
+  const held = pendingPlan([
+    ord({ transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 308.2 }),
+    ord({ transactionType: 'SELL', orderType: 'LIMIT', price: 316 }),
+  ], 'ANGELONE', '11', 'LONG')!;
+  assert.deepEqual([held.stop, held.target], [308.2, 316]);
+});
+
+test('end to end: the check is judged at his pending entry with his stop, and gets reward:risk', async () => {
+  const d = { ...fakeDhan(), async orders() {
+    return [
+      { orderId: 'E', tradingSymbol: 'X', securityId: '11', transactionType: 'BUY', orderType: 'LIMIT', price: 263.6, orderStatus: 'PENDING', createTime: '2026-10-14 15:00:00' },
+      { orderId: 'S', tradingSymbol: 'X', securityId: '11', transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 263.0, orderStatus: 'PENDING', createTime: '2026-10-14 15:00:05' },
+      { orderId: 'T', tradingSymbol: 'X', securityId: '11', transactionType: 'SELL', orderType: 'LIMIT', price: 265.4, orderStatus: 'PENDING', createTime: '2026-10-14 15:00:09' },
+    ];
+  } };
+  const r = await buildCheck({ dhan: d, sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-19', '01:58:00') }, { direction: 'SHORT', setup: 'REVERSAL', symbol: 'X' });
+  assert.equal(r.direction, 'LONG'); // his order is a buy
+  assert.ok(r.notes.some((n) => /pending order is LONG/.test(n)));
+  assert.equal(r.facts.PendingEntry, 263.6);
+  assert.equal(r.facts.StopDist, 0.6);
+  assert.equal(r.facts.RewardRisk, 3);
+  assert.equal(r.pending?.target, 265.4);
+});

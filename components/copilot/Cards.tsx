@@ -119,7 +119,7 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
         <div className="mt-3 space-y-3">
       {m && (
         <Group title="In trade">
-          <Row label="Avg entry / stop now" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)}`} />
+          <Row label="Avg entry / stop / target" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)} / ${fmt(m.CurrentTarget)}`} hint="from Dhan" />
           <Row label="Open R / best R" value={`${fmt(m.OpenR)} / ${fmt(m.BestR)}`} hint={m.GivebackR !== undefined ? `gave back ${fmt(m.GivebackR)}R` : undefined} />
           <Row label="Stop distance" value={`${fmt(m.StopDistAtr)} ATR`} />
           <Row label="Counter-volume" value={fmt(m.CounterVolRatio)} hint="against ÷ with" />
@@ -155,6 +155,12 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
 
       {c.mode === 'ENTRY' && (
         <Group title="Plan">
+          {(f.PendingEntry !== undefined || f.PendingStop !== undefined || f.PendingTarget !== undefined) && (
+            <Row label="Your Dhan orders" value={`entry ${fmt(f.PendingEntry)} · stop ${fmt(f.PendingStop)} · target ${fmt(f.PendingTarget)}`} />
+          )}
+          {f.RewardRisk !== undefined && (
+            <Row label="Reward : risk" value={`${fmt(f.RewardRisk)} : 1${f.TargetPastObstacle ? ' · target past the next obstacle' : ''}`} />
+          )}
           <Row label="Stop distance" value={f.StopAssumed ? `${fmt(f.StopDist)} (2×ATR cap: type your stop)` : `${fmt(f.StopDist)} (${fmt(f.StopVsAtr2)}× of 2ATR)`} />
           <Row label="Size / risk" value={`${fmt(f.SizeQty)} sh / ₹${fmt(f.RiskInr, 0)}`} />
           <Row label="Next obstacle" value={f.RoomTo ?? '–'} />

@@ -14,6 +14,7 @@ import { buildMessage, PROMPT_VERSION } from './prompt';
 import type { CheckRow } from './store';
 import { settings } from './settings';
 import { getRiskInr } from './userSettings';
+import { pendingPlan, type PendingPlan } from './pending';
 
 export { settings };
 
@@ -83,6 +84,7 @@ export interface CheckResult {
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; row: CheckRow; payload: string; notes: string[];
   alternatives: Alternative[];
   fitsNow: FitNow[];
+  pending?: PendingPlan;
 }
 
 /** A setup the data fits right now (core conditions met, no flags), with the stop from the 10-minute chart. */
@@ -99,7 +101,6 @@ interface Deps {
   now?: () => number;
 }
 
-const OPEN_STATUSES = new Set(['PENDING', 'TRANSIT', 'PART_TRADED', 'TRIGGER_PENDING', 'OPEN', 'MODIFIED', 'CONFIRM']);
 
 export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckResult> {
   const s = { ...settings(), riskInr: await getRiskInr(deps.sheets) };
@@ -160,15 +161,38 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
     direction = posDir;
   }
 
+  // his own orders in Dhan for this stock = his intention (entry, stop, target)
+  const rawOrders = await deps.dhan.orders().catch(() => [] as any[]);
+  const snaps = rawOrders.map(normalizeOrder).filter((o): o is NonNullable<typeof o> => !!o);
+  const pending: PendingPlan | undefined = pendingPlan(snaps, symbol, securityId, mode === 'MANAGE' ? direction : undefined);
+  let evalPrice = price;
+  if (mode === 'ENTRY' && pending) {
+    if (pending.direction && pending.direction !== direction) {
+      notes.push(`Your pending order is ${pending.direction}; reading the trade as ${pending.direction}.`);
+      direction = pending.direction;
+    }
+    if (pending.entry !== undefined) { evalPrice = pending.entry; notes.push(`Judged at your pending entry ${pending.entry} (last price ${price}).`); }
+  }
+  const plannedStop = mode === 'ENTRY' ? req.plannedStop ?? pending?.stop : undefined;
+
   // sheets: your day and record, and your charge rate
   const trades = await recentTrades(deps.sheets, sess.date, nowMs).catch((e) => { notes.push(`Journal not readable: ${(e as Error).message}`); return [] as TradeSummary[]; });
 
   const facts = computeFacts({
-    date: sess.date, nowMs: sess.asOfMs, price, direction, setup: req.setup, stock1m, nifty1m, daily,
-    plannedStop: mode === 'ENTRY' ? req.plannedStop : undefined,
+    date: sess.date, nowMs: sess.asOfMs, price: evalPrice, direction, setup: req.setup, stock1m, nifty1m, daily,
+    plannedStop,
     riskInr: s.riskInr, niftyDirPct: s.niftyDirPct, emaReachAtr: s.emaReachAtr, pocRows: s.pocRows,
     chargeRate: chargeRate(trades),
   });
+  if (pending && mode === 'ENTRY') {
+    facts.PendingEntry = pending.entry; facts.PendingStop = pending.stop; facts.PendingTarget = pending.target;
+    if (pending.target !== undefined && facts.StopDist) {
+      facts.RewardRisk = Number((Math.abs(pending.target - evalPrice) / facts.StopDist).toFixed(2));
+      const obstacle = Number((facts.RoomTo ?? '').match(/(\d+(?:\.\d+)?)$/)?.[1]);
+      const sgn = direction === 'LONG' ? 1 : -1;
+      if (Number.isFinite(obstacle) && (pending.target - obstacle) * sgn > 0) facts.TargetPastObstacle = 'YES';
+    }
+  }
   const behaviour = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction, setup: req.setup, openPositions: openPositions.length });
   const ruleFlags = (fx: Facts, b: Behaviour, setup: Setup, dir: Direction) => {
     if (b.FirstTradeLost) fx.flags.push('First trade of the day lost and nothing else is open');
@@ -198,16 +222,12 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
 
   let manage: ManageFacts | undefined;
   if (mode === 'MANAGE') {
-    const [rawTrades, rawOrders] = await Promise.all([deps.dhan.trades().catch(() => [] as any[]), deps.dhan.orders().catch(() => [] as any[])]);
+    const rawTrades = await deps.dhan.trades().catch(() => [] as any[]);
     const fills = rawTrades.map(normalizeTrade).filter((f): f is NonNullable<typeof f> => !!f && f.symbol.toUpperCase() === symbol);
     const group = groupFills(fills).filter((g) => g.status === 'OPEN').at(-1);
     const avgEntry = group?.avgCost || Number(direction === 'LONG' ? held.buyAvg : held.sellAvg) || Number(held.costPrice) || price;
     const entryTs = group?.entryTs ?? sess.asOfMs;
-    const stopSide = direction === 'LONG' ? 'SELL' : 'BUY';
-    const stops = rawOrders.map(normalizeOrder).filter((o): o is NonNullable<typeof o> => !!o)
-      .filter((o) => (o.securityId === securityId || o.symbol?.toUpperCase() === symbol) && o.side === stopSide
-        && (o.triggerPrice ?? 0) > 0 && OPEN_STATUSES.has(String(o.status ?? '').toUpperCase()));
-    const currentStop = stops.at(-1)?.triggerPrice;
+    const currentStop = pending?.stop;
     let initialStop: number | undefined, stopMoves: number | undefined;
     if (group) {
       try {
@@ -222,6 +242,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
       date: sess.date, nowMs: sess.asOfMs, price, direction, stock1m, nifty1m, avgEntry, entryMs: entryTs,
       initialStop, currentStop, stopMoves, atr10m: facts.Atr10m,
     });
+    if (pending?.target !== undefined) manage.CurrentTarget = pending.target;
   }
 
   // setups whose core conditions are met with no flags, read by the app alone (no Claude needed)
@@ -236,7 +257,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   const checkId = `C${sess.date.replace(/-/g, '')}-${time.replace(/:/g, '')}-${symbol}-${Math.random().toString(36).slice(2, 6)}`;
   const todayTrades = trades.filter((t) => t.date === sess.date).map((t) => ({ symbol: t.symbol, direction: t.direction, netPnl: t.netPnl, exitType: t.exitType }));
   const payload = buildMessage({
-    mode, time: time.slice(0, 5), direction, setup: req.setup, symbol, riskInr: s.riskInr, price,
+    mode, time: time.slice(0, 5), direction, setup: req.setup, symbol, riskInr: s.riskInr, price: evalPrice,
     facts, manage, behaviour, todayTrades, stock1m, nifty1m, date: sess.date, asOfMs: sess.asOfMs, live: sess.live,
     alternatives,
   });
@@ -261,7 +282,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   }
   for (const k of Object.keys(row)) if ((row as Record<string, unknown>)[k] === undefined) (row as Record<string, unknown>)[k] = '';
 
-  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives, fitsNow };
+  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives, fitsNow, pending };
 }
 
 /** Today's market strip: Nifty 500 state and your day so far. */

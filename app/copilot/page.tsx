@@ -19,6 +19,14 @@ export default function CopilotPage() {
   const [editRisk, setEditRisk] = useState(false);
   const [riskDraft, setRiskDraft] = useState('');
   const stopRef = useRef<HTMLInputElement>(null);
+
+  // orders already placed in Dhan: fill the Stop box (if empty) and follow the order's direction
+  useEffect(() => {
+    const p = c.check?.pending;
+    if (!p || c.check?.mode !== 'ENTRY') return;
+    if (p.stop !== undefined) setStop((cur) => (cur ? cur : String(p.stop)));
+    if (p.direction && p.direction !== c.direction) c.setDirection(p.direction);
+  }, [c.check]); // eslint-disable-line react-hooks/exhaustive-deps
   const picked = useRef('');
 
   useEffect(() => {

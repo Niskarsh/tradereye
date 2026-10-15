@@ -68,6 +68,10 @@ export interface Facts {
    * plus 0.1 ATR, at least 0.25 ATR from price, capped at his 2x ATR. Used for the "better fit" suggestion.
    */
   StopIdea?: number; StopIdeaAtr?: number; StopIdeaCapped?: 'YES';
+  /** His own orders in Dhan for this stock (his intention): pending entry, stop and target. */
+  PendingEntry?: number; PendingStop?: number; PendingTarget?: number;
+  /** Target distance / stop distance, and whether his target sits beyond the next obstacle (RoomTo). */
+  RewardRisk?: number; TargetPastObstacle?: 'YES';
   /** YES when he typed no stop: StopDist is then his 2x ATR cap (worst case), not his real stop. */
   StopAssumed?: 'YES';
   RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
@@ -518,7 +522,7 @@ export interface ManageInput {
 }
 
 export interface ManageFacts {
-  AvgEntry: number; CurrentStop?: number;
+  AvgEntry: number; CurrentStop?: number; CurrentTarget?: number;
   OpenR?: number; BestR?: number; GivebackR?: number; StopDistAtr?: number;
   CounterVolRatio?: number; ClimaxAgainst: string; FailedExtreme: string;
   NiftySinceEntryPct?: number; MinInTrade: number; StopMoves?: number;

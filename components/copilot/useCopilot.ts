@@ -23,6 +23,7 @@ export interface CheckResp {
   symbol: string; direction: Dir; setup: SetupT; price: number; priceSource: string;
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; notes: string[]; asksLeft: number;
   fitsNow: { direction: Dir; setup: SetupT; stop?: number; roomTo?: string; roomAtr?: number }[];
+  pending?: { direction?: Dir; entry?: number; stop?: number; target?: number; source: string };
 }
 
 export interface AltResp { direction: Dir; setup: SetupT; stop?: number; reason: string }
