@@ -749,3 +749,25 @@ test('reversal: no sign of the run stopping -> wait for a 10-min close back thro
   }
   assert.match(SYSTEM_PROMPT, /ENTRY TIMING/);
 });
+
+test('re-check in a trade reads stop, target and a pending add the way the Live page does (LTF case)', async () => {
+  const d = { ...fakeDhan(),
+    async positions() { return [{ tradingSymbol: 'LTF', securityId: '11', netQty: 107, buyAvg: 265.6, unrealizedProfit: -5 }]; },
+    async trades() { return [{ exchangeTradeId: 'T1', orderId: 'E1', tradingSymbol: 'LTF', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'BUY', tradedQuantity: 107, tradedPrice: 265.6, createTime: '2026-10-14 10:13:00' }]; },
+    async orders() {
+      return [
+        { orderId: 'E1', tradingSymbol: 'LTF', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'BUY', orderType: 'MARKET', orderStatus: 'TRADED', quantity: 107, filledQty: 107, createTime: '2026-10-14 10:13:00', updateTime: '2026-10-14 10:13:00' },
+        { orderId: 'S1', tradingSymbol: 'LTF', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'SELL', orderType: 'STOP_LOSS_MARKET', triggerPrice: 264.35, price: 0, orderStatus: 'PENDING', quantity: 107, filledQty: 0, createTime: '2026-10-14 10:13:30', updateTime: '2026-10-14 10:13:30' },
+        { orderId: 'T1', tradingSymbol: 'LTF', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'SELL', orderType: 'LIMIT', price: 268.4, orderStatus: 'PENDING', quantity: 107, filledQty: 0, createTime: '2026-10-14 10:14:00', updateTime: '2026-10-14 10:14:00' },
+        { orderId: 'A1', tradingSymbol: 'LTF', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'BUY', orderType: 'LIMIT', price: 264.8, orderStatus: 'PENDING', quantity: 50, filledQty: 0, createTime: '2026-10-14 10:20:00', updateTime: '2026-10-14 10:20:00' },
+      ];
+    },
+  };
+  const r = await buildCheck({ dhan: d, sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-20', '01:58:00') }, { direction: 'LONG', setup: 'MOMENTUM', symbol: 'LTF' });
+  assert.equal(r.mode, 'MANAGE');
+  assert.equal(r.manage!.CurrentStop, 264.35);
+  assert.equal(r.manage!.CurrentTarget, 268.4);
+  assert.equal(r.manage!.PendingAddPrice, 264.8);
+  assert.equal(r.manage!.PendingAddQty, 50);
+  assert.ok(!r.notes.some((n) => /No stop found/.test(n)), r.notes.join(' | '));
+});
