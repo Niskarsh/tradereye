@@ -782,6 +782,7 @@ test('chat sends the conversation with the facts in the cached system block and 
   assert.equal(r.text, 'Nothing has turned against you yet.');
   assert.equal(sent.output_config, undefined, 'chat is plain text, not the JSON schema');
   assert.equal(sent.system.length, 2);
+  assert.equal(sent.max_tokens, 400, 'short answers: hard cap');
   assert.match(sent.system[1].text, /CHAT MODE[\s\S]*DATA fetched at 10:44/);
   assert.deepEqual(sent.messages, [{ role: 'user', content: 'why weakening?' }]);
 });
