@@ -3,7 +3,7 @@ import { DhanError } from '../dhan';
 import { rowToObject, type Cell, type SheetsClient } from '../sheetsApi';
 import { LOOKBACK_CALENDAR_DAYS, tenMinuteBars, toSessions, type Bar } from '../live/enrich';
 import { MONTHLY_REVIEW_COLS } from '../live/schema';
-import { dateKeyToMs, istDateKey, istParts, normDate, normTime, parseIst } from '../live/time';
+import { dateKeyToMs, istDateKey, istParts, istTime, normDate, normTime, parseIst } from '../live/time';
 import type { Direction } from '../live/types';
 import { summarizeTrades } from './behaviour';
 import { computeFacts, computeManageFacts, type Facts, type ManageFacts, type Setup } from './features';
@@ -17,7 +17,7 @@ import { readChecks } from './store';
  * measurable parts (exit call, stay/go signals at the exit); Claude explains them. Stored on the trade's own row.
  */
 
-export const REVIEW_VERSION = 'review-v1';
+export const REVIEW_VERSION = 'review-v2';
 const NIFTY500 = { securityId: '19', segment: 'IDX_I', instrument: 'INDEX' };
 const r2 = (n: number) => Number(n.toFixed(2));
 
@@ -106,6 +106,23 @@ export function exitSignals(f: Facts, m: ManageFacts, direction: Direction, last
   return { stay, go };
 }
 
+/**
+ * Fills -> orders. The sheet has no order id, so fills on the same side within 3 seconds of the previous one, with
+ * no fill on the other side in between, are one order split by the exchange (60 shares filled as 30 + 30).
+ */
+export function ordersOf(fills: { ts: number; side: string; qty: number; price: number }[], side: string) {
+  const out: { ts: number; qty: number; avg: number; fills: number }[] = [];
+  let cur: { ts: number; last: number; qty: number; val: number; fills: number } | undefined;
+  for (const f of [...fills].sort((a, b) => a.ts - b.ts)) {
+    if (f.side !== side) { if (cur) { out.push({ ts: cur.ts, qty: cur.qty, avg: cur.val / cur.qty, fills: cur.fills }); cur = undefined; } continue; }
+    if (cur && f.ts - cur.last <= 3000) { cur.qty += f.qty; cur.val += f.qty * f.price; cur.fills++; cur.last = f.ts; continue; }
+    if (cur) out.push({ ts: cur.ts, qty: cur.qty, avg: cur.val / cur.qty, fills: cur.fills });
+    cur = { ts: f.ts, last: f.ts, qty: f.qty, val: f.qty * f.price, fills: 1 };
+  }
+  if (cur) out.push({ ts: cur.ts, qty: cur.qty, avg: cur.val / cur.qty, fills: cur.fills });
+  return out;
+}
+
 /* ---- gathering one trade ---------------------------------------------------------------------------------- */
 
 export interface ReviewDeps {
@@ -145,6 +162,7 @@ export async function gatherReview(deps: ReviewDeps, title: string, groupId: str
   const direction: Direction = dirCol === 'SHORT' || dirCol === 'LONG' ? dirCol : fills[0].side === 'SELL' ? 'SHORT' : 'LONG';
   const entrySide = direction === 'LONG' ? 'BUY' : 'SELL';
   const entries = fills.filter((f) => f.side === entrySide), exits = fills.filter((f) => f.side !== entrySide);
+  const entryOrders = ordersOf(fills, entrySide), exitOrders = ordersOf(fills, entrySide === 'BUY' ? 'SELL' : 'BUY');
   const wavg = (a: typeof fills) => { const q = a.reduce((s, f) => s + f.qty, 0); return q ? a.reduce((s, f) => s + f.qty * f.price, 0) / q : 0; };
   const avgEntry = wavg(entries), avgExit = wavg(exits);
   const entryMs = entries[0]?.ts ?? fills[0].ts, exitMs = exits.length ? exits[exits.length - 1].ts : fills[fills.length - 1].ts;
@@ -157,7 +175,10 @@ export async function gatherReview(deps: ReviewDeps, title: string, groupId: str
     Symbol: symbol, Date: date, Direction: direction, Setup: setupCol ? setup : `${setup} (not tagged: assumed)`,
     EntryTime: hhmm(entryMs / 1000), ExitTime: hhmm(exitMs / 1000), MinutesInTrade: Math.round((exitMs - entryMs) / 60000),
     AvgEntry: r2(avgEntry), AvgExit: avgExit ? r2(avgExit) : undefined, Qty: entries.reduce((s, f) => s + f.qty, 0),
-    Adds: Math.max(0, entries.length - 1), Exits: exits.length,
+    // the exchange splits one order into several fills: count ORDERS, and list them, so split fills are never read as adds
+    EntryOrders: entryOrders.map((o) => `${istTime(o.ts)} ${o.qty} @ ${r2(o.avg)}${o.fills > 1 ? ` (${o.fills} fills, one order)` : ''}`),
+    Adds: Math.max(0, entryOrders.length - 1),
+    ExitOrders: exitOrders.map((o) => `${istTime(o.ts)} ${o.qty} @ ${r2(o.avg)}${o.fills > 1 ? ` (${o.fills} fills, one order)` : ''}`),
     InitialStop: initialStop, LastStop: lastStop, StopMoves: num(o0.StopMoves), TargetFirst: num(o0.TpFirst), TargetLast: num(o0.TpLast),
     ExitType: exitType || 'UNKNOWN', GrossPnL: num(o0.GrossPnL), NetPnL: num(o0.NetPnL), Charges: num(o0.TotalCharges), RiskInr: num(o0.RiskInr),
     MfeR: num(o0.MfeR), MaeR: num(o0.MaeR), RBasis: o0.RBasis || undefined,
@@ -250,6 +271,7 @@ export async function gatherReview(deps: ReviewDeps, title: string, groupId: str
 
 export const REVIEW_RULES = `REVIEW MODE
 This is not a live read. The trade is finished and Nik asked for a review of it in his journal, to learn from it later. Ignore the live verdict labels, entry-timing and scenario rules above; your knowledge of his method and of the facts still holds. The data: TRADE (what he did), AT_ENTRY and AT_EXIT (the app's facts at those moments, same names as the live read), IN_TRADE_AT_EXIT, EXIT_SIGNALS (the app's own list of signs that said stay or go at the moment he exited), AFTER_EXIT (what price did after he got out, in R of his risk), COPILOT_CHECKS (what the co-pilot told him and what he did), HIS_NOTES (his own account) and the day's 10-minute candles with ENTRY and EXIT marked.
+- EntryOrders / ExitOrders are his ORDERS. The exchange often fills one order in several pieces at the same second ("2 fills, one order"): that is ONE entry, never an add. Adds counts only separate entry orders placed later; call something an add (or averaging down) only when Adds is 1 or more, and name its time.
 - Judge the PROCESS, not the P&L. A loss taken on a sound plan with the stop honoured is SOLID; a win from a trade that broke his rules is MIXED or POOR. Grade: SOLID (followed a sound plan), MIXED, POOR (the setup was not there, or rules broken).
 - Every point is ONE short line, under 18 words, plain words. Name the fact behind it ("Nifty was flat for 30 min before entry"), a number only when it means something. No jargon, no field names, no filler.
 - right: up to 3 things he did well. wrong: up to 3 mistakes, most costly first. If there is genuinely nothing for one of them, give an empty list; never invent one.

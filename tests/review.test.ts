@@ -92,3 +92,35 @@ test('stored review keeps the app\'s exit call and caps every list at 3', () => 
   assert.deepEqual([s.grade, s.right.length, s.exit], ['MIXED', 3, 'EARLY']);
   assert.equal((REVIEW_SCHEMA as { additionalProperties: boolean }).additionalProperties, false);
 });
+
+import { ordersOf } from '../lib/copilot/review';
+
+test('one order filled in pieces is one entry, not an add; a later order is an add', () => {
+  const t = (hms: string) => IST('2026-10-15', hms);
+  const fills = [
+    { ts: t('10:40:00'), side: 'BUY', qty: 30, price: 339.2 },
+    { ts: t('10:40:00'), side: 'BUY', qty: 30, price: 339.3 },   // same order, split by the exchange
+    { ts: t('10:40:01'), side: 'BUY', qty: 40, price: 339.35 },  // still the same order
+    { ts: t('10:52:10'), side: 'BUY', qty: 50, price: 338.0 },   // a real add, 12 minutes later
+    { ts: t('11:05:00'), side: 'SELL', qty: 100, price: 341 },
+    { ts: t('11:05:00'), side: 'SELL', qty: 50, price: 341 },
+  ];
+  const buys = ordersOf(fills, 'BUY'), sells = ordersOf(fills, 'SELL');
+  assert.deepEqual(buys.map((o) => [o.qty, o.fills]), [[100, 3], [50, 1]]);
+  assert.deepEqual(sells.map((o) => [o.qty, o.fills]), [[150, 2]]);
+});
+
+test('the review sends orders, and Adds counts orders (split fills are not an add)', async () => {
+  const fs = new FakeSheets();
+  const h = [...MONTHLY_ALL];
+  const row = (o: Record<string, string | number>) => h.map((k) => String(o[k] ?? ''));
+  const base = { TradeGroupId: 'G3', 'Date (IST)': '2026-10-15', Symbol: 'X', DirFromFills: 'LONG' };
+  fs.addTab('october-2026', [h,
+    row({ ...base, OrderType: 'BUY', Price: 100, Qty: 30, 'Time (IST)': '10:40:00' }),
+    row({ ...base, OrderType: 'BUY', Price: 100.1, Qty: 30, 'Time (IST)': '10:40:00' }),
+    row({ ...base, OrderType: 'SELL', Price: 101, Qty: 60, 'Time (IST)': '10:55:00' }),
+  ]);
+  const r = await gatherReview({ sheets: fs.client(), lookupSecurityId: async () => '1' }, 'october-2026', 'G3');
+  assert.match(r.message, /"Adds":0/);
+  assert.match(r.message, /"EntryOrders":\["10:40:00 60 @ 100.05 \(2 fills, one order\)"\]/);
+});

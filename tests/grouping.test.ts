@@ -50,3 +50,15 @@ test('same symbol traded twice in a day gives two trades; symbols are independen
   assert.equal(gs.length, 3);
   assert.equal(gs.filter((g) => g.symbol === 'AAA').length, 2);
 });
+
+test('adds count new entry ORDERS: one order split into several fills is not an add', async () => {
+  const { groupFills } = await import('../lib/live/grouping');
+  const f = (tradeId: string, orderId: string, side: 'BUY' | 'SELL', qty: number, price: number, ts: number) => ({ tradeId, orderId, symbol: 'X', securityId: '1', segment: 'NSE_EQ', side, qty, price, ts, time: '' });
+  const t0 = Date.UTC(2026, 9, 15, 5, 10, 0);
+  const groups = groupFills([
+    f('a', 'O1', 'BUY', 30, 100, t0), f('b', 'O1', 'BUY', 30, 100.1, t0), // split
+    f('c', 'O2', 'BUY', 20, 99, t0 + 600_000),                            // real add
+    f('d', 'O3', 'SELL', 80, 101, t0 + 900_000),
+  ]);
+  assert.equal(groups[0].adds, 1);
+});
