@@ -459,8 +459,7 @@ export function computeFacts(inp: FactsInput): Facts {
 /**
  * The core of each setup, decided by the app (so the label can never be argued away):
  *  Momentum = with today's move: the stock moving his way today (at least 10% of the average daily range),
- *    Nifty 500 trending his way, or not trending against him while the stock leads it (busier than usual and
- *    0.5% stronger than Nifty his way), VWAP control on his side, and room to the next obstacle (0.5 ATR or more,
+ *    Nifty 500 not against him, VWAP control on his side, and room to the next obstacle (0.5 ATR or more,
  *    or price breaking out at the day's extreme).
  *  Reversal = against today's move, back to the target: the stock moved at least 30% of its daily range the
  *    other way, the target (VWAP / 2-day POC before 10:15, today's POC after) at least 0.75 ATR away, not busier than usual, and Nifty not pushing
@@ -475,18 +474,9 @@ export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missi
   if (setup === 'MOMENTUM') {
     if (ext === undefined) missing.push('today\'s move unknown');
     else if (ext * sign < 10) missing.push(`stock not moving ${up ? 'up' : 'down'} today (${ext > 0 ? '+' : ''}${ext}% of daily range)`);
-    // Nifty: trending against him is a miss. Flat, flipped, fading against him or not known yet is fine when the
-    // stock is LEADING: busier than usual and at least 0.5% stronger than Nifty in his direction (a stock in play
-    // moves on its own buying or selling).
-    const rs = f.RsVsNiftyPct;
-    const leading = f.RvolBusy === 'YES' && rs !== undefined && rs * sign >= 0.5;
-    const against = up ? n === 'TRENDING_DOWN' : n === 'TRENDING_UP';
-    const withHim = up ? n === 'TRENDING_UP' : n === 'TRENDING_DOWN';
-    if (against) missing.push(`Nifty 500 trending ${up ? 'down' : 'up'}`);
-    else if (!withHim && !leading) {
-      const what = n === 'OPENING' || n === 'UNKNOWN' || n === undefined ? 'Nifty direction not known yet' : `Nifty 500 ${String(n).toLowerCase().replace('_', ' ')}`;
-      missing.push(`${what} and the stock not leading it (needs busier than usual and 0.5% stronger than Nifty)`);
-    }
+    if (n === 'OPENING' || n === 'UNKNOWN' || n === undefined) missing.push('Nifty direction not known yet');
+    else if (n === 'FLAT' || n === 'FLIPPED') missing.push(`Nifty 500 ${n.toLowerCase()}`);
+    else if (up ? n.endsWith('_DOWN') : n.endsWith('_UP')) missing.push(`Nifty 500 moving ${up ? 'down' : 'up'}`);
     if (f.VwapSide && f.VwapSide !== (up ? 'BUYERS' : 'SELLERS')) missing.push(`${f.VwapSide.toLowerCase()} in control (VWAP)`);
     const breakout = (f.RoomTo ?? '').startsWith('none: price is at the day');
     if (!breakout && f.RoomAtr !== undefined && f.RoomAtr < 0.5) missing.push(`little room: ${f.RoomTo} ${f.RoomAtr} ATR away`);

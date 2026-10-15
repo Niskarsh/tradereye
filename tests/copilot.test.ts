@@ -565,13 +565,8 @@ test('core check rules, one by one', () => {
   // breakout at the day's low counts as room
   assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomTo: "none: price is at the day's low (breakout)" }), 'MOMENTUM', 'SHORT').missing, []);
   // Nifty against / flat
-  assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'TRENDING_UP' }), 'MOMENTUM', 'SHORT').missing.join(), /Nifty 500 trending up/);
+  assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'TRENDING_UP' }), 'MOMENTUM', 'SHORT').missing.join(), /Nifty 500 moving up/);
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'FLAT' }), 'MOMENTUM', 'SHORT').missing.join(), /flat/);
-  // ANGELONE 15 Oct 09:43: flat Nifty, but the stock leads it (1.55x usual volume, +1.75% vs Nifty) at the day high
-  assert.deepEqual(coreCheck(f({ ExtAdrPct: 51, VwapSide: 'BUYERS', RvolBusy: 'YES', RsVsNiftyPct: 1.75, NiftyState: 'FLAT', RoomTo: "none: price is at the day's high (breakout)" }), 'MOMENTUM', 'LONG').missing, []);
-  // leading only counts in his direction, and busy is needed
-  assert.match(coreCheck(f({ ExtAdrPct: 51, VwapSide: 'BUYERS', RvolBusy: 'NO', RsVsNiftyPct: 1.75, NiftyState: 'FLAT', RoomAtr: 1 }), 'MOMENTUM', 'LONG').missing.join(), /not leading/);
-  assert.match(coreCheck(f({ ExtAdrPct: 51, VwapSide: 'BUYERS', RvolBusy: 'YES', RsVsNiftyPct: 1.75, NiftyState: 'TRENDING_DOWN', RoomAtr: 1 }), 'MOMENTUM', 'LONG').missing.join(), /trending down/);
   // reversal long: down 50% of range, POC 1.5 ATR above, not busy, Nifty not trending down
   assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
   assert.match(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 0.4, RoomTo: 'POC 256.6', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
