@@ -717,3 +717,35 @@ test('stretch numbers: a run bigger than every recent day and far from VWAP is v
   assert.ok(f.StretchVwapAtr! > 0.75, `vwap atr ${f.StretchVwapAtr}`);
   assert.notEqual(f.Stretch, 'NONE');
 });
+
+/* ---- entry timing: now, or wait for a pullback / confirmation ---------------------------------------------------- */
+
+test('momentum: not stretched -> enter now', () => {
+  // prior days ran up to 20 from the open: today's +4.6 is ordinary for this stock
+  const g = computeFacts(base({ nowMs: IST('2026-10-12', '09:30:20'), price: 304.6, daily: (() => { const d = dailyFlat(800, 300); d.h.fill(320); return d; })() }));
+  assert.equal(g.Stretch, 'NONE');
+  assert.equal(g.EntryTiming, 'NOW');
+});
+
+test('momentum: very stretched and the tape not strong -> wait for a pullback to a named level, with where the move is over', () => {
+  // prior days ran at most 0.5 from the open; today +9 by 09:45 -> very stretched, far above VWAP
+  const daily = dailyFlat(800, 300); daily.h.fill(300.5); daily.l.fill(299.5);
+  const f = computeFacts(base({ daily, nowMs: IST('2026-10-12', '09:45:20'), price: 309.2, nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] } }));
+  assert.equal(f.Stretch, 'VERY_STRETCHED');
+  assert.equal(f.EntryTiming, 'WAIT_PULLBACK');
+  assert.ok(f.EntryLevel !== undefined && f.EntryLevel < 309.2, `level ${f.EntryLevel} ${f.EntryLevelName}`);
+  assert.ok(f.EntryInvalid !== undefined && f.EntryInvalid < f.EntryLevel!, `invalid ${f.EntryInvalid} ${f.EntryInvalidName}`);
+  assert.match(f.EntryWhy!, /very stretched/);
+});
+
+test('reversal: no sign of the run stopping -> wait for a 10-min close back through the last candle', () => {
+  // steady run up, every 10-min candle green: a reversal short has no confirmation yet
+  const daily = dailyFlat(800, 300); daily.h.fill(300.5); daily.l.fill(299.5);
+  const f = computeFacts(base({ daily, nowMs: IST('2026-10-12', '09:45:20'), price: 309.2, direction: 'SHORT', setup: 'REVERSAL' }));
+  assert.ok(f.EntryTiming === 'WAIT_CONFIRM' || f.EntryTiming === 'LATE', `${f.EntryTiming} ${f.EntryWhy}`);
+  if (f.EntryTiming === 'WAIT_CONFIRM') {
+    assert.match(f.EntryLevelName!, /close below the last candle's low/);
+    assert.equal(f.EntryInvalidName, 'a new day high');
+  }
+  assert.match(SYSTEM_PROMPT, /ENTRY TIMING/);
+});

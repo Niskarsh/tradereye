@@ -60,7 +60,15 @@ export default function CopilotPage() {
   };
   const ready = !!c.direction && !!c.setup;
   const held = c.check?.mode === 'MANAGE';
-  const canAsk = !!c.check && !c.read && c.busy === '' && (c.market?.asksLeft ?? 1) > 0;
+  const canAsk = !!c.check && c.busy === '' && (c.market?.asksLeft ?? 1) > 0;
+  // after a read, the same button refreshes the data and asks again (repeatable, in a trade or not)
+  const onAsk = () => {
+    if (!c.check) return;
+    if (!c.read) { c.ask(); return; }
+    const st = parseFloat(stop);
+    c.refreshAndAsk(c.check.symbol, held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined);
+    c.reload();
+  };
   const chips = c.market?.recentSymbols ?? [];
 
   return (
@@ -160,10 +168,10 @@ export default function CopilotPage() {
       {c.check && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-900 bg-brand-bg/95 p-3 backdrop-blur">
           <div className="max-w-xl mx-auto">
-            <button onClick={c.ask} disabled={!canAsk}
+            <button onClick={onAsk} disabled={!canAsk}
               className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-accent text-black text-base font-black uppercase tracking-tight disabled:opacity-40">
-              {c.busy === 'ask' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-              {c.read ? 'Asked · tap a symbol for a new check' : held ? 'Re-check my trade' : 'Ask Claude'}
+              {c.busy !== '' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+              {c.busy === 'check' ? 'Fetching fresh data…' : c.read ? (held ? '↻ Re-check my trade again' : '↻ Refresh & ask again') : held ? 'Re-check my trade' : 'Ask Claude'}
             </button>
             {c.market && !c.market.hasApiKey && <p className="mt-1 text-center text-[10px] text-data-red">ANTHROPIC_API_KEY is not set in Vercel yet.</p>}
           </div>

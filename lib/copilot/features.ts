@@ -72,6 +72,17 @@ export interface Facts {
   PendingEntry?: number; PendingStop?: number; PendingTarget?: number;
   /** Target distance / stop distance, and whether his target sits beyond the next obstacle (RoomTo). */
   RewardRisk?: number; TargetPastObstacle?: 'YES';
+  /**
+   * Entry timing for the trade he named (decided by the app):
+   *  NOW            enter at the current price;
+   *  WAIT_PULLBACK  momentum, but chasing: wait for a pullback to EntryLevel;
+   *  WAIT_CONFIRM   reversal, but nothing shows the run stopping: wait for a 10-min close beyond EntryLevel;
+   *  LATE           reversal, most of the move back to the target is done.
+   * EntryInvalid = the level where a pullback stops being a pullback (the move is likely over), or where the run
+   * is still on (reversal). EntryWhy = the reason in plain words.
+   */
+  EntryTiming?: 'NOW' | 'WAIT_PULLBACK' | 'WAIT_CONFIRM' | 'LATE';
+  EntryLevel?: number; EntryLevelName?: string; EntryInvalid?: number; EntryInvalidName?: string; EntryWhy?: string;
   /** YES when he typed no stop: StopDist is then his 2x ATR cap (worst case), not his real stop. */
   StopAssumed?: 'YES';
   RoomAtr?: number; RoomVsStop?: number; RoomTo?: string; EstChargesInr?: number;
@@ -497,6 +508,74 @@ export function computeFacts(inp: FactsInput): Facts {
       if (f.StopDist && !f.StopAssumed) f.RoomVsStop = r2(room / f.StopDist);
     }
   }
+  // ---- entry timing: enter now, or wait (for a pullback / for confirmation), and where it stops being valid
+  if (atr) {
+    const up = sign === 1;
+    const behind = (px: number) => (price - px) * sign; // > 0 = level behind price (support for a long)
+    if (inp.setup === 'MOMENTUM') {
+      const niftyWith = f.NiftyNowTrend ? f.NiftyNowTrend === (up ? 'RISING' : 'FALLING') : f.NiftyState === (up ? 'TRENDING_UP' : 'TRENDING_DOWN');
+      const strongTape = niftyWith && f.RvolBusy === 'YES' && (f.VolTrend === 'RISING' || (f.PushVsPullVol ?? 0) >= 1.2);
+      const withRun = f.StretchDir === (up ? 'UP' : 'DOWN');
+      const very = withRun && f.Stretch === 'VERY_STRETCHED';
+      const farFromVwap = withRun && (f.StretchVwapAtr ?? 0) >= 1.5;
+      const latePush = (f.PullbackNo ?? 0) >= 3;
+      const chase = very || farFromVwap || latePush;
+      // levels behind price where a pullback could hold: crossed breakout levels, the first 10-min candle edge, VWAP
+      const levels = [
+        { name: up ? 'prev day high' : 'prev day low', px: n ? (up ? daily.h[n - 1] : daily.l[n - 1]) : NaN },
+        { name: up ? 'first 10-min candle high' : 'first 10-min candle low', px: (up ? f.OrHigh : f.OrLow) ?? NaN },
+        { name: 'VWAP', px: vwapPx ?? NaN },
+        { name: '5m 200 EMA', px: e5 ?? NaN },
+      ].filter((x) => Number.isFinite(x.px) && behind(x.px) >= 0.3 * atr && behind(x.px) <= 2.5 * atr)
+        .sort((a, b) => behind(a.px) - behind(b.px));
+      const pull = levels[0];
+      // where the pullback stops being a pullback: VWAP if it is further back, else just beyond the pullback level
+      const inv = vwapPx !== undefined && pull && behind(vwapPx) > behind(pull.px) + 0.2 * atr
+        ? { name: 'VWAP', px: vwapPx }
+        : pull ? { name: `below ${pull.name}`, px: pull.px - sign * 0.3 * atr } : undefined;
+      if (!chase || (strongTape && !very)) {
+        f.EntryTiming = 'NOW';
+        f.EntryWhy = !chase ? 'not stretched yet: entering at the current price is fine'
+          : 'stretched, but the tape is strong (Nifty with you, busy, volume building): waiting risks missing it';
+      } else if (pull) {
+        f.EntryTiming = 'WAIT_PULLBACK';
+        f.EntryWhy = very ? `very stretched: today's run is bigger than ${f.StretchRunPct}% of recent days`
+          : farFromVwap ? `far from VWAP (${f.StretchVwapAtr} ATR): chasing` : `already the ${f.PullbackNo}th push of the move: late`;
+      } else {
+        f.EntryTiming = 'WAIT_PULLBACK';
+        f.EntryWhy = 'stretched with no level close behind price: a pullback has nothing near to hold';
+      }
+      if (f.EntryTiming === 'WAIT_PULLBACK' || chase) {
+        if (pull) { f.EntryLevel = r2(pull.px); f.EntryLevelName = pull.name; }
+        if (inv) { f.EntryInvalid = r2(inv.px); f.EntryInvalidName = inv.name; }
+      }
+    } else {
+      // reversal: is there any sign the run is stopping? (climax / failed break the run's way, or the last
+      // completed 10-min candle closing against the run)
+      const runUp = !up; // a reversal short fades a run up
+      const lastDone = tensDone.at(-1);
+      const candleAgainst = lastDone ? (runUp ? lastDone.c < lastDone.o : lastDone.c > lastDone.o) : false;
+      const climaxSign = runUp ? f.Climax.startsWith('TOP') : f.Climax.startsWith('BOTTOM');
+      const failed = runUp ? f.FailedBreak === 'HIGH' : f.FailedBreak === 'LOW';
+      const confirmed = climaxSign || failed || candleAgainst;
+      const extreme = runUp ? dayHi : dayLo;
+      f.EntryInvalid = r2(extreme + (runUp ? 1 : -1) * 0.1 * atr);
+      f.EntryInvalidName = runUp ? 'a new day high' : 'a new day low';
+      if (f.RoomAtr !== undefined && f.RoomAtr < 0.75 && !(f.RoomTo ?? '').startsWith('no target')) {
+        f.EntryTiming = 'LATE';
+        f.EntryWhy = `most of the move back to ${f.RoomTo} is already done`;
+      } else if (!confirmed && lastDone) {
+        f.EntryTiming = 'WAIT_CONFIRM';
+        f.EntryLevel = r2(runUp ? lastDone.l : lastDone.h);
+        f.EntryLevelName = `a 10-min close ${runUp ? 'below' : 'above'} the last candle's ${runUp ? 'low' : 'high'}`;
+        f.EntryWhy = 'nothing shows the run stopping yet (no climax, no failed break, no candle against it)';
+      } else {
+        f.EntryTiming = 'NOW';
+        f.EntryWhy = climaxSign ? 'a climax candle against the run' : failed ? `a failed break of the day ${runUp ? 'high' : 'low'}` : 'the last 10-min candle closed against the run';
+      }
+    }
+  }
+
   // ---- what kind of trade this is by TODAY's move, and whether the setup's core conditions are there
   if (f.ExtAdrPct !== undefined) {
     f.MoveToday = f.ExtAdrPct >= 10 ? 'UP' : f.ExtAdrPct <= -10 ? 'DOWN' : 'FLAT';
