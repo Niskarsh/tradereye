@@ -69,7 +69,10 @@ export const MONTHLY_COPILOT_COLS = [
   'RcCount', 'RcLastTime', 'RcLastLabel', 'RcLastLines', 'RcLastWatch', 'RcCostInr',
 ] as const;
 
-export const MONTHLY_EXTRA = [...MONTHLY_LIVE_COLS, ...MONTHLY_ENRICH_COLS, ...MONTHLY_CONTEXT_COLS, ...MONTHLY_COPILOT_COLS] as const;
+/** Trade review ("Review this trade" in the journal): written on the trade's first row only, on demand. */
+export const MONTHLY_REVIEW_COLS = ['AiReview', 'AiReviewGrade', 'AiReviewAt', 'AiReviewCostInr'] as const;
+
+export const MONTHLY_EXTRA = [...MONTHLY_LIVE_COLS, ...MONTHLY_ENRICH_COLS, ...MONTHLY_CONTEXT_COLS, ...MONTHLY_COPILOT_COLS, ...MONTHLY_REVIEW_COLS] as const;
 export const MONTHLY_ALL = [...MONTHLY_BASE, ...MONTHLY_EXTRA] as const;
 
 /* ---- tabs used only by live capture (created automatically; analytics ignores them) ---------- */

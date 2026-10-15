@@ -258,3 +258,36 @@ export async function chatClaude(context: string, turns: ChatTurn[], o: ClaudeOp
     outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
   };
 }
+
+export interface StructuredReply { json: Record<string, unknown>; text: string; cutOff: boolean; model: string; inTokens: number; outTokens: number; costInr: number; latencyMs: number }
+
+/** A one-off structured call (JSON schema), with the shared system prompt cached first and task rules after it. */
+export async function structuredClaude(rules: string, message: string, schema: object, o: ClaudeOptions, maxTokens = 1500): Promise<StructuredReply> {
+  const f = o.fetchImpl ?? fetch;
+  const sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const now = o.now ?? Date.now;
+  const model = o.model || DEFAULT_MODEL;
+  const body = {
+    model,
+    max_tokens: o.thinking === 'on' ? maxTokens + 3000 : maxTokens,
+    ...(o.thinking === 'on' ? {} : { thinking: { type: 'between_tools' } }),
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: rules, cache_control: { type: 'ephemeral' } },
+    ],
+    output_config: { format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content: message }],
+  };
+  const t0 = now();
+  const json = await postMessages(body, { ...o, timeoutMs: o.timeoutMs ?? 45_000 }, f, sleep);
+  const content: { type: string; text?: string }[] = json?.content ?? [];
+  const text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
+  let parsed: Record<string, unknown> = {};
+  try { parsed = JSON.parse(text); } catch { parsed = parseReadFromText(text); }
+  const u = json?.usage ?? {};
+  return {
+    json: parsed, text, cutOff: json?.stop_reason === 'max_tokens', model,
+    inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+    outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
+  };
+}
