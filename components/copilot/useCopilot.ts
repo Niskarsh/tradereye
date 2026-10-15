@@ -56,7 +56,8 @@ export function useCopilot(token: string) {
 
   const runCheck = useCallback(async (symbol: string, plannedStop?: number) => {
     if (!token || !direction || !setup || !symbol) return;
-    setBusy('check'); setError(''); setRead(null); setDecision(''); setCheck(null);
+    // keep the current card on screen until the fresh one arrives (refresh), then replace it
+    setBusy('check'); setError(''); setRead(null); setDecision('');
     try {
       const r = await postWithToken<CheckResp>('/api/copilot/check', token, { direction, setup, symbol, plannedStop });
       setCheck(r);

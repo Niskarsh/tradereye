@@ -16,14 +16,16 @@ const STATE_TEXT: Record<string, string> = {
 };
 const stateTone = (s: string) => (s.startsWith('TRENDING') ? 'text-data-green' : s === 'FLIPPED' ? 'text-data-red' : s.startsWith('FADING') ? 'text-brand-accent' : 'text-zinc-300');
 
-export function MarketStrip({ m, err }: { m: MarketResp | null; err: string }) {
+export function MarketStrip({ m, err, onRefresh }: { m: MarketResp | null; err: string; onRefresh?: () => void }) {
   if (!m) return <div className="rounded-2xl bg-brand-card p-4 text-xs text-zinc-500">{err || 'Loading market…'}</div>;
   const k = m.market;
   return (
     <div className="rounded-2xl bg-brand-card p-4 space-y-2">
       <div className="flex items-baseline justify-between gap-3">
         <div>
-          <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Nifty 500 {k.live ? '' : `· ${k.date} close`}</p>
+          <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Nifty 500 {k.live ? `· ${k.asOf.slice(0, 5)}` : `· ${k.date} close`}
+            {onRefresh && <button onClick={onRefresh} className="ml-2 text-zinc-400 underline decoration-dotted underline-offset-2">refresh</button>}
+          </p>
           <p className={`text-xl font-black tracking-tight ${stateTone(k.state)}`}>{STATE_TEXT[k.state] ?? k.state}</p>
         </div>
         <div className="text-right font-mono text-xs text-zinc-400 leading-5">
@@ -59,12 +61,19 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?: (stop: number) => void; onTryAlt?: (a: AltResp) => void }) {
+export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c: CheckResp; onUseStop?: (stop: number) => void; onTryAlt?: (a: AltResp) => void; onRefresh?: () => void; refreshing?: boolean }) {
   const f = c.facts, b = c.behaviour, m = c.manage;
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between">
-        <p className="text-lg font-black tracking-tight">{c.symbol} <span className="text-sm text-zinc-400">{c.direction} · {c.setup.toLowerCase()} · {c.mode === 'MANAGE' ? 'in trade' : 'entry'}</span></p>
+        <p className="text-lg font-black tracking-tight">{c.symbol} <span className="text-sm text-zinc-400">{c.direction} · {c.setup.toLowerCase()} · {c.mode === 'MANAGE' ? 'in trade' : 'entry'}</span>
+          {onRefresh && (
+            <button onClick={onRefresh} disabled={refreshing} title="Fetch fresh data for this stock (no Claude)"
+              className="ml-2 align-middle rounded-lg border border-zinc-700 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-300 disabled:opacity-40">
+              {refreshing ? '…' : '↻ Refresh'}
+            </button>
+          )}
+        </p>
         <p className="font-mono text-sm text-zinc-300">₹{c.price.toFixed(2)} <span className="text-[10px] text-zinc-600">{c.priceSource === 'LTP' ? 'live' : 'last candle'} {c.time.slice(0, 5)}</span></p>
       </div>
       {f.flags.length > 0 && (
