@@ -2,8 +2,8 @@
 import React, { useRef, useState } from 'react';
 import { Loader2, Play, Search, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import { TokenBar } from '@/components/auth/TokenBar';
 import { postWithToken } from '@/components/live/useLiveSession';
 import type { PlanResult, RunItemResult, RunResult } from '@/lib/live/backfill';
 
@@ -14,7 +14,7 @@ const ABORT_TEXT: Record<string, string> = {
 };
 
 export default function BackfillPage() {
-  const { token, setToken } = useAuth();
+  const { token } = useAuth();
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [busy, setBusy] = useState<'' | 'plan' | 'run'>('');
   const [redo, setRedo] = useState(false);
@@ -85,10 +85,7 @@ export default function BackfillPage() {
           This needs the Dhan Data API only while it runs: history goes back years, so one paid month can enrich everything, then you can cancel.
         </p>
 
-        <div className="flex gap-2 p-2 bg-brand-card rounded-2xl">
-          <Input type="password" placeholder="Dhan Auth Token" value={token} onChange={(e) => setToken(e.target.value)}
-            className="bg-brand-card border-none h-10 text-xs focus-visible:ring-0 placeholder:text-brand-text/20 font-mono" />
-        </div>
+        <TokenBar />
 
         <div className="flex flex-wrap items-center gap-4">
           <Button onClick={doPlan} disabled={!token || !!busy} className="h-10 bg-brand-accent hover:bg-brand-accent/90 text-black font-black uppercase tracking-tighter">

@@ -12,6 +12,7 @@ export default function Header() {
         { name: 'Live', href: '/live', current: false },
         { name: 'Co-pilot', href: '/copilot', current: false },
         { name: 'Backfill', href: '/backfill', current: false },
+        { name: 'Dhan login', href: '/dhan-login', current: false },
         { name: 'Youtube', href: 'https://www.youtube.com/@CandlesBeforeCubicles?sub_confirmation=1', current: false },
     ]
 

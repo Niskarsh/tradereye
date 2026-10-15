@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { Loader2, Play, RefreshCcw, Square, KeyRound, Wrench, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import { TokenBar } from '@/components/auth/TokenBar';
 import { useLiveSession, postWithToken } from '@/components/live/useLiveSession';
 import { ClosedTable, OpenTradeCard } from '@/components/live/TradeCards';
 import { countdown, inr, tone } from '@/components/live/format';
@@ -67,13 +67,11 @@ export default function LivePage() {
               </Button>}
         </header>
 
-        <div className="flex gap-2 p-2 bg-brand-card rounded-2xl">
-          <Input type="password" placeholder="Dhan Auth Token" value={token} onChange={(e) => setToken(e.target.value)}
-            className="bg-brand-card border-none h-10 text-xs focus-visible:ring-0 placeholder:text-brand-text/20 font-mono" />
-          <Button size="sm" variant="outline" className="h-10" onClick={renew} disabled={!token || renewing} title="Swap this token for a fresh 24h one">
+        <TokenBar>
+          {token && <Button size="sm" variant="outline" className="h-8" onClick={renew} disabled={renewing} title="Swap this token for a fresh 24h one">
             {renewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}Renew
-          </Button>
-        </div>
+          </Button>}
+        </TokenBar>
         {renewMsg && <p className="text-[11px] text-zinc-400">{renewMsg}</p>}
 
         <div className="flex flex-wrap items-center gap-2">
