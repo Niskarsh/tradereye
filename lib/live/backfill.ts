@@ -46,7 +46,7 @@ export async function planBackfill(sheets: SheetsClient, opts: { redo?: boolean 
     for (const g of groupRows(headers, rows)) {
       const st = (g.rows[0].o.EnrichStatus ?? '').trim();
       // done = market columns OK AND the newer context columns filled (so old trades get context too)
-      const ok = st === 'OK' && /v2/.test(g.rows[0].o.ContextStatus ?? ''); // v2 = 10-minute chart basis
+      const ok = st === 'OK' && /v3/.test(g.rows[0].o.ContextStatus ?? ''); // v2 = 10-minute chart basis, v3 = + last 30 min
       if (ok && !opts.redo) { done++; continue; }
       items.push({ tab, groupId: g.groupId, date: normDate(g.rows[0].o['Date (IST)']), symbol: g.rows[0].o.Symbol, fills: g.rows.length, status: st || 'NEW' });
     }
@@ -147,7 +147,7 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
         const initialStop = parseFloat(g.rows[0].o.InitialStop);
         const ctx = computeFacts({
           date, nowMs: fills[0].ts, price: avgEntry, direction, setup: setupCell === 'reversal' ? 'REVERSAL' : 'MOMENTUM',
-          stock1m: stockC, nifty1m: { t: [], o: [], h: [], l: [], c: [], v: [] }, daily: daily ?? { t: [], o: [], h: [], l: [], c: [], v: [] },
+          stock1m: stockC, nifty1m: niftyCandles(nifty.find((x) => x.date === date)?.bars ?? []), daily: daily ?? { t: [], o: [], h: [], l: [], c: [], v: [] },
           plannedStop: initialStop > 0 ? initialStop : undefined,
           riskInr: cfg.riskInr, niftyDirPct: cfg.niftyDirPct, emaReachAtr: cfg.emaReachAtr, pocRows: cfg.pocRows,
         });
@@ -164,7 +164,9 @@ export async function runBackfill(deps: RunDeps, items: { tab: string; groupId: 
           Ema200_5mAtr: ctx.Ema200_5mAtr ?? '', Ema200_10mAtr: ctx.Ema200_10mAtr ?? '', Ema200_1dAtr: ctx.Ema200_1dAtr ?? '',
           RsVsNiftyPct: rs, ExtAdrPct: ctx.ExtAdrPct ?? '', PocDistAtr: ctx.PocDistAtr ?? '',
           PullbackNo: ctx.PullbackNo ?? '', VolTrend: ctx.VolTrend ?? '',
-          ContextStatus: ctxMissing.length ? `PARTIAL v2: ${ctxMissing.join(', ')}`.slice(0, 200) : 'OK v2',
+          NiftyDayTrend: ctx.NiftyNowTrend ?? '', NiftyLast30Pct: ctx.NiftyLast30Pct ?? '', NiftyLast30Trend: ctx.NiftyLast30Trend ?? '',
+          Stock30mAtr: ctx.Stock30mAtr ?? '', StockNow: ctx.StockNow ?? '',
+          ContextStatus: ctxMissing.length ? `PARTIAL v3: ${ctxMissing.join(', ')}`.slice(0, 200) : 'OK v3',
         };
         for (const k of MONTHLY_CONTEXT_COLS) if (!(k in ctxVals)) ctxVals[k] = '';
 
@@ -227,4 +229,9 @@ export async function inspectVolume(deps: Pick<RunDeps, 'dhan' | 'sheets' | 'loo
   const mins = new Date(entryMin + 330 * 60_000);
   const entryMinOfDay = mins.getUTCHours() * 60 + mins.getUTCMinutes();
   return { symbol, date, entryTime: istTime(times[0]), securityId: secId, rawCandles: c.t.length, ...volumeDiagnostics(toSessions(c), date, entryMinOfDay) };
+}
+
+/** Session bars back to Dhan-style candle arrays (for computeFacts). */
+function niftyCandles(bars: { t: number; o: number; h: number; l: number; c: number; v: number }[]) {
+  return { t: bars.map((b) => b.t), o: bars.map((b) => b.o), h: bars.map((b) => b.h), l: bars.map((b) => b.l), c: bars.map((b) => b.c), v: bars.map((b) => b.v) };
 }

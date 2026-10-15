@@ -148,8 +148,9 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
       )}
 
       <Group title="Market">
-        <Row label="Nifty 500 open / day" value={`${STATE_TEXT[f.NiftyState] ?? f.NiftyState} / ${f.NiftyNowTrend?.toLowerCase() ?? 'from 09:30'}`} hint="day decides from 09:30" />
-        <Row label="Nifty last 20m vs the stock" value={f.NiftyVsStock ? `${f.NiftyVsStock === 'AGAINST_STOCK' ? 'turning against it' : f.NiftyVsStock === 'WITH_STOCK' ? 'with it' : 'flat'} (${signed(f.Nifty20mPct, 2, '%')})` : 'from 09:30'} />
+        <Row label="Nifty 500 day · last 30m" value={f.NiftyRead ?? `opened ${(STATE_TEXT[f.NiftyState] ?? f.NiftyState).toLowerCase()}`} hint={f.NiftyLast30Pct !== undefined ? `${signed(f.NiftyNowPct, 2, '%')} · ${signed(f.NiftyLast30Pct, 2, '%')}` : 'last 30m counts more'} />
+        <Row label="Stock day · last 30m" value={f.StockRead ?? 'from 09:45'} />
+        <Row label="Nifty last 30m vs the stock" value={f.NiftyVsStock ? `${f.NiftyVsStock === 'AGAINST_STOCK' ? 'turning against it' : f.NiftyVsStock === 'WITH_STOCK' ? 'with it' : 'flat'}` : 'from 09:30'} />
         <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
       </Group>
 
@@ -199,6 +200,7 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
         <Row label="First trade lost / same symbol stopped" value={`${fmt(b.FirstTradeLost)} / ${fmt(b.SameSymbolStopped)}`} />
         <Row label="Minutes since last loss" value={fmt(b.MinSinceLoss)} />
         <Row label={`Your record: ${c.setup.toLowerCase()} ${c.direction.toLowerCase()}`} value={b.SetupTrades ? `${b.SetupTrades} tr · ${Math.round((b.SetupWinRate ?? 0) * 100)}% · ₹${fmt(b.SetupAvgPnl, 0)}` : 'not enough tagged trades'} />
+        {b.LikeNow && <Row label={`…when ${b.LikeNow}`} value={b.LikeNowTrades ? `${b.LikeNowTrades} tr · ${Math.round((b.LikeNowWinRate ?? 0) * 100)}% · ₹${fmt(b.LikeNowAvgPnl, 0)}` : 'none yet (run Backfill)'} />}
       </Group>
 
       {f.missing.length > 0 && (

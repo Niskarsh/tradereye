@@ -193,7 +193,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
       if (Number.isFinite(obstacle) && (pending.target - obstacle) * sgn > 0) facts.TargetPastObstacle = 'YES';
     }
   }
-  const behaviour = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction, setup: req.setup, openPositions: openPositions.length });
+  const behaviour = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction, setup: req.setup, openPositions: openPositions.length, niftyLast30: facts.NiftyLast30Trend });
   const ruleFlags = (fx: Facts, b: Behaviour, setup: Setup, dir: Direction) => {
     if (b.FirstTradeLost) fx.flags.push('First trade of the day lost and nothing else is open');
     if (b.SameSymbolStopped) fx.flags.push(`Stopped out of ${symbol} ${dir} earlier today`);
@@ -214,7 +214,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
       };
       const first = computeFacts(common);
       const fx = first.StopIdea !== undefined ? computeFacts({ ...common, plannedStop: first.StopIdea }) : first;
-      const b = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction: dir, setup, openPositions: openPositions.length });
+      const b = computeBehaviour(trades, { today: sess.date, nowMs: sess.asOfMs, symbol, direction: dir, setup, openPositions: openPositions.length, niftyLast30: fx.NiftyLast30Trend });
       ruleFlags(fx, b, setup, dir);
       alternatives.push({ direction: dir, setup, facts: fx });
     }

@@ -788,5 +788,31 @@ test('chat sends the conversation with the facts in the cached system block and 
 
 test('in-trade rules: a stretched stock that is working is not "weakening" by itself', () => {
   assert.match(SYSTEM_PROMPT, /Conditions that were already there at entry are not signs against/);
-  assert.match(SYSTEM_PROMPT, /MOMENTUM trade, judge Nifty on the day's move/);
+  assert.match(SYSTEM_PROMPT, /Nifty AND the stock both stalled or pulling back in the last 30 minutes is a sign against/);
+});
+
+test('now vs the day: Nifty and the stock over the last 30 minutes (HINDPETRO 10:44 shape)', () => {
+  // Nifty: up ~0.6% by 10:14, then flat; the stock: grinding up all morning
+  const n = day('2026-10-12', (m) => { const c = 24000 * (1 + Math.min(m, 59) * 0.0001); return { o: c, h: c + 1, l: c - 1, c }; }, 90);
+  const st = day('2026-10-12', (m) => ({ o: 300 + m * 0.1, h: 300.3 + m * 0.1, l: 299.9 + m * 0.1, c: 300.1 + m * 0.1 }), 90);
+  const f = computeFacts(base({ nifty1m: n, stock1m: merge(...calm, st), nowMs: IST('2026-10-12', '10:45:20'), price: 309 }));
+  assert.equal(f.NiftyNowTrend, 'RISING');
+  assert.equal(f.NiftyLast30Trend, 'FLAT');
+  assert.equal(f.NiftyRead, 'up on the day, flat in the last 30 min');
+  assert.equal(f.StockNow, 'PUSHING');
+  assert.match(f.StockRead ?? '', /^up on the day, still pushing up in the last 30 min/);
+});
+
+test('momentum core: Nifty against him in the last 30 min breaks it; flat is only a caution', () => {
+  const f = (o: Partial<Facts>) => ({ NiftyState: 'FLAT', Ema200InPath: '', Climax: '', FailedBreak: '', flags: [], missing: [], ExtAdrPct: 40, VwapSide: 'BUYERS', RoomAtr: 1, RoomTo: 'day high 313.35', NiftyNowTrend: 'RISING', ...o }) as Facts;
+  assert.match(coreCheck(f({ NiftyLast30Trend: 'FALLING' }), 'MOMENTUM', 'LONG').missing.join(), /falling in the last 30 min/);
+  assert.deepEqual(coreCheck(f({ NiftyLast30Trend: 'FLAT' }), 'MOMENTUM', 'LONG').missing, []);
+});
+
+test('your record when Nifty was like now', () => {
+  const t = (pnl: number, n30: string) => ({ groupId: String(Math.random()), date: '2026-10-01', symbol: 'X', direction: 'LONG' as const, netPnl: pnl, charges: 20, turnover: 1, exitType: '', setup: 'momentum', firstTs: 1, lastTs: 2, niftyLast30: n30 });
+  const b = computeBehaviour([t(100, 'FLAT'), t(-50, 'FLAT'), t(-60, 'FLAT'), t(200, 'RISING')], { today: '2026-10-15', nowMs: 0, symbol: 'Y', direction: 'LONG', setup: 'MOMENTUM', openPositions: 0, niftyLast30: 'FLAT' });
+  assert.equal(b.LikeNow, 'Nifty flat in the last 30 min');
+  assert.equal(b.LikeNowTrades, 3);
+  assert.equal(b.LikeNowWinRate, 0.33);
 });

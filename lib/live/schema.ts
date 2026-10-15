@@ -54,6 +54,8 @@ export const MONTHLY_CONTEXT_COLS = [
   'OrHigh', 'OrLow', 'EntryVsOr', 'PdhDistAtr', 'PdlDistAtr',
   'Ema200_5mAtr', 'Ema200_10mAtr', 'Ema200_1dAtr', 'RsVsNiftyPct', 'ExtAdrPct', 'PocDistAtr',
   'PullbackNo', 'VolTrend', 'ContextStatus',
+  // now vs the day at entry (Oct 15): Nifty's day and last 30 min, the stock's last 30 min
+  'NiftyDayTrend', 'NiftyLast30Pct', 'NiftyLast30Trend', 'Stock30mAtr', 'StockNow',
 ] as const;
 
 /** Co-pilot: the entry check (Ck...) and a summary of in-trade re-checks (Rc...), copied on when the trade is logged. */
@@ -131,6 +133,7 @@ export const COPILOT_CHECK_COLS = [
   'Stretch', 'StretchDir', 'StretchRunPct', 'StretchVwapAtr', 'Nifty20mPct', 'NiftyVsStock',
   'EntryTiming', 'EntryLevel', 'EntryLevelName', 'EntryInvalid', 'EntryInvalidName', 'EntryWhy',
   'PendingAddPrice', 'PendingAddQty',
+  'NiftyLast30Pct', 'NiftyLast30Trend', 'Stock30mAtr', 'StockNow',
 ] as const;
 
 /** Co-pilot chat: one row per question and answer, in a tab per month ("october-2026-chat"). */
