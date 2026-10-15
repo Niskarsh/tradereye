@@ -45,6 +45,18 @@ export interface Facts {
    * the directional threshold) or FLAT. Undefined before 09:30, when the first-5-minute rule (NiftyState) decides.
    */
   NiftyNowTrend?: 'RISING' | 'FALLING' | 'FLAT'; NiftyLast30Pct?: number;
+  /**
+   * Now vs the day (his rule, Oct 15): the whole day is the reference, the last 30 minutes (three 10-min candles) is
+   * what is acting on the next move and weighs more. From 09:45. Nifty: RISING / FALLING (0.05% or more) or FLAT.
+   */
+  NiftyLast30Trend?: 'RISING' | 'FALLING' | 'FLAT';
+  /** Plain words for both, e.g. "up on the day, flat in the last 30 min". */
+  NiftyRead?: string;
+  /** The stock's last 30 minutes in 10-min ATR, + = in the direction of its day move. */
+  Stock30mAtr?: number;
+  /** PUSHING (0.5 ATR or more in the day's direction), STALLED, or PULLING_BACK (0.5 ATR or more against it). */
+  StockNow?: 'PUSHING' | 'STALLED' | 'PULLING_BACK';
+  StockRead?: string;
   RvolDay?: number; Atr10m?: number; Atr2?: number;
   /** Volume so far vs the average for the SAME time of day over the last 10 sessions (1 = normal). */
   RvolSameTime?: number;
@@ -70,6 +82,14 @@ export interface Facts {
   StopIdea?: number; StopIdeaAtr?: number; StopIdeaCapped?: 'YES';
   /** His own orders in Dhan for this stock (his intention): pending entry, stop and target. */
   PendingEntry?: number; PendingStop?: number; PendingTarget?: number;
+  /** What his pending entry order means: BREAK = a stop-entry beyond price (waits for the break), PULLBACK = a limit behind price. */
+  PendingEntryType?: 'BREAK' | 'PULLBACK' | 'AT_MARKET';
+  /**
+   * Reversal style: FADE = selling/buying a stretched run before it turns, back to VWAP / POC (the stretch rule).
+   * RECLAIM = the run has already stopped and price (or his entry) is back across VWAP: the trade is the move on to the
+   * next level, not the fade, so stretch does not apply.
+   */
+  ReversalStyle?: 'FADE' | 'RECLAIM';
   /** Target distance / stop distance, and whether his target sits beyond the next obstacle (RoomTo). */
   RewardRisk?: number; TargetPastObstacle?: 'YES';
   /**
@@ -298,6 +318,16 @@ export function computeFacts(inp: FactsInput): Facts {
   if (asOfMin >= 9 * 60 + 30 && f.NiftyNowPct !== undefined) {
     f.NiftyNowTrend = f.NiftyNowPct >= inp.niftyDirPct ? 'RISING' : f.NiftyNowPct <= -inp.niftyDirPct ? 'FALLING' : 'FLAT';
   }
+  const th30 = inp.niftyDirPct / 3; // 0.05% by default: half an hour moves less than a day
+  if (asOfMin >= 9 * 60 + 45 && f.NiftyLast30Pct !== undefined) {
+    f.NiftyLast30Trend = f.NiftyLast30Pct >= th30 ? 'RISING' : f.NiftyLast30Pct <= -th30 ? 'FALLING' : 'FLAT';
+  }
+  if (f.NiftyNowTrend) {
+    const day = f.NiftyNowTrend === 'RISING' ? 'up on the day' : f.NiftyNowTrend === 'FALLING' ? 'down on the day' : 'flat on the day';
+    const now = f.NiftyLast30Trend === undefined ? '' : f.NiftyLast30Trend === 'FLAT' ? 'flat in the last 30 min'
+      : `${f.NiftyLast30Trend === 'RISING' ? 'rising' : 'falling'} in the last 30 min`;
+    f.NiftyRead = now ? `${day}, ${now}` : day;
+  }
 
   // ---- 200 EMAs (5m, 10m: built from prior sessions + this session so far; 1D: daily closes + today's price)
   const upto = stock.filter((s) => s.date <= inp.date)
@@ -365,6 +395,15 @@ export function computeFacts(inp: FactsInput): Facts {
     f.Rs20mPct = r4(s20 - n20);
   }
 
+  // ---- the stock's last 30 minutes against its day move (needs 30 minutes of today and the 10-min ATR)
+  if (asOfMin >= 9 * 60 + 45 && bars.length > 30 && atr && open !== undefined) {
+    const dayDir = price >= open ? 1 : -1;
+    f.Stock30mAtr = r2(((price - bars[bars.length - 31].c) / atr) * dayDir);
+    f.StockNow = f.Stock30mAtr >= 0.5 ? 'PUSHING' : f.Stock30mAtr <= -0.5 ? 'PULLING_BACK' : 'STALLED';
+    const word = dayDir > 0 ? 'up' : 'down';
+    f.StockRead = `${word} on the day, ${f.StockNow === 'PUSHING' ? `still pushing ${word}` : f.StockNow === 'STALLED' ? 'stalled' : 'pulling back'} in the last 30 min (${f.Stock30mAtr > 0 ? '+' : ''}${f.Stock30mAtr} ATR)`;
+  }
+
   // ---- extension from the open as a share of the 10-day average daily range
   if (n >= 10 && open !== undefined) {
     const last10 = Array.from({ length: 10 }, (_, i) => daily.h[n - 10 + i] - daily.l[n - 10 + i]);
@@ -408,8 +447,10 @@ export function computeFacts(inp: FactsInput): Facts {
     f.Nifty20mPct = r4((nBars[nBars.length - 1].c / nBars[nBars.length - 21].c - 1) * 100);
     const stockUp = price >= open;
     const th = inp.niftyDirPct / 3; // 0.05% by default: a short window moves less
-    f.NiftyVsStock = (stockUp ? f.Nifty20mPct >= th : f.Nifty20mPct <= -th) ? 'WITH_STOCK'
-      : (stockUp ? f.Nifty20mPct <= -th : f.Nifty20mPct >= th) ? 'AGAINST_STOCK' : 'FLAT';
+    // his window is the last 30 minutes (Oct 15); before 30 minutes of data, the last 20
+    const nRecent = f.NiftyLast30Pct ?? f.Nifty20mPct;
+    f.NiftyVsStock = (stockUp ? nRecent >= th : nRecent <= -th) ? 'WITH_STOCK'
+      : (stockUp ? nRecent <= -th : nRecent >= th) ? 'AGAINST_STOCK' : 'FLAT';
   }
 
   // ---- move structure: pullbacks follow the trade for momentum, the stock's own run for reversal
@@ -471,7 +512,23 @@ export function computeFacts(inp: FactsInput): Facts {
   f.DayHigh = r2(dayHi); f.DayLow = r2(dayLo);
   if (atr) {
     let room: number | undefined;
-    if (inp.setup === 'REVERSAL') {
+    // RECLAIM: price (his entry) already back across VWAP his way after a real run against him (25%+ of the daily range)
+    const reclaim = inp.setup === 'REVERSAL' && vwapPx !== undefined && (price - vwapPx) * sign > 0.05 * atr && (f.ExtAdrPct ?? 0) * sign <= -25;
+    if (inp.setup === 'REVERSAL') f.ReversalStyle = reclaim ? 'RECLAIM' : 'FADE';
+    if (reclaim) {
+      // the mean (VWAP / POC) is behind: the target is the next real level beyond it
+      const levels: { name: string; px: number }[] = [
+        { name: sign === 1 ? 'first 10-min candle high' : 'first 10-min candle low', px: (sign === 1 ? f.OrHigh : f.OrLow) ?? NaN },
+        { name: '2-day POC', px: poc2d ?? NaN }, { name: 'POC', px: poc ?? NaN },
+        { name: sign === 1 ? 'day high' : 'day low', px: sign === 1 ? dayHi : dayLo },
+        { name: sign === 1 ? 'prev day high' : 'prev day low', px: n ? (sign === 1 ? daily.h[n - 1] : daily.l[n - 1]) : NaN },
+        { name: '5m 200 EMA', px: e5 ?? NaN }, { name: '10m 200 EMA', px: e10 ?? NaN }, { name: 'daily 200 EMA', px: e1d ?? NaN },
+      ].filter((x) => Number.isFinite(x.px) && (x.px - price) * sign > 0.3 * atr);
+      if (levels.length) {
+        const near = levels.reduce((a, b) => (Math.abs(b.px - price) < Math.abs(a.px - price) ? b : a));
+        room = Math.abs(near.px - price); f.RoomTo = `${near.name} ${r2(near.px)}`;
+      } else { room = 0; f.RoomTo = `no level ${sign === 1 ? 'above' : 'below'} in the data`; }
+    } else if (inp.setup === 'REVERSAL') {
       // The target is where price reverts to. Before 10:15 (fewer than six completed 10-min candles) today's
       // profile is just the opening move, so today's POC sits on the move itself: use the nearer of VWAP and the
       // 2-day POC. From 10:15, today's POC (his rule).
@@ -549,6 +606,12 @@ export function computeFacts(inp: FactsInput): Facts {
         if (pull) { f.EntryLevel = r2(pull.px); f.EntryLevelName = pull.name; }
         if (inv) { f.EntryInvalid = r2(inv.px); f.EntryInvalidName = inv.name; }
       }
+    } else if (f.ReversalStyle === 'RECLAIM' && vwapPx !== undefined) {
+      // back across VWAP: valid while it stays there; a 10-min close back through VWAP means the run is back on
+      f.EntryInvalid = r2(vwapPx - sign * 0.3 * atr);
+      f.EntryInvalidName = `a 10-min close back ${up ? 'below' : 'above'} VWAP`;
+      f.EntryTiming = 'NOW';
+      f.EntryWhy = `price is back ${up ? 'above' : 'below'} VWAP after the run: the reclaim is the confirmation`;
     } else {
       // reversal: is there any sign the run is stopping? (climax / failed break the run's way, or the last
       // completed 10-min candle closing against the run)
@@ -610,12 +673,22 @@ export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missi
       const t = f.NiftyNowTrend;
       if (t === 'FLAT') missing.push('Nifty 500 flat on the day');
       else if (up ? t === 'FALLING' : t === 'RISING') missing.push(`Nifty 500 ${t.toLowerCase()} on the day`);
+      // the last 30 minutes weigh more: Nifty moving against him right now breaks the core; flat is a caution only
+      const r = f.NiftyLast30Trend;
+      if (r && (up ? r === 'FALLING' : r === 'RISING')) missing.push(`Nifty 500 ${r.toLowerCase()} in the last 30 min`);
     } else if (n === 'OPENING' || n === 'UNKNOWN' || n === undefined) missing.push('Nifty direction not known yet');
     else if (n === 'FLAT' || n === 'FLIPPED') missing.push(`Nifty 500 ${n.toLowerCase()}`);
     else if (up ? n.endsWith('_DOWN') : n.endsWith('_UP')) missing.push(`Nifty 500 moving ${up ? 'down' : 'up'}`);
     if (f.VwapSide && f.VwapSide !== (up ? 'BUYERS' : 'SELLERS')) missing.push(`${f.VwapSide.toLowerCase()} in control (VWAP)`);
     const breakout = (f.RoomTo ?? '').startsWith('none: price is at the day');
     if (!breakout && f.RoomAtr !== undefined && f.RoomAtr < 0.5) missing.push(`little room: ${f.RoomTo} ${f.RoomAtr} ATR away`);
+  } else if (f.ReversalStyle === 'RECLAIM') {
+    // the run against him has stopped and price is back across VWAP: the trade is the move on to the next level
+    if (f.StockNow === 'PUSHING') missing.push(`the ${up ? 'down' : 'up'}-run is still going in the last 30 min`);
+    if (f.RoomAtr === undefined || f.RoomAtr < 1) missing.push(f.RoomAtr === undefined ? (f.RoomTo ?? 'no level') : `next level ${f.RoomTo} only ${f.RoomAtr} ATR away`);
+    const r = f.NiftyLast30Trend;
+    if (r && (up ? r === 'FALLING' : r === 'RISING')) missing.push(`Nifty 500 ${r.toLowerCase()} in the last 30 min`);
+    else if (!r && f.NiftyVsStock === 'WITH_STOCK') missing.push(`Nifty 500 still pushing ${up ? 'down' : 'up'} with the stock`);
   } else {
     // the stock must be stretched the OTHER way (stretched up for a reversal short), measured against its own history
     const fadeDir = up ? 'DOWN' : 'UP';
@@ -627,7 +700,7 @@ export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missi
     if (f.RvolBusy === 'YES') missing.push('busier than usual');
     if (f.NiftyVsStock) {
       // from 09:30: Nifty's last 20 minutes must not still be pushing the stock's way
-      if (f.NiftyVsStock === 'WITH_STOCK') missing.push(`Nifty 500 still pushing ${up ? 'down' : 'up'} with the stock (last 20 min)`);
+      if (f.NiftyVsStock === 'WITH_STOCK') missing.push(`Nifty 500 still pushing ${up ? 'down' : 'up'} with the stock (last 30 min)`);
     } else if (up ? n === 'TRENDING_DOWN' : n === 'TRENDING_UP') missing.push(`Nifty 500 pushing ${up ? 'down' : 'up'}`);
   }
   return { missing };

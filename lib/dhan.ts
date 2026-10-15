@@ -65,6 +65,8 @@ export class DhanClient {
   }
 
   orders() { return this.req<any[]>('GET', '/orders').then((r) => (Array.isArray(r) ? r : [])); }
+  /** Super orders (entry + stop + target in one, as TradingView brackets place them): the legs are not in /orders until the entry fills. */
+  superOrders() { return this.req<any[]>('GET', '/super/orders').then((r) => (Array.isArray(r) ? r : [])); }
   trades() { return this.req<any[]>('GET', '/trades').then((r) => (Array.isArray(r) ? r : [])); }
   positions() { return this.req<any[]>('GET', '/positions').then((r) => (Array.isArray(r) ? r : [])); }
   profile() { return this.req<Profile>('GET', '/profile'); }

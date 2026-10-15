@@ -24,13 +24,19 @@ export interface CheckResp {
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; notes: string[]; asksLeft: number;
   fitsNow: { direction: Dir; setup: SetupT; stop?: number; roomTo?: string; roomAtr?: number }[];
   pending?: { direction?: Dir; entry?: number; stop?: number; target?: number; source: string };
+  /** when the browser received it (ms): used to refresh facts that have gone stale before asking */
+  fetchedAt?: number;
 }
+
+export interface ChatMsg { role: 'user' | 'assistant' | 'note'; content: string; meta?: string }
 
 export interface AltResp { direction: Dir; setup: SetupT; stop?: number; reason: string }
 export interface ScenarioResp { kind: 'SETUP' | 'WAIT'; setup?: SetupT; direction?: Dir; stop?: number; target?: number; why: string; trigger: string }
 export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number; scenarios: ScenarioResp[] }
 
 const MARKET_EVERY_MS = 60_000;
+/** Facts older than this are fetched again before Claude reads them. */
+export const FRESH_MS = 45_000;
 
 export function useCopilot(token: string) {
   const [market, setMarket] = useState<MarketResp | null>(null);
@@ -42,6 +48,9 @@ export function useCopilot(token: string) {
   const [busy, setBusy] = useState<'' | 'check' | 'ask'>('');
   const [error, setError] = useState('');
   const [decision, setDecision] = useState<'' | 'TOOK' | 'SKIPPED'>('');
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const chatKey = useRef('');
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadMarket = useCallback(async () => {
@@ -56,13 +65,16 @@ export function useCopilot(token: string) {
     return () => { if (timer.current) clearInterval(timer.current); };
   }, [loadMarket]);
 
-  const runCheck = useCallback(async (symbol: string, plannedStop?: number): Promise<CheckResp | null> => {
+  const runCheck = useCallback(async (symbol: string, plannedStop?: number, keepRead = false): Promise<CheckResp | null> => {
     if (!token || !direction || !setup || !symbol) return null;
     // keep the current card on screen until the fresh one arrives (refresh), then replace it
-    setBusy('check'); setError(''); setRead(null); setDecision('');
+    setBusy('check'); setError(''); if (!keepRead) { setRead(null); setDecision(''); }
     try {
-      const r = await postWithToken<CheckResp>('/api/copilot/check', token, { direction, setup, symbol, plannedStop });
+      const r = { ...(await postWithToken<CheckResp>('/api/copilot/check', token, { direction, setup, symbol, plannedStop })), fetchedAt: Date.now() };
       setCheck(r);
+      // a new stock or side starts a new chat; a refresh of the same one keeps it
+      const key = `${r.symbol}|${r.direction}|${r.setup}`;
+      if (key !== chatKey.current) { chatKey.current = key; setChat([]); }
       setMarket((m) => (m ? { ...m, asksLeft: r.asksLeft } : m));
       return r;
     } catch (e) { setError((e as Error).message); return null; }
@@ -103,5 +115,43 @@ export function useCopilot(token: string) {
     if (fresh) await ask(fresh);
   }, [runCheck, ask]);
 
-  return { refreshAndAsk, saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
+  /** Ask once: if the facts on screen are older than FRESH_MS, fetch them again first so Claude never reads stale data. */
+  const askFresh = useCallback(async (plannedStop?: number) => {
+    if (!check) return;
+    if (Date.now() - (check.fetchedAt ?? 0) > FRESH_MS) return refreshAndAsk(check.symbol, plannedStop);
+    return ask();
+  }, [check, ask, refreshAndAsk]);
+
+  /** Chat: free questions about the stock / trade on screen, answered on the latest facts the app fetched. */
+  const sendChat = useCallback(async (text: string) => {
+    const q = text.trim();
+    if (!token || !check || !q) return;
+    const next: ChatMsg[] = [...chat, { role: 'user', content: q }];
+    setChat(next); setChatBusy(true);
+    try {
+      // notes (data refreshed) go to Claude as part of the next question, so it knows the numbers moved
+      const turns: { role: 'user' | 'assistant'; content: string }[] = [];
+      let pendingNote = '';
+      for (const m of next) {
+        if (m.role === 'note') { pendingNote += `[${m.content}] `; continue; }
+        if (m.role === 'user') { turns.push({ role: 'user', content: pendingNote + m.content }); pendingNote = ''; }
+        else turns.push({ role: 'assistant', content: m.content });
+      }
+      const lastRead = read ? `${read.verdict}: ${read.lines.join(' / ')}${read.watch ? ` | Watch: ${read.watch}` : ''}` : '';
+      const r = await postWithToken<{ text: string; costInr: number; latencyMs: number; dataTime: string }>('/api/copilot/chat', token,
+        { checkId: check.checkId, date: check.date, turns, lastRead });
+      setChat((c) => [...c, { role: 'assistant', content: r.text, meta: `data ${r.dataTime.slice(0, 5)} · ${(r.latencyMs / 1000).toFixed(1)}s · ₹${r.costInr.toFixed(2)}` }]);
+    } catch (e) {
+      setChat((c) => [...c, { role: 'note', content: `Could not answer: ${(e as Error).message}` }]);
+    } finally { setChatBusy(false); }
+  }, [token, check, chat, read]);
+
+  /** "Latest Dhan data" inside the chat: a fresh check for the same stock; the chat continues on the new numbers. */
+  const refreshForChat = useCallback(async (plannedStop?: number) => {
+    if (!check) return;
+    const fresh = await runCheck(check.symbol, plannedStop, true);
+    if (fresh) setChat((c) => [...c, { role: 'note', content: `Fresh Dhan data at ${fresh.time.slice(0, 5)}: price ${fresh.price}` }]);
+  }, [check, runCheck]);
+
+  return { askFresh, chat, chatBusy, sendChat, refreshForChat, refreshAndAsk, saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
 }

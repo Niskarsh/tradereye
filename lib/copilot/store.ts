@@ -1,5 +1,5 @@
 import { colLetter, objectToRow, rowToObject, type Cell, type SheetsClient } from '../sheetsApi';
-import { COPILOT_CHECK_COLS, checksTabTitle } from '../live/schema';
+import { COPILOT_CHAT_COLS, COPILOT_CHECK_COLS, chatTabTitle, checksTabTitle } from '../live/schema';
 import { monthSheetTitle, normTime, parseIst } from '../live/time';
 
 /**
@@ -136,4 +136,24 @@ export async function checksForTrade(sheets: SheetsClient, t: TradeForLink) {
     await sheets.updateRanges(linked.map((r) => ({ range: `${q(title)}!${colLetter(i)}${r.rowNumber}`, values: [[groupId]] })), true);
   };
   return { columns, tag };
+}
+
+/* ---- chat log ------------------------------------------------------------------------------------------------ */
+
+export type ChatRow = Partial<Record<typeof COPILOT_CHAT_COLS[number], Cell>>;
+export const chatTitleFor = (date: string) => chatTabTitle(monthSheetTitle(date));
+
+export async function appendChat(sheets: SheetsClient, date: string, row: ChatRow): Promise<void> {
+  const title = chatTitleFor(date);
+  const { headers } = await sheets.ensureTab(title, COPILOT_CHAT_COLS, HEADER_CACHE);
+  await sheets.append(title, [objectToRow(headers, row as Record<string, Cell>)], true);
+}
+
+/** Questions already answered today (for the daily chat limit). */
+export async function chatsToday(sheets: SheetsClient, date: string): Promise<number> {
+  const title = chatTitleFor(date);
+  const tab = await sheets.findTab(title);
+  if (!tab) return 0;
+  const { headers, rows } = await sheets.readTail(title, 400);
+  return rows.map((r) => rowToObject(headers, r.cells)).filter((o) => o.Date === date && !o.Error).length;
 }
