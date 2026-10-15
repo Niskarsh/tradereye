@@ -28,12 +28,12 @@ export function MarketStrip({ m, err, onRefresh }: { m: MarketResp | null; err: 
           </p>
           <p className={`text-xl font-black tracking-tight ${stateTone(k.state)}`}>
             <span className="text-xs font-bold text-zinc-500 mr-1">Open</span>{STATE_TEXT[k.state] ?? k.state}
-            {k.nowTrend && <><span className="text-xs font-bold text-zinc-500 mx-1">· Now</span><span className={k.nowTrend === 'RISING' ? 'text-data-green' : k.nowTrend === 'FALLING' ? 'text-data-red' : 'text-zinc-300'}>{k.nowTrend.toLowerCase()}</span></>}
+            {k.nowTrend && <><span className="text-xs font-bold text-zinc-500 mx-1">· Day</span><span className={k.nowTrend === 'RISING' ? 'text-data-green' : k.nowTrend === 'FALLING' ? 'text-data-red' : 'text-zinc-300'}>{k.nowTrend.toLowerCase()}</span></>}
           </p>
         </div>
         <div className="text-right font-mono text-xs text-zinc-400 leading-5">
           <div>first 5m {signed(k.first5, 2, '%')}</div>
-          <div>day {signed(k.nowPct, 2, '%')} · 30m {signed(k.last30, 2, '%')}</div>
+          <div>day {signed(k.nowPct, 2, '%')} · 10m {signed(k.last10, 2, '%')}</div>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-400">
@@ -130,7 +130,7 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
       )}
 
       <Group title="Market">
-        <Row label="Nifty 500 open / now" value={`${STATE_TEXT[f.NiftyState] ?? f.NiftyState} / ${f.NiftyNowTrend?.toLowerCase() ?? '–'}`} hint="open = your first-5-min rule" />
+        <Row label="Nifty 500 open / day" value={`${STATE_TEXT[f.NiftyState] ?? f.NiftyState} / ${f.NiftyNowTrend?.toLowerCase() ?? 'from 09:30'}`} hint="day decides from 09:30" />
         <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
       </Group>
 

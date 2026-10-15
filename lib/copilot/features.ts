@@ -40,7 +40,10 @@ export interface Facts {
   NiftyFirst5Pct?: number; NiftyNowPct?: number; NiftyLast10Pct?: number;
   /** His day-type rule: how Nifty 500 OPENED (first 5 minutes), plus whether that move has since faded or flipped. */
   NiftyState: NiftyState;
-  /** Where Nifty 500 is going NOW: its move over the last 30 minutes (three 10-min candles). */
+  /**
+   * From 09:30 (his rule): Nifty 500's move over the whole day so far (open to now) - RISING / FALLING (at least
+   * the directional threshold) or FLAT. Undefined before 09:30, when the first-5-minute rule (NiftyState) decides.
+   */
   NiftyNowTrend?: 'RISING' | 'FALLING' | 'FLAT'; NiftyLast30Pct?: number;
   RvolDay?: number; Atr10m?: number; Atr2?: number;
   /** Volume so far vs the average for the SAME time of day over the last 10 sessions (1 = normal). */
@@ -267,9 +270,9 @@ export function computeFacts(inp: FactsInput): Facts {
   const nBars = nDay ? nDay.bars.filter((b) => b.t * 1000 < asOfMs) : [];
   if (nBars.length > 10) f.NiftyLast10Pct = r4((nBars[nBars.length - 1].c / nBars[nBars.length - 11].c - 1) * 100);
   f.NiftyState = niftyState(f.NiftyFirst5Pct, f.NiftyNowPct, f.NiftyLast10Pct, inp.niftyDirPct, asOfMin);
-  if (nBars.length > 30) {
-    f.NiftyLast30Pct = r4((nBars[nBars.length - 1].c / nBars[nBars.length - 31].c - 1) * 100);
-    f.NiftyNowTrend = f.NiftyLast30Pct >= inp.niftyDirPct ? 'RISING' : f.NiftyLast30Pct <= -inp.niftyDirPct ? 'FALLING' : 'FLAT';
+  if (nBars.length > 30) f.NiftyLast30Pct = r4((nBars[nBars.length - 1].c / nBars[nBars.length - 31].c - 1) * 100);
+  if (asOfMin >= 9 * 60 + 30 && f.NiftyNowPct !== undefined) {
+    f.NiftyNowTrend = f.NiftyNowPct >= inp.niftyDirPct ? 'RISING' : f.NiftyNowPct <= -inp.niftyDirPct ? 'FALLING' : 'FLAT';
   }
 
   // ---- 200 EMAs (5m, 10m: built from prior sessions + this session so far; 1D: daily closes + today's price)
@@ -467,7 +470,7 @@ export function computeFacts(inp: FactsInput): Facts {
 /**
  * The core of each setup, decided by the app (so the label can never be argued away):
  *  Momentum = with today's move: the stock moving his way today (at least 10% of the average daily range),
- *    Nifty 500 not against him, VWAP control on his side, and room to the next obstacle (0.5 ATR or more,
+ *    Nifty 500 his way (before 09:30 by his first-5-minute rule, from 09:30 by its move over the whole day), VWAP control on his side, and room to the next obstacle (0.5 ATR or more,
  *    or price breaking out at the day's extreme).
  *  Reversal = against today's move, back to the target: the stock moved at least 30% of its daily range the
  *    other way, the target (VWAP / 2-day POC before 10:15, today's POC after) at least 0.75 ATR away, not busier than usual, and Nifty not pushing
@@ -482,7 +485,12 @@ export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missi
   if (setup === 'MOMENTUM') {
     if (ext === undefined) missing.push('today\'s move unknown');
     else if (ext * sign < 10) missing.push(`stock not moving ${up ? 'up' : 'down'} today (${ext > 0 ? '+' : ''}${ext}% of daily range)`);
-    if (n === 'OPENING' || n === 'UNKNOWN' || n === undefined) missing.push('Nifty direction not known yet');
+    if (f.NiftyNowTrend) {
+      // from 09:30: Nifty's move over the whole day so far must be his way
+      const t = f.NiftyNowTrend;
+      if (t === 'FLAT') missing.push('Nifty 500 flat on the day');
+      else if (up ? t === 'FALLING' : t === 'RISING') missing.push(`Nifty 500 ${t.toLowerCase()} on the day`);
+    } else if (n === 'OPENING' || n === 'UNKNOWN' || n === undefined) missing.push('Nifty direction not known yet');
     else if (n === 'FLAT' || n === 'FLIPPED') missing.push(`Nifty 500 ${n.toLowerCase()}`);
     else if (up ? n.endsWith('_DOWN') : n.endsWith('_UP')) missing.push(`Nifty 500 moving ${up ? 'down' : 'up'}`);
     if (f.VwapSide && f.VwapSide !== (up ? 'BUYERS' : 'SELLERS')) missing.push(`${f.VwapSide.toLowerCase()} in control (VWAP)`);

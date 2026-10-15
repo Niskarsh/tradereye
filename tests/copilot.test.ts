@@ -629,6 +629,15 @@ test('Nifty: the opening state stays your first-5-minute rule; the current trend
   const n = day('2026-10-12', (m) => { const c = m < 15 ? 24000 : 24000 + (m - 15) * 3; return { o: c, h: c + 2, l: c - 2, c }; }, 60);
   const f = computeFacts(base({ nifty1m: n, nowMs: IST('2026-10-12', '10:12:20') }));
   assert.equal(f.NiftyState, 'FLAT');       // the open, his rule
-  assert.equal(f.NiftyNowTrend, 'RISING');  // now
-  assert.ok(f.NiftyLast30Pct! > 0.15);
+  assert.equal(f.NiftyNowTrend, 'RISING');  // from 09:30: the day's move (+0.4%)
+  // before 09:30 the day rule is not used
+  assert.equal(computeFacts(base({ nifty1m: n, nowMs: IST('2026-10-12', '09:28:20') })).NiftyNowTrend, undefined);
+});
+
+test('momentum Nifty check: first-5-min rule before 09:30, the whole day from 09:30', () => {
+  const f = (o: Partial<Facts>) => ({ NiftyState: 'FLAT', Ema200InPath: '', Climax: '', FailedBreak: '', flags: [], missing: [], ExtAdrPct: 40, VwapSide: 'BUYERS', RoomAtr: 1, RoomTo: 'day high 313.35', ...o }) as Facts;
+  assert.match(coreCheck(f({}), 'MOMENTUM', 'LONG').missing.join(), /flat/);                         // 09:25, flat open
+  assert.deepEqual(coreCheck(f({ NiftyNowTrend: 'RISING' }), 'MOMENTUM', 'LONG').missing, []);       // ANGELONE 09:54: up on the day
+  assert.match(coreCheck(f({ NiftyNowTrend: 'FLAT' }), 'MOMENTUM', 'LONG').missing.join(), /flat on the day/);
+  assert.match(coreCheck(f({ NiftyState: 'TRENDING_UP', NiftyNowTrend: 'FALLING' }), 'MOMENTUM', 'LONG').missing.join(), /falling on the day/);
 });

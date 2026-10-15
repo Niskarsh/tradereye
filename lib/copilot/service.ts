@@ -285,7 +285,9 @@ export async function marketStrip(deps: Pick<Deps, 'dhan' | 'sheets' | 'now'>) {
   if (bars.length > 10) last10 = Number(((bars.at(-1)!.c / bars.at(-11)!.c - 1) * 100).toFixed(4));
   const state = niftyState(first5, nowPct, last10, s.niftyDirPct, istParts(asOfMs).minuteOfDay);
   const last30 = bars.length > 30 ? Number(((bars.at(-1)!.c / bars.at(-31)!.c - 1) * 100).toFixed(4)) : undefined;
-  const nowTrend = last30 === undefined ? undefined : last30 >= s.niftyDirPct ? 'RISING' : last30 <= -s.niftyDirPct ? 'FALLING' : 'FLAT';
+  // from 09:30: Nifty judged on its move over the whole day so far (his rule)
+  const nowTrend = istParts(asOfMs).minuteOfDay < 9 * 60 + 30 || nowPct === undefined ? undefined
+    : nowPct >= s.niftyDirPct ? 'RISING' : nowPct <= -s.niftyDirPct ? 'FALLING' : 'FLAT';
   return { date, live: date === today && istParts(nowMs).minuteOfDay < SESSION_CLOSE_MIN, asOf: istTime(asOfMs), first5, nowPct, last10, last30, nowTrend, state };
 }
 
