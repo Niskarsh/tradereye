@@ -339,7 +339,7 @@ export default function Journal() {
     const currentSheetTitle = currentMonthRows.find(t => t.date === selectedDateState)?.sheetTitle;
 
     return (
-        <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans pb-32">
+        <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-32">
             {/* Lightbox */}
             {fullScreenImage && (
                 <div className="fixed inset-0 z-[100] bg-black/98 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setFullScreenImage(null)}>
@@ -367,7 +367,7 @@ export default function Journal() {
                         </Button>
                     </header>
 
-                    <div className="bg-[#0c0c0c] border border-zinc-800 rounded-[32px] p-6 shadow-2xl">
+                    <div className="bg-brand-card border border-zinc-800 rounded-[32px] p-6 shadow-2xl">
                         <div className="flex items-center justify-between mb-8">
                             <h2 className="font-black text-xl uppercase tracking-tighter">{formatMonthLabel(displayMonth)}</h2>
                             <div className="flex gap-2">
@@ -384,7 +384,7 @@ export default function Journal() {
 
                         <div className="grid grid-cols-7 gap-2">
                             {calendarCells.map((cell, i) => cell ? (
-                                <button key={cell.date} onClick={() => setSelectedDateState(cell.date)} className={`aspect-square rounded-2xl flex flex-col items-center justify-center transition-all border ${selectedDateState === cell.date ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.25)]' : 'bg-zinc-900/30 border-zinc-800/50 hover:border-zinc-600'}`}>
+                                <button key={cell.date} onClick={() => setSelectedDateState(cell.date)} className={`aspect-square rounded-2xl flex flex-col items-center justify-center transition-all border ${selectedDateState === cell.date ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_20px_rgba(223,177,91,0.25)]' : 'bg-zinc-900/30 border-zinc-800/50 hover:border-zinc-600'}`}>
                                     <span className={`text-[11px] font-black ${selectedDateState === cell.date ? 'text-black' : 'text-zinc-500'}`}>{cell.day}</span>
                                     {cell.hasData && (
                                         <span className={`text-[8px] font-black mt-1 leading-none ${selectedDateState === cell.date ? 'text-black' : cell.pnl >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
@@ -424,11 +424,11 @@ export default function Journal() {
                                 <Calendar className="w-12 h-12 mb-4 opacity-10" /><p className="font-black uppercase tracking-[0.2em] text-[10px]">No activity recorded</p>
                             </div>
                         ) : selectedDayGroups.map(([groupId, group]) => (
-                            <div key={groupId} className="bg-[#0c0c0c] border border-zinc-800 rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
+                            <div key={groupId} className="bg-brand-card border border-zinc-800 rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
                                 {/* CARD HEADER */}
                                 <div className="p-6 flex items-center justify-between bg-zinc-900/20 border-b border-zinc-800/40">
                                     <div className="flex items-center gap-4">
-                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${group.pnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'bg-rose-500/10 text-rose-400 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]'}`}>
+                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${group.pnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 shadow-[inset_0_0_20px_rgba(29,201,149,0.05)]' : 'bg-rose-500/10 text-rose-400 shadow-[inset_0_0_20px_rgba(224,63,83,0.05)]'}`}>
                                             {group.pnl >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
                                         </div>
                                         <div>
@@ -599,7 +599,7 @@ export default function Journal() {
                     <Button
                         onClick={saveJournal}
                         disabled={saving}
-                        className="w-full h-14 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white font-black uppercase tracking-[0.3em] text-[10px] shadow-[0_20px_50px_rgba(34,211,238,0.3)] gap-3 animate-in fade-in slide-in-from-bottom-6"
+                        className="w-full h-14 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white font-black uppercase tracking-[0.3em] text-[10px] shadow-[0_20px_50px_rgba(223,177,91,0.3)] gap-3 animate-in fade-in slide-in-from-bottom-6"
                     >
                         {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                         {saving ? 'Saving...' : `Push ${Object.keys(pendingComments).length + Object.keys(pendingScreenshots).length} Updates`}
