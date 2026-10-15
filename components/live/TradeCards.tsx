@@ -56,7 +56,7 @@ const SAVE_LABEL: Record<string, { text: string; cls: string }> = {
 export function ClosedTable({ rows }: { rows: LiveGroupView[] }) {
   if (!rows.length) return <p className="text-sm text-zinc-500">No completed trades yet today.</p>;
   return (
-    <div className="bg-[#080808] rounded-3xl border border-zinc-900 overflow-x-auto">
+    <div className="bg-brand-section rounded-3xl border border-zinc-900 overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[9px] font-black text-zinc-600 uppercase tracking-widest">

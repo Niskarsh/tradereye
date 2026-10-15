@@ -54,11 +54,11 @@ export default function LivePnl({
     };
 
     return (
-        <div key={selectedDate} className="bg-[#0c0c0c] border border-zinc-800 rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
+        <div key={selectedDate} className="bg-brand-card border border-zinc-800 rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
             {/* CARD HEADER */}
             <div className="p-6 flex items-center justify-between bg-zinc-900/20 border-b border-zinc-800/40">
                 <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${todayPnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]' : 'bg-rose-500/10 text-rose-400 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]'}`}>
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${todayPnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 shadow-[inset_0_0_20px_rgba(29,201,149,0.05)]' : 'bg-rose-500/10 text-rose-400 shadow-[inset_0_0_20px_rgba(224,63,83,0.05)]'}`}>
                         {todayPnl >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
                     </div>
                     <div>

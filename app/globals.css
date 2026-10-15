@@ -1,38 +1,103 @@
 @import "tailwindcss";
 
+/*
+ * tradereye palette. Every colour in the app comes from here.
+ *  Surfaces: canvas -> section -> card -> raised, with two border weights.
+ *  Text: off-white and three quieter tiers. Gold = brand and main actions (one gold button per screen).
+ *  Emerald = profit / long, crimson = loss / short, copper = caution, steel = neutral data. Nothing else.
+ */
 :root {
-  /* Core Canvas & Hierarchy (Exclusively Dark Theme / Terminal Aesthetic) */
-  --background: #0A1118;       /* Midnight Navy - Dominant (60%) */
-  --foreground: #E8EAF0;       /* Cool Off-White - Main Typography */
+  /* surfaces */
+  --midnight-navy: #0A1118;     /* canvas (60%) */
+  --navy-section: #111B26;      /* sections, table bands */
+  --gunmetal-slate: #16222F;    /* cards, inputs (30%) */
+  --navy-raised: #1E2D3D;       /* hover, popovers, raised */
+  --line: #243446;              /* default border */
+  --line-strong: #34485E;       /* emphasised border */
+  --scrim: #05090D;             /* overlays, inset wells */
 
-  /* Dedicated Brand & UI Tokens */
-  --midnight-navy: #0A1118;
-  --gunmetal-slate: #16222F;   /* Structural (30%) - Cards, inputs, table container rows */
-  --candlelight-gold: #DFB15B; /* Accent (10%) - Brand identity, links, primary CTA buttons */
-  --cool-off-white: #E8EAF0;
+  /* text */
+  --cool-off-white: #E8EAF0;    /* primary */
+  --ink-2: #A9B4C2;             /* secondary */
+  --ink-3: #7C8899;             /* muted, labels */
+  --ink-4: #4E5B6B;             /* disabled, axis lines */
 
-  /* Functional Utility Tokens (Strictly for Data/PnL Metrics) */
-  --muted-emerald: #1DC995;    /* Profit, targets, long/bull states */
-  --crimson-red: #E03F53;      /* Loss, stops, short/bear states */
+  /* brand gold (10%) */
+  --candlelight-gold: #DFB15B;
+  --gold-hover: #E9C27A;
+  --gold-pressed: #C89A45;
+
+  /* data meaning */
+  --muted-emerald: #1DC995;     /* profit, targets, long */
+  --crimson-red: #E03F53;       /* loss, stops, short (fills, bars) */
+  --crimson-text: #F06B7C;      /* loss as small text on dark */
+  --copper: #E8873A;            /* caution: mixed, weakening, stretched */
+  --steel: #8FA8C2;             /* neutral data: Nifty line, info chips */
+
+  --background: var(--midnight-navy);
+  --foreground: var(--cool-off-white);
 }
 
 @theme inline {
-  /* Overriding default utility classes */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  
-  /* Custom Semantic Color Design Tokens */
+
   --color-brand-bg: var(--midnight-navy);
+  --color-brand-section: var(--navy-section);
   --color-brand-card: var(--gunmetal-slate);
+  --color-brand-raised: var(--navy-raised);
   --color-brand-accent: var(--candlelight-gold);
+  --color-brand-accent-hover: var(--gold-hover);
+  --color-brand-accent-pressed: var(--gold-pressed);
   --color-brand-text: var(--cool-off-white);
-  
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-scrim: var(--scrim);
+  --color-ink: var(--cool-off-white);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+
   --color-data-green: var(--muted-emerald);
   --color-data-red: var(--crimson-red);
+  --color-data-red-text: var(--crimson-text);
+  --color-data-caution: var(--copper);
+  --color-data-neutral: var(--steel);
 
-  /* Typography Fallbacks */
   --font-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   --font-mono: var(--font-geist-mono), Courier, monospace;
+}
+
+/*
+ * Tailwind's stock colours, pinned to the palette so every existing class (zinc, cyan, emerald, rose, amber...)
+ * lands on a palette colour: greys -> navy/ink, cool accents -> gold, greens -> emerald, reds -> crimson,
+ * ambers/oranges -> copper. White is the off-white; black is the deepest navy.
+ */
+@theme {
+  --color-white: #E8EAF0;
+  --color-black: #05090D;
+  --color-zinc-50: #F4F5F8; --color-zinc-100: #E8EAF0; --color-zinc-200: #D3D8E1; --color-zinc-300: #BCC4CF; --color-zinc-400: #A9B4C2; --color-zinc-500: #7C8899; --color-zinc-600: #5F6B7B; --color-zinc-700: #34485E; --color-zinc-800: #243446; --color-zinc-900: #16222F; --color-zinc-950: #111B26;
+  --color-slate-50: #F4F5F8; --color-slate-100: #E8EAF0; --color-slate-200: #D3D8E1; --color-slate-300: #BCC4CF; --color-slate-400: #A9B4C2; --color-slate-500: #7C8899; --color-slate-600: #5F6B7B; --color-slate-700: #34485E; --color-slate-800: #243446; --color-slate-900: #16222F; --color-slate-950: #111B26;
+  --color-gray-50: #F4F5F8; --color-gray-100: #E8EAF0; --color-gray-200: #D3D8E1; --color-gray-300: #BCC4CF; --color-gray-400: #A9B4C2; --color-gray-500: #7C8899; --color-gray-600: #5F6B7B; --color-gray-700: #34485E; --color-gray-800: #243446; --color-gray-900: #16222F; --color-gray-950: #111B26;
+  --color-neutral-50: #F4F5F8; --color-neutral-100: #E8EAF0; --color-neutral-200: #D3D8E1; --color-neutral-300: #BCC4CF; --color-neutral-400: #A9B4C2; --color-neutral-500: #7C8899; --color-neutral-600: #5F6B7B; --color-neutral-700: #34485E; --color-neutral-800: #243446; --color-neutral-900: #16222F; --color-neutral-950: #111B26;
+  --color-stone-50: #F4F5F8; --color-stone-100: #E8EAF0; --color-stone-200: #D3D8E1; --color-stone-300: #BCC4CF; --color-stone-400: #A9B4C2; --color-stone-500: #7C8899; --color-stone-600: #5F6B7B; --color-stone-700: #34485E; --color-stone-800: #243446; --color-stone-900: #16222F; --color-stone-950: #111B26;
+  --color-cyan-50: #FBF4E6; --color-cyan-100: #F5E4C0; --color-cyan-200: #EFD49C; --color-cyan-300: #E9C27A; --color-cyan-400: #E4BA6B; --color-cyan-500: #DFB15B; --color-cyan-600: #C89A45; --color-cyan-700: #A67F38; --color-cyan-800: #6E5628; --color-cyan-900: #3D321C; --color-cyan-950: #2A2419;
+  --color-sky-50: #FBF4E6; --color-sky-100: #F5E4C0; --color-sky-200: #EFD49C; --color-sky-300: #E9C27A; --color-sky-400: #E4BA6B; --color-sky-500: #DFB15B; --color-sky-600: #C89A45; --color-sky-700: #A67F38; --color-sky-800: #6E5628; --color-sky-900: #3D321C; --color-sky-950: #2A2419;
+  --color-blue-50: #FBF4E6; --color-blue-100: #F5E4C0; --color-blue-200: #EFD49C; --color-blue-300: #E9C27A; --color-blue-400: #E4BA6B; --color-blue-500: #DFB15B; --color-blue-600: #C89A45; --color-blue-700: #A67F38; --color-blue-800: #6E5628; --color-blue-900: #3D321C; --color-blue-950: #2A2419;
+  --color-indigo-50: #FBF4E6; --color-indigo-100: #F5E4C0; --color-indigo-200: #EFD49C; --color-indigo-300: #E9C27A; --color-indigo-400: #E4BA6B; --color-indigo-500: #DFB15B; --color-indigo-600: #C89A45; --color-indigo-700: #A67F38; --color-indigo-800: #6E5628; --color-indigo-900: #3D321C; --color-indigo-950: #2A2419;
+  --color-violet-50: #FBF4E6; --color-violet-100: #F5E4C0; --color-violet-200: #EFD49C; --color-violet-300: #E9C27A; --color-violet-400: #E4BA6B; --color-violet-500: #DFB15B; --color-violet-600: #C89A45; --color-violet-700: #A67F38; --color-violet-800: #6E5628; --color-violet-900: #3D321C; --color-violet-950: #2A2419;
+  --color-purple-50: #FBF4E6; --color-purple-100: #F5E4C0; --color-purple-200: #EFD49C; --color-purple-300: #E9C27A; --color-purple-400: #E4BA6B; --color-purple-500: #DFB15B; --color-purple-600: #C89A45; --color-purple-700: #A67F38; --color-purple-800: #6E5628; --color-purple-900: #3D321C; --color-purple-950: #2A2419;
+  --color-fuchsia-50: #FBF4E6; --color-fuchsia-100: #F5E4C0; --color-fuchsia-200: #EFD49C; --color-fuchsia-300: #E9C27A; --color-fuchsia-400: #E4BA6B; --color-fuchsia-500: #DFB15B; --color-fuchsia-600: #C89A45; --color-fuchsia-700: #A67F38; --color-fuchsia-800: #6E5628; --color-fuchsia-900: #3D321C; --color-fuchsia-950: #2A2419;
+  --color-pink-50: #FBF4E6; --color-pink-100: #F5E4C0; --color-pink-200: #EFD49C; --color-pink-300: #E9C27A; --color-pink-400: #E4BA6B; --color-pink-500: #DFB15B; --color-pink-600: #C89A45; --color-pink-700: #A67F38; --color-pink-800: #6E5628; --color-pink-900: #3D321C; --color-pink-950: #2A2419;
+  --color-emerald-50: #E3FAF2; --color-emerald-100: #BDF2E0; --color-emerald-200: #8DE8CB; --color-emerald-300: #5DDCB4; --color-emerald-400: #1DC995; --color-emerald-500: #1DC995; --color-emerald-600: #17A47A; --color-emerald-700: #12805F; --color-emerald-800: #0D5C45; --color-emerald-900: #0A3D2F; --color-emerald-950: #072A21;
+  --color-green-50: #E3FAF2; --color-green-100: #BDF2E0; --color-green-200: #8DE8CB; --color-green-300: #5DDCB4; --color-green-400: #1DC995; --color-green-500: #1DC995; --color-green-600: #17A47A; --color-green-700: #12805F; --color-green-800: #0D5C45; --color-green-900: #0A3D2F; --color-green-950: #072A21;
+  --color-teal-50: #E3FAF2; --color-teal-100: #BDF2E0; --color-teal-200: #8DE8CB; --color-teal-300: #5DDCB4; --color-teal-400: #1DC995; --color-teal-500: #1DC995; --color-teal-600: #17A47A; --color-teal-700: #12805F; --color-teal-800: #0D5C45; --color-teal-900: #0A3D2F; --color-teal-950: #072A21;
+  --color-lime-50: #E3FAF2; --color-lime-100: #BDF2E0; --color-lime-200: #8DE8CB; --color-lime-300: #5DDCB4; --color-lime-400: #1DC995; --color-lime-500: #1DC995; --color-lime-600: #17A47A; --color-lime-700: #12805F; --color-lime-800: #0D5C45; --color-lime-900: #0A3D2F; --color-lime-950: #072A21;
+  --color-rose-50: #FDECEE; --color-rose-100: #FAD0D5; --color-rose-200: #F7A9B2; --color-rose-300: #F38895; --color-rose-400: #F06B7C; --color-rose-500: #E03F53; --color-rose-600: #C2344A; --color-rose-700: #9E2A3C; --color-rose-800: #6E1F2B; --color-rose-900: #45151C; --color-rose-950: #2E0F14;
+  --color-red-50: #FDECEE; --color-red-100: #FAD0D5; --color-red-200: #F7A9B2; --color-red-300: #F38895; --color-red-400: #F06B7C; --color-red-500: #E03F53; --color-red-600: #C2344A; --color-red-700: #9E2A3C; --color-red-800: #6E1F2B; --color-red-900: #45151C; --color-red-950: #2E0F14;
+  --color-amber-50: #FDF1E7; --color-amber-100: #FADCC4; --color-amber-200: #F5C29A; --color-amber-300: #F2AE75; --color-amber-400: #EE9A55; --color-amber-500: #E8873A; --color-amber-600: #C9702C; --color-amber-700: #A35A22; --color-amber-800: #6F3E18; --color-amber-900: #432611; --color-amber-950: #2D1A0C;
+  --color-yellow-50: #FDF1E7; --color-yellow-100: #FADCC4; --color-yellow-200: #F5C29A; --color-yellow-300: #F2AE75; --color-yellow-400: #EE9A55; --color-yellow-500: #E8873A; --color-yellow-600: #C9702C; --color-yellow-700: #A35A22; --color-yellow-800: #6F3E18; --color-yellow-900: #432611; --color-yellow-950: #2D1A0C;
+  --color-orange-50: #FDF1E7; --color-orange-100: #FADCC4; --color-orange-200: #F5C29A; --color-orange-300: #F2AE75; --color-orange-400: #EE9A55; --color-orange-500: #E8873A; --color-orange-600: #C9702C; --color-orange-700: #A35A22; --color-orange-800: #6F3E18; --color-orange-900: #432611; --color-orange-950: #2D1A0C;
 }
 
 /* Base resets & styling matching the brand look */

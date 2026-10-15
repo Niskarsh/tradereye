@@ -139,13 +139,13 @@ export default function TradeAnalytics() {
                   </linearGradient>
                 </defs>
 
-                <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
-                <XAxis dataKey="date" stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
-                <Tooltip content={<CustomTooltip mode={viewMode} />} cursor={{ stroke: '#52525b', strokeWidth: 1 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+                <XAxis dataKey="date" stroke="var(--ink-4)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--ink-4)" fontSize={10} tickLine={false} axisLine={false} />
+                <Tooltip content={<CustomTooltip mode={viewMode} />} cursor={{ stroke: 'var(--ink-3)', strokeWidth: 1 }} />
                 
                 {/* 3. ADDED: Horizontal baseline indicator running through 0 */}
-                <ReferenceLine y={0} stroke="#3f3f46" strokeDasharray="3 3" opacity={0.5} />
+                <ReferenceLine y={0} stroke="var(--ink-4)" strokeDasharray="3 3" opacity={0.5} />
 
                 {/* 4. CHANGED: Line to Area component */}
                 <Area
@@ -165,7 +165,7 @@ export default function TradeAnalytics() {
                         cx={cx}
                         cy={cy}
                         r={3.5}
-                        fill="#09090b"
+                        fill="var(--midnight-navy)"
                         className={getPointColor(payload.val)}
                         strokeWidth={2}
                       />
@@ -177,11 +177,11 @@ export default function TradeAnalytics() {
             ) : (
               // BarChart block remains fully unmodified
               <BarChart data={stats.chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
-                <XAxis dataKey="date" stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis stroke="#3f3f46" fontSize={10} tickLine={false} axisLine={false} />
-                <Tooltip content={<CustomTooltip mode={viewMode} />} cursor={{ fill: '#18181b', opacity: 0.4 }} />
-                <ReferenceLine y={0} stroke="#3f3f46" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+                <XAxis dataKey="date" stroke="var(--ink-4)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--ink-4)" fontSize={10} tickLine={false} axisLine={false} />
+                <Tooltip content={<CustomTooltip mode={viewMode} />} cursor={{ fill: 'var(--navy-raised)', opacity: 0.4 }} />
+                <ReferenceLine y={0} stroke="var(--ink-4)" />
                 <Bar dataKey="val" radius={[4, 4, 0, 0]}>
                   {stats.chartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.val >= 0 ? 'var(--color-data-green)' : 'var(--color-data-red)'} />
@@ -198,7 +198,7 @@ export default function TradeAnalytics() {
     <div className="space-y-6">
       {/* Modal Expansion */}
       {expandedChart && (
-        <div className="fixed inset-0 z-[100] bg-[#050505]/98 backdrop-blur-2xl p-6 md:p-16 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[100] bg-scrim/95 backdrop-blur-2xl p-6 md:p-16 flex flex-col animate-in fade-in zoom-in-95 duration-200">
           <div className="flex justify-end mb-4">
             <button onClick={() => setExpandedChart(null)} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white">
               <X size={24} />
