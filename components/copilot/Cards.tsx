@@ -136,7 +136,8 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
         <div className="mt-3 space-y-3">
       {m && (
         <Group title="In trade">
-          <Row label="Avg entry / stop / target" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)} / ${fmt(m.CurrentTarget)}`} hint="from Dhan" />
+          <Row label="Avg entry / stop / target" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)} / ${fmt(m.CurrentTarget)}`} hint="as on Live" />
+          {m.PendingAddPrice !== undefined && <Row label="Pending add" value={`${fmt(m.PendingAddQty)} sh @ ${fmt(m.PendingAddPrice)}`} />}
           <Row label="Open R / best R" value={`${fmt(m.OpenR)} / ${fmt(m.BestR)}`} hint={m.GivebackR !== undefined ? `gave back ${fmt(m.GivebackR)}R` : undefined} />
           <Row label="Stop distance" value={`${fmt(m.StopDistAtr)} ATR`} />
           <Row label="Counter-volume" value={fmt(m.CounterVolRatio)} hint="against ÷ with" />

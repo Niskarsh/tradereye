@@ -4,17 +4,17 @@ import type { SheetsClient } from '../sheetsApi';
 import { LOOKBACK_CALENDAR_DAYS, toSessions } from '../live/enrich';
 import { NIFTY500 } from '../live/backfill';
 import { LiveStore } from '../live/store';
-import { normalizeOrder, normalizeTrade } from '../live/orders';
+import { analyzeTrade, applyOrderSnaps, normalizeOrder, normalizeTrade } from '../live/orders';
 import { groupFills } from '../live/grouping';
 import { dateKeyToMs, istDateKey, istParts, istTime, monthSheetTitle, MONTHS, SESSION_CLOSE_MIN } from '../live/time';
-import type { Direction } from '../live/types';
+import type { Direction, TrackedOrder } from '../live/types';
 import { chargeRate, computeBehaviour, summarizeTrades, type Behaviour, type TradeSummary } from './behaviour';
 import { computeFacts, computeManageFacts, niftyState, type Facts, type ManageFacts, type Setup } from './features';
 import { buildMessage, PROMPT_VERSION } from './prompt';
 import type { CheckRow } from './store';
 import { settings } from './settings';
 import { getRiskInr } from './userSettings';
-import { pendingPlan, type PendingPlan } from './pending';
+import { OPEN_ORDER_STATUSES, pendingPlan, type PendingPlan } from './pending';
 
 export { settings };
 
@@ -227,22 +227,34 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
     const group = groupFills(fills).filter((g) => g.status === 'OPEN').at(-1);
     const avgEntry = group?.avgCost || Number(direction === 'LONG' ? held.buyAvg : held.sellAvg) || Number(held.costPrice) || price;
     const entryTs = group?.entryTs ?? sess.asOfMs;
-    const currentStop = pending?.stop;
-    let initialStop: number | undefined, stopMoves: number | undefined;
+    // stop / target / moves exactly as the Live page works them out: the order history live capture keeps in the
+    // sheet, with the order book read just now merged in (in memory only), through the same analyzeTrade()
+    let meta: ReturnType<typeof analyzeTrade> | undefined;
     if (group) {
       try {
-        const live = await new LiveStore(deps.sheets).loadTrades();
-        const row = live.get(group.id);
-        if (row && row.InitialStop !== '') initialStop = Number(row.InitialStop);
-        if (row) stopMoves = row.StopMoves;
-      } catch { /* the live-trades tab is optional */ }
+        const known = await new LiveStore(deps.sheets).loadOrders().then((x) => x.known).catch(() => new Map<string, TrackedOrder>());
+        const { updated } = applyOrderSnaps(known, snaps, 'COPILOT', nowMs);
+        for (const u of updated) known.set(u.orderId, u);
+        meta = analyzeTrade(group, [...known.values()]);
+      } catch (e) { notes.push(`Could not read your stop history: ${(e as Error).message}`); }
     }
-    if (currentStop === undefined) notes.push('No pending stop order found in Dhan for this position.');
+    const currentStop = meta?.lastStop ?? pending?.stop;
+    const currentTarget = meta?.tpLast ?? pending?.target;
+    if (currentStop === undefined) notes.push('No stop found for this position (Dhan order book and the live order log).');
+    // orders on the entry side that are still open = adds he intends to make
+    const entrySide = direction === 'LONG' ? 'BUY' : 'SELL';
+    const adds = snaps.filter((o) => (o.securityId === securityId || String(o.symbol ?? '').toUpperCase() === symbol) && o.side === entrySide
+      && OPEN_ORDER_STATUSES.has(String(o.status ?? '').toUpperCase()));
     manage = computeManageFacts({
       date: sess.date, nowMs: sess.asOfMs, price, direction, stock1m, nifty1m, avgEntry, entryMs: entryTs,
-      initialStop, currentStop, stopMoves, atr10m: facts.Atr10m,
+      initialStop: meta?.initialStop, currentStop, stopMoves: meta?.stopMoves, atr10m: facts.Atr10m,
     });
-    if (pending?.target !== undefined) manage.CurrentTarget = pending.target;
+    if (currentTarget !== undefined) manage.CurrentTarget = currentTarget;
+    if (adds.length) {
+      const a = adds.at(-1)!;
+      manage.PendingAddPrice = (a.kind === 'SL' || a.kind === 'SLM' ? a.triggerPrice : a.price) || undefined;
+      manage.PendingAddQty = adds.reduce((sum, o) => sum + Math.max(0, (o.qty ?? 0) - (o.filledQty ?? 0)), 0) || undefined;
+    }
   }
 
   // setups whose core conditions are met with no flags, read by the app alone (no Claude needed)

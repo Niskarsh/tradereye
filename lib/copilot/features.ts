@@ -645,6 +645,8 @@ export interface ManageInput {
 
 export interface ManageFacts {
   AvgEntry: number; CurrentStop?: number; CurrentTarget?: number;
+  /** Open orders on the entry side = adds he intends to make (latest price, total unfilled qty). */
+  PendingAddPrice?: number; PendingAddQty?: number;
   OpenR?: number; BestR?: number; GivebackR?: number; StopDistAtr?: number;
   CounterVolRatio?: number; ClimaxAgainst: string; FailedExtreme: string;
   NiftySinceEntryPct?: number; MinInTrade: number; StopMoves?: number;
