@@ -9,6 +9,8 @@ import {
     Camera, Upload
 } from "lucide-react";
 import LivePnl from './livePnl';
+import { TradeReview } from '@/components/journal/TradeReview';
+import { useAuth } from '@/context/AuthContext';
 
 // --- Functional Helpers ---
 const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -57,6 +59,7 @@ interface TradeEntry {
     CkVerdict?: string;
     CkLines?: string;
     RcLastLabel?: string;
+    AiReview?: string;
     Nifty500First5Pct?: string;
     RvolAtEntry?: string;
     RvolDay5?: string;
@@ -75,6 +78,7 @@ const uploadFolders = {
 export type UploadFolderKey = keyof typeof uploadFolders
 
 export default function Journal() {
+    const { token } = useAuth();
     const [analyticsData, setAnalyticsData] = useState<Record<string, TradeEntry[]>>(() => {
         if (typeof window === 'undefined') return {};
         const cached = localStorage.getItem('traderEye_analytics_ranged');
@@ -478,6 +482,20 @@ export default function Journal() {
                                         </div>
                                     );
                                 })()}
+
+                                {/* AI TRADE REVIEW (on demand, saved to the sheet) */}
+                                <TradeReview
+                                    raw={group.trades.find(t => t.AiReview)?.AiReview}
+                                    sheetTitle={group.trades[0].sheetTitle}
+                                    groupId={groupId}
+                                    token={token}
+                                    onSaved={(json) => {
+                                        const updated = { ...analyticsData };
+                                        Object.keys(updated).forEach(m => { updated[m] = updated[m].map((t, i, arr) => t.TradeGroupId === groupId && arr.findIndex(x => x.TradeGroupId === groupId) === i ? { ...t, AiReview: json } : t); });
+                                        setAnalyticsData(updated);
+                                        persistData(updated);
+                                    }}
+                                />
 
                                 {/* SECTION 2: EXPANDED JOURNAL SPACE */}
                                 <div className="px-6 py-6 bg-zinc-950/30 border-t border-zinc-800/50">

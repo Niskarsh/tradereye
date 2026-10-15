@@ -110,6 +110,8 @@ export async function GET(request: Request) {
             CkVerdict: row.get('CkVerdict') || '',
             CkLines: row.get('CkLines') || '',
             RcLastLabel: row.get('RcLastLabel') || '',
+            // trade review (stored once, on the trade's first row)
+            AiReview: row.get('AiReview') || '',
             sheetTitle: title
           }));
         } catch (sheetError) {
