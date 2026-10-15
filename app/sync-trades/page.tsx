@@ -32,7 +32,7 @@ export default function TraderEye() {
     if (!token) return showStatus('error', "AUTH REQUIRED");
     setLoading(true);
     try {
-      const res = await fetch(`/api/trades?token=${token}`);
+      const res = await fetch('/api/trades', { headers: { 'x-dhan-token': token } });
       const data = await res.json();
       if (Array.isArray(data)) {
         setTrades(data);
