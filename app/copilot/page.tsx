@@ -20,6 +20,12 @@ export default function CopilotPage() {
   const [editRisk, setEditRisk] = useState(false);
   const [riskDraft, setRiskDraft] = useState('');
   const [chatOpen, setChatOpen] = useState(false);
+  const chatInput = useRef<HTMLTextAreaElement>(null);
+  // the Chat button opens the chat card below the data and jumps to it; scrolling up shows the data, the thread stays
+  const openChat = () => {
+    setChatOpen(true);
+    setTimeout(() => { document.getElementById('copilot-chat')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); chatInput.current?.focus({ preventScroll: true }); }, 50);
+  };
   const stopRef = useRef<HTMLInputElement>(null);
 
   // orders already placed in Dhan: fill the Stop box (if empty) and follow the order's direction
@@ -165,13 +171,18 @@ export default function CopilotPage() {
           onUseStop={held ? undefined : (st) => { setStop(String(st)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
           onTryAlt={(a) => { c.setDirection(a.direction); c.setSetup(a.setup); setStop(a.stop !== undefined ? String(a.stop) : ''); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
 
+        {c.check && (chatOpen || c.chat.length > 0) && (
+          <ChatPanel ref={chatInput} check={c.check} msgs={c.chat} busy={c.chatBusy} fetching={c.busy === 'check'} onSend={c.sendChat}
+            onRefresh={() => { const st = parseFloat(stop); c.refreshForChat(held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined); }} />
+        )}
+
         <TodayChecks m={c.market} />
       </div>
 
       {c.check && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-900 bg-brand-bg/95 p-3 backdrop-blur">
           <div className="max-w-xl mx-auto flex gap-2">
-            <button onClick={() => setChatOpen(true)} disabled={c.busy === 'check'} aria-label="Chat with Claude"
+            <button onClick={openChat} disabled={c.busy === 'check'} aria-label="Chat with Claude"
               className="flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-2xl border-2 border-brand-accent text-brand-accent text-[9px] font-black uppercase disabled:opacity-40">
               <MessageCircle className="w-5 h-5" />Chat
             </button>
@@ -184,10 +195,7 @@ export default function CopilotPage() {
           {c.market && !c.market.hasApiKey && <p className="mt-1 text-center text-[10px] text-data-red">ANTHROPIC_API_KEY is not set in Vercel yet.</p>}
         </div>
       )}
-      {chatOpen && c.check && (
-        <ChatPanel check={c.check} msgs={c.chat} busy={c.chatBusy} fetching={c.busy === 'check'} onSend={c.sendChat} onClose={() => setChatOpen(false)}
-          onRefresh={() => { const st = parseFloat(stop); c.refreshForChat(held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined); }} />
-      )}
+
     </div>
   );
 }

@@ -236,7 +236,8 @@ export async function chatClaude(context: string, turns: ChatTurn[], o: ClaudeOp
   const model = o.model || DEFAULT_MODEL;
   const body = {
     model,
-    max_tokens: o.thinking === 'on' ? 4000 : 1200,
+    // short answers by design (he is watching a trade): the rules ask for under 60 words; this is the hard cap
+    max_tokens: o.thinking === 'on' ? 3000 : 400,
     ...(o.thinking === 'on' ? {} : { thinking: { type: 'between_tools' } }),
     system: [
       { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
@@ -248,7 +249,7 @@ export async function chatClaude(context: string, turns: ChatTurn[], o: ClaudeOp
   const json = await postMessages(body, { ...o, timeoutMs: o.timeoutMs ?? 30_000 }, f, sleep);
   const content: { type: string; text?: string }[] = json?.content ?? [];
   let text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
-  if (json?.stop_reason === 'max_tokens') text += text ? '\n\n(cut short)' : 'The answer ran too long. Ask a narrower question.';
+  if (json?.stop_reason === 'max_tokens') text += text ? ' …(cut short: ask a narrower question)' : 'The answer ran too long. Ask a narrower question.';
   if (!text) text = json?.stop_reason === 'refusal' ? 'Claude declined to answer that.' : 'Claude returned no text.';
   const u = json?.usage ?? {};
   return {
