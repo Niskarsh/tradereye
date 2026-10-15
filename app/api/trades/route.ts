@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const token = searchParams.get('token');
+  // the token comes in a header (never in the URL, where it would be logged); the query is a fallback for old clients
+  const token = request.headers.get('x-dhan-token')?.trim() || searchParams.get('token');
 
   if (!token) return NextResponse.json({ error: 'Token is required' }, { status: 400 });
 
