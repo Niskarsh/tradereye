@@ -56,23 +56,25 @@ export function useCopilot(token: string) {
     return () => { if (timer.current) clearInterval(timer.current); };
   }, [loadMarket]);
 
-  const runCheck = useCallback(async (symbol: string, plannedStop?: number) => {
-    if (!token || !direction || !setup || !symbol) return;
+  const runCheck = useCallback(async (symbol: string, plannedStop?: number): Promise<CheckResp | null> => {
+    if (!token || !direction || !setup || !symbol) return null;
     // keep the current card on screen until the fresh one arrives (refresh), then replace it
     setBusy('check'); setError(''); setRead(null); setDecision('');
     try {
       const r = await postWithToken<CheckResp>('/api/copilot/check', token, { direction, setup, symbol, plannedStop });
       setCheck(r);
       setMarket((m) => (m ? { ...m, asksLeft: r.asksLeft } : m));
-    } catch (e) { setError((e as Error).message); }
+      return r;
+    } catch (e) { setError((e as Error).message); return null; }
     finally { setBusy(''); }
   }, [token, direction, setup]);
 
-  const ask = useCallback(async () => {
-    if (!token || !check) return;
+  const ask = useCallback(async (forCheck?: CheckResp) => {
+    const target = forCheck ?? check;
+    if (!token || !target) return;
     setBusy('ask'); setError('');
     try {
-      const r = await postWithToken<ReadResp>('/api/copilot/ask', token, { checkId: check.checkId, date: check.date });
+      const r = await postWithToken<ReadResp>('/api/copilot/ask', token, { checkId: target.checkId, date: target.date });
       setRead(r);
       setMarket((m) => (m ? { ...m, asksLeft: r.asksLeft } : m));
       loadMarket();
@@ -95,5 +97,11 @@ export function useCopilot(token: string) {
     } catch (e) { setError((e as Error).message); }
   }, [token]);
 
-  return { saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
+  /** Fresh data for the same symbol, then a new read from Claude: the repeatable re-check (in a trade or not). */
+  const refreshAndAsk = useCallback(async (symbol: string, plannedStop?: number) => {
+    const fresh = await runCheck(symbol, plannedStop);
+    if (fresh) await ask(fresh);
+  }, [runCheck, ask]);
+
+  return { refreshAndAsk, saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
 }
