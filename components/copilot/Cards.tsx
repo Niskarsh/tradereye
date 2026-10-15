@@ -111,6 +111,9 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
         </section>
       )}
 
+      <details className="group">
+        <summary className="cursor-pointer select-none text-[10px] font-black uppercase tracking-widest text-zinc-500">Show the numbers</summary>
+        <div className="mt-3 space-y-3">
       {m && (
         <Group title="In trade">
           <Row label="Avg entry / stop now" value={`${fmt(m.AvgEntry)} / ${fmt(m.CurrentStop)}`} />
@@ -174,6 +177,8 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
           <ul className="mt-1 list-disc pl-5">{f.missing.map((x) => <li key={x}>{x}</li>)}</ul>
         </details>
       )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -195,19 +200,25 @@ export function VerdictCard({ r, decision, onDecide, showDecision, onTryAlt }: {
       <ol className="space-y-1.5 text-sm text-zinc-100">{r.lines.map((l, i) => <li key={i} className="leading-snug whitespace-pre-wrap">{l}</li>)}</ol>
       {r.watch && <p className="text-sm text-zinc-300"><span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mr-2">Watch</span>{r.watch}</p>}
       <p className="text-[10px] text-zinc-500">{(r.latencyMs / 1000).toFixed(1)}s · ₹{r.costInr.toFixed(2)} · {r.model}</p>
-      {r.alternative && (
-        <div className="rounded-xl border border-zinc-700 bg-black/20 p-3 space-y-2">
-          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Better fit</p>
-          <p className="text-sm font-black text-zinc-100">
-            {r.alternative.setup.toLowerCase()} {r.alternative.direction.toLowerCase()}
-            {r.alternative.stop !== undefined && <span className="font-mono font-normal text-zinc-300"> · stop {r.alternative.stop.toFixed(2)}</span>}
-          </p>
-          {r.alternative.reason && <p className="text-xs text-zinc-300">{r.alternative.reason}</p>}
-          {onTryAlt && (
-            <button onClick={() => onTryAlt(r.alternative!)} className="h-9 w-full rounded-lg bg-zinc-100 text-black text-xs font-black uppercase tracking-wider">
-              Set this up (then press Go)
-            </button>
-          )}
+      {r.scenarios?.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Other ways to play it</p>
+          {r.scenarios.map((sc, i) => (
+            <div key={i} className="rounded-xl border border-zinc-700 bg-black/20 p-3 space-y-1">
+              <p className="text-sm font-black text-zinc-100">
+                {sc.setup ? `${sc.kind === 'WAIT' ? 'Wait: ' : ''}${sc.setup.toLowerCase()} ${sc.direction!.toLowerCase()}` : 'Stand aside'}
+                {sc.stop !== undefined && <span className="font-mono font-normal text-zinc-300"> · stop {sc.stop.toFixed(2)}</span>}
+              </p>
+              {sc.why && <p className="text-xs text-zinc-300">{sc.why}</p>}
+              {sc.trigger && <p className="text-xs text-zinc-400"><span className="font-black text-zinc-500">{sc.kind === 'WAIT' ? 'Needs: ' : 'Working if: '}</span>{sc.trigger}</p>}
+              {sc.setup && onTryAlt && (
+                <button onClick={() => onTryAlt({ direction: sc.direction!, setup: sc.setup!, stop: sc.stop, reason: sc.why })}
+                  className="mt-1 h-8 w-full rounded-lg bg-zinc-100 text-black text-[10px] font-black uppercase tracking-wider">
+                  Set this up (then press Go)
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       )}
       {showDecision && (

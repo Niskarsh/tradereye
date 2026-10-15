@@ -26,7 +26,8 @@ export interface CheckResp {
 }
 
 export interface AltResp { direction: Dir; setup: SetupT; stop?: number; reason: string }
-export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number; alternative?: AltResp }
+export interface ScenarioResp { kind: 'SETUP' | 'WAIT'; setup?: SetupT; direction?: Dir; stop?: number; why: string; trigger: string }
+export interface ReadResp { verdict: string; lines: string[]; watch: string; model: string; costInr: number; latencyMs: number; asksLeft: number; scenarios: ScenarioResp[] }
 
 const MARKET_EVERY_MS = 60_000;
 

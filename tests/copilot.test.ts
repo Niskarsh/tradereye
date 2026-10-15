@@ -470,7 +470,8 @@ test('a closed-session check is marked as a practice read, and the verdict rules
 });
 
 /* ---- better fit: other setups with a stop from the 10-minute chart --------------------------------------------- */
-import { checkAlternative } from '../lib/copilot/claude';
+import { checkScenarios } from '../lib/copilot/claude';
+import { coreCheck } from '../lib/copilot/features';
 import { READ_SCHEMA } from '../lib/copilot/prompt';
 
 test('stop from the 10-minute chart: beyond the last two candles, on the right side, capped at 2x ATR', () => {
@@ -489,28 +490,49 @@ test('end to end: a check carries the three other setups, and the message lists 
   assert.match(r.payload, /^ALT REVERSAL LONG: stop \d/m);
 });
 
-test('a suggested alternative keeps the app stop and is dropped if it is not one of the computed setups', () => {
-  const msg = 'FLAGS none\nALT MOMENTUM SHORT: stop 316.4 (0.93 ATR) · room to day low 314.05 1.5 ATR\nALT REVERSAL LONG: stop 314.2 (0.5 ATR)';
-  assert.deepEqual(checkAlternative({ direction: 'SHORT', setup: 'MOMENTUM', stop: 999, reason: 'r' }, msg), { direction: 'SHORT', setup: 'MOMENTUM', stop: 316.4, reason: 'r' });
-  assert.equal(checkAlternative({ direction: 'LONG', setup: 'MOMENTUM', stop: 310, reason: 'r' }, msg), undefined);
-  assert.equal(checkAlternative(undefined, msg), undefined);
+test('scenarios: SETUP only for a CORE MET alternative with the app stop; WAIT keeps the app stop; stand aside allowed', () => {
+  const msg = [
+    'Mode ENTRY · 09:40 IST · LONG · MOMENTUM · AEQUS · price 257.25 · risk limit 300 INR',
+    'FACTS {"StopIdea":255.3,"RoomTo":"VWAP 258.33"}',
+    'FLAGS none',
+    'ALT MOMENTUM SHORT: stop 258.9 (0.8 ATR) · room to day low 254.6 1.3 ATR · core missing: Nifty 500 moving up',
+    'ALT REVERSAL LONG: stop 254.4 (1.4 ATR) · room to VWAP 258.33 0.54 ATR · core missing: target VWAP 258.33 only 0.54 ATR away',
+    'ALT REVERSAL SHORT: stop 259.1 (0.9 ATR) · room to - · CORE MET',
+  ].join('\n');
+  const out = checkScenarios([
+    { kind: 'SETUP', setup: 'REVERSAL', direction: 'SHORT', stop: 999, why: 'a', trigger: 't' },  // CORE MET: kept, stop from the app
+    { kind: 'SETUP', setup: 'MOMENTUM', direction: 'SHORT', stop: 258, why: 'b', trigger: 't' },  // not core met: dropped
+    { kind: 'WAIT', setup: 'REVERSAL', direction: 'LONG', stop: 1, why: 'c', trigger: 'pullback first' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'LONG', stop: 0, why: 'd', trigger: 'close above VWAP' }, // his own setup: StopIdea
+    { kind: 'WAIT', why: 'nothing fits', trigger: '' },
+  ], msg);
+  assert.deepEqual(out.map((x) => [x.kind, x.setup ?? '-', x.direction ?? '-', x.stop]), [
+    ['SETUP', 'REVERSAL', 'SHORT', 259.1], ['WAIT', 'REVERSAL', 'LONG', 254.4], ['WAIT', 'MOMENTUM', 'LONG', 255.3],
+  ]);
+  const aside = checkScenarios([{ kind: 'WAIT', why: 'nothing fits', trigger: '' }], msg);
+  assert.deepEqual(aside.map((x) => [x.kind, x.setup, x.stop]), [['WAIT', undefined, undefined]]);
   // the schema stays within what structured outputs accept
-  const alt = (READ_SCHEMA as any).properties.alternative; // eslint-disable-line @typescript-eslint/no-explicit-any
-  assert.equal(alt.additionalProperties, false);
-  assert.deepEqual([...READ_SCHEMA.required], ['verdict', 'lines', 'watch', 'alternative']);
+  const sc = (READ_SCHEMA as any).properties.scenarios; // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal(sc.items.additionalProperties, false);
+  assert.doesNotMatch(JSON.stringify(READ_SCHEMA), /maxItems|minLength|maximum/);
+  assert.deepEqual([...READ_SCHEMA.required], ['verdict', 'lines', 'watch', 'scenarios']);
 });
 
-test('Claude: an alternative of NONE is no suggestion', async () => {
-  const body = { verdict: 'MIXED', lines: ['a'], watch: 'b', alternative: { direction: 'NONE', setup: 'NONE', stop: 0, reason: '' } };
+test('Claude: scenarios are read from the reply (setup NONE = stand aside), at most 3', async () => {
+  const body = { verdict: 'MIXED', lines: ['a'], watch: 'b', scenarios: [
+    { kind: 'WAIT', setup: 'NONE', direction: 'NONE', stop: 0, why: 'nothing fits', trigger: '' },
+    { kind: 'SETUP', setup: 'REVERSAL', direction: 'LONG', stop: 254.4, why: 'w', trigger: 't' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'LONG', stop: 0, why: 'w', trigger: 't' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'SHORT', stop: 0, why: 'w', trigger: 't' },
+  ] };
   const f = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body) }], usage: {} }), { status: 200 })) as typeof fetch;
-  assert.equal((await askClaude('m', { apiKey: 'k', fetchImpl: f })).alternative, undefined);
-  const body2 = { ...body, alternative: { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' } };
-  const f2 = (async () => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(body2) }], usage: {} }), { status: 200 })) as typeof fetch;
-  assert.deepEqual((await askClaude('m', { apiKey: 'k', fetchImpl: f2 })).alternative, { direction: 'LONG', setup: 'REVERSAL', stop: 314.2, reason: 'stretched below POC' });
+  const r = await askClaude('m', { apiKey: 'k', fetchImpl: f });
+  assert.equal(r.scenarios.length, 3);
+  assert.equal(r.scenarios[0].setup, undefined);
+  assert.deepEqual([r.scenarios[1].setup, r.scenarios[1].direction, r.scenarios[1].stop], ['REVERSAL', 'LONG', 254.4]);
+  assert.match(SYSTEM_PROMPT, /hypothesis, not a fact/);
+  assert.match(SYSTEM_PROMPT, /Never write field names/);
 });
-
-/* ---- what kind of trade it is by today's move, and the app's own core check ------------------------------------ */
-import { coreCheck } from '../lib/copilot/features';
 
 test('ETERNAL-shaped day: a short is momentum by today\'s move; reversal short has nothing to fade', () => {
   // opens 320.5, slides to ~315 by 11:00, then drifts 315-315.6; Nifty 500 down all morning
@@ -558,7 +580,7 @@ test('end to end: the check lists the setups that fit now, without asking Claude
   assert.match(r.payload, /^ALT [A-Z]+ [A-Z]+: stop \d.*(CORE MET|core missing)/m);
   // and a suggestion for any of those setups survives the stop check
   const first = r.alternatives[0];
-  assert.ok(checkAlternative({ direction: first.direction, setup: first.setup, stop: 1, reason: '' }, r.payload)?.stop === first.facts.StopIdea);
+  assert.equal(checkScenarios([{ kind: 'WAIT', setup: first.setup, direction: first.direction, stop: 1, why: '', trigger: '' }], r.payload)[0].stop, first.facts.StopIdea);
 });
 
 test('AEQUS 15 Oct 09:26: an opening flush is a reversal long aiming at VWAP, not at the POC under it', () => {
