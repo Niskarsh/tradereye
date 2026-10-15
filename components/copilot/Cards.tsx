@@ -93,6 +93,23 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
               By today&apos;s move this {c.direction.toLowerCase()} is a {f.SetupByMove.toLowerCase()} trade, not a {c.setup.toLowerCase()}.
             </p>
           )}
+          {f.EntryTiming && (
+            <div className={`rounded-xl border px-3 py-2 ${f.EntryTiming === 'NOW' ? 'border-data-green/50' : 'border-brand-accent/50'}`}>
+              <p className="text-xs font-black text-zinc-100">
+                {f.EntryTiming === 'NOW' ? 'Entry: now is fine'
+                  : f.EntryTiming === 'WAIT_PULLBACK' ? `Entry: wait for a pullback${f.EntryLevel !== undefined ? ` to ${f.EntryLevel.toFixed(2)} (${f.EntryLevelName})` : ''}`
+                  : f.EntryTiming === 'WAIT_CONFIRM' ? `Entry: wait for ${f.EntryLevelName}${f.EntryLevel !== undefined ? ` ${f.EntryLevel.toFixed(2)}` : ''}`
+                  : 'Entry: late, most of the move back is done'}
+              </p>
+              {f.EntryWhy && <p className="text-[11px] text-zinc-400">{f.EntryWhy}</p>}
+              {f.EntryInvalid !== undefined && f.EntryTiming !== 'LATE' && (
+                <p className="text-[11px] text-zinc-400">
+                  {c.setup === 'MOMENTUM' ? `Move likely over if a 10-min candle closes ${c.direction === 'LONG' ? 'below' : 'above'} ${f.EntryInvalid.toFixed(2)} (${f.EntryInvalidName}): that pullback is the reversal.`
+                    : `Run still on with ${f.EntryInvalidName} past ${f.EntryInvalid.toFixed(2)}.`}
+                </p>
+              )}
+            </div>
+          )}
           <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Fits the data now</p>
           {c.fitsNow.length === 0
             ? <p className="text-xs text-zinc-400">No setup has its core conditions met right now.{f.CoreMissing ? ` Yours is missing: ${f.CoreMissing}.` : ''}</p>
