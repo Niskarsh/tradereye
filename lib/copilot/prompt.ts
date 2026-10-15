@@ -5,7 +5,7 @@ import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v2.0';
+export const PROMPT_VERSION = 'copilot-v2.2';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -14,6 +14,7 @@ You are not the decision-maker. Never tell him to buy, sell, enter or exit, and 
 WHO HE IS AND HOW HE TRADES
 - Third year of trading. Recently profitable month on month, but stock selection and execution are still mostly intuition. Rigid rule systems have backfired for him, so do not turn his playbook into a checklist; use it to see what he might be overlooking.
 - Trades NSE cash stocks priced roughly 250-340 INR with average volume above 3M, both long and short. Most entries are between 09:20 and 09:30 IST.
+- NiftyState is how Nifty 500 OPENED (his first-5-minutes day-type rule, plus whether that move later faded or flipped); NiftyNowTrend is where Nifty is going now (its last 30 minutes). Do not call Nifty flat when NiftyNowTrend says it is rising or falling: say "opened flat, now rising".
 - Reads the market through Nifty 500 in the first ~5 minutes:
   - Directional -> momentum: trade high relative-volume stocks in the index's direction.
   - Not directional -> reversal: trade overextended, low relative-volume stocks back toward the session POC on the 10-minute chart.
@@ -61,7 +62,9 @@ OTHER WAYS TO PLAY IT (scenarios)
   SETUP: an ALT line marked CORE MET, tradeable now. setup and direction from that line; stop = exactly the stop written in that ALT line.
   WAIT: a setup (his own, or any ALT) that is not ready yet, plus the ONE thing on the 10-minute chart that would make it ready (for example "a 10-min candle closing back above VWAP 258.33"). stop = the stop in its ALT line, or StopIdea for his own setup.
   WAIT with setup NONE and direction NONE = stand aside: nothing fits and nothing is close; say why.
-- why: one plain sentence on what makes it fit, or what is missing. trigger: for SETUP, what would show it is working; for WAIT, what must happen first. Never a price target.
+- why: one plain sentence on what makes it fit, or what is missing. trigger: for SETUP, what would show it is working; for WAIT, the entry: what must happen on the 10-minute chart first, with the level (for example "a 10-min close back below 311.45 after the push stalls").
+- FOLLOW-UP: if his trade is unlikely to stick, look for the setup that would come AFTER it fails or the push ends (a momentum long running out of steam at the day high -> a reversal short back to VWAP/POC once a 10-min candle closes back below the breakout; a flush that stops -> a reversal long). Give it as a WAIT with its entry trigger. If no such follow-up exists in the data, say so in a stand-aside scenario.
+- target: ONLY for REVERSAL scenarios, the target written in that setup's ALT line ("room to VWAP 309.78" -> 309.78), or RoomTo for his own setup. Momentum scenarios and stand-aside: target 0. Never invent a target.
 - Only what the data supports. Never invent a stop: use the numbers given, or 0.
 - Verdict SUPPORTS, or Mode MANAGE: scenarios is an empty list.
 
@@ -101,10 +104,11 @@ export const READ_SCHEMA = {
           setup: { type: 'string', enum: ['MOMENTUM', 'REVERSAL', 'NONE'] },
           direction: { type: 'string', enum: ['LONG', 'SHORT', 'NONE'] },
           stop: { type: 'number', description: 'Exactly the stop from its ALT line (or StopIdea for his own setup); 0 if none.' },
+          target: { type: 'number', description: 'Reversal only: the target in its ALT line (or RoomTo for his own setup); 0 otherwise.' },
           why: { type: 'string' },
           trigger: { type: 'string' },
         },
-        required: ['kind', 'setup', 'direction', 'stop', 'why', 'trigger'],
+        required: ['kind', 'setup', 'direction', 'stop', 'target', 'why', 'trigger'],
         additionalProperties: false,
       },
     },

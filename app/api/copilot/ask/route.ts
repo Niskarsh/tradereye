@@ -42,7 +42,7 @@ export async function POST(req: Request) {
       await updateCheck(sheets, found, {
         Status: 'ASKED', Model: r.model, Verdict: r.verdict, Line1: r.lines[0] ?? '', Line2: r.lines[1] ?? '', Line3: r.lines[2] ?? '',
         Watch: r.watch, AltDirection: firstSetup?.direction ?? '', AltSetup: firstSetup?.setup ?? '', AltStop: firstSetup?.stop ?? '', AltReason: firstSetup?.why ?? '',
-        Scenarios: r.scenarios.map((x) => `${x.kind}${x.setup ? ` ${x.setup} ${x.direction}` : ' stand aside'}${x.stop ? ` stop ${x.stop}` : ''}: ${x.why}${x.trigger ? ` | ${x.trigger}` : ''}`).join(' || ').slice(0, 1500),
+        Scenarios: r.scenarios.map((x) => `${x.kind}${x.setup ? ` ${x.setup} ${x.direction}` : ' stand aside'}${x.stop ? ` stop ${x.stop}` : ''}${x.target ? ` target ${x.target}` : ''}: ${x.why}${x.trigger ? ` | ${x.trigger}` : ''}`).join(' || ').slice(0, 1500),
         InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '',
       });
       return NextResponse.json({ ...r, asksLeft: Math.max(0, s.dailyLimit - askedToday(rows, date) - 1) });

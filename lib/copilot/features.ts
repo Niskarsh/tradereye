@@ -37,7 +37,11 @@ export interface FactsInput {
 export type NiftyState = 'OPENING' | 'TRENDING_UP' | 'TRENDING_DOWN' | 'FADING_UP' | 'FADING_DOWN' | 'FLAT' | 'FLIPPED' | 'UNKNOWN';
 
 export interface Facts {
-  NiftyFirst5Pct?: number; NiftyNowPct?: number; NiftyLast10Pct?: number; NiftyState: NiftyState;
+  NiftyFirst5Pct?: number; NiftyNowPct?: number; NiftyLast10Pct?: number;
+  /** His day-type rule: how Nifty 500 OPENED (first 5 minutes), plus whether that move has since faded or flipped. */
+  NiftyState: NiftyState;
+  /** Where Nifty 500 is going NOW: its move over the last 30 minutes (three 10-min candles). */
+  NiftyNowTrend?: 'RISING' | 'FALLING' | 'FLAT'; NiftyLast30Pct?: number;
   RvolDay?: number; Atr10m?: number; Atr2?: number;
   /** Volume so far vs the average for the SAME time of day over the last 10 sessions (1 = normal). */
   RvolSameTime?: number;
@@ -263,6 +267,10 @@ export function computeFacts(inp: FactsInput): Facts {
   const nBars = nDay ? nDay.bars.filter((b) => b.t * 1000 < asOfMs) : [];
   if (nBars.length > 10) f.NiftyLast10Pct = r4((nBars[nBars.length - 1].c / nBars[nBars.length - 11].c - 1) * 100);
   f.NiftyState = niftyState(f.NiftyFirst5Pct, f.NiftyNowPct, f.NiftyLast10Pct, inp.niftyDirPct, asOfMin);
+  if (nBars.length > 30) {
+    f.NiftyLast30Pct = r4((nBars[nBars.length - 1].c / nBars[nBars.length - 31].c - 1) * 100);
+    f.NiftyNowTrend = f.NiftyLast30Pct >= inp.niftyDirPct ? 'RISING' : f.NiftyLast30Pct <= -inp.niftyDirPct ? 'FALLING' : 'FLAT';
+  }
 
   // ---- 200 EMAs (5m, 10m: built from prior sessions + this session so far; 1D: daily closes + today's price)
   const upto = stock.filter((s) => s.date <= inp.date)

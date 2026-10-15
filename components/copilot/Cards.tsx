@@ -26,11 +26,14 @@ export function MarketStrip({ m, err, onRefresh }: { m: MarketResp | null; err: 
           <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Nifty 500 {k.live ? `· ${k.asOf.slice(0, 5)}` : `· ${k.date} close`}
             {onRefresh && <button onClick={onRefresh} className="ml-2 text-zinc-400 underline decoration-dotted underline-offset-2">refresh</button>}
           </p>
-          <p className={`text-xl font-black tracking-tight ${stateTone(k.state)}`}>{STATE_TEXT[k.state] ?? k.state}</p>
+          <p className={`text-xl font-black tracking-tight ${stateTone(k.state)}`}>
+            <span className="text-xs font-bold text-zinc-500 mr-1">Open</span>{STATE_TEXT[k.state] ?? k.state}
+            {k.nowTrend && <><span className="text-xs font-bold text-zinc-500 mx-1">· Now</span><span className={k.nowTrend === 'RISING' ? 'text-data-green' : k.nowTrend === 'FALLING' ? 'text-data-red' : 'text-zinc-300'}>{k.nowTrend.toLowerCase()}</span></>}
+          </p>
         </div>
         <div className="text-right font-mono text-xs text-zinc-400 leading-5">
           <div>first 5m {signed(k.first5, 2, '%')}</div>
-          <div>now {signed(k.nowPct, 2, '%')} · 10m {signed(k.last10, 2, '%')}</div>
+          <div>day {signed(k.nowPct, 2, '%')} · 30m {signed(k.last30, 2, '%')}</div>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-400">
@@ -127,7 +130,7 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
       )}
 
       <Group title="Market">
-        <Row label="Nifty 500" value={STATE_TEXT[f.NiftyState] ?? f.NiftyState} />
+        <Row label="Nifty 500 open / now" value={`${STATE_TEXT[f.NiftyState] ?? f.NiftyState} / ${f.NiftyNowTrend?.toLowerCase() ?? '–'}`} hint="open = your first-5-min rule" />
         <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
       </Group>
 
@@ -208,9 +211,10 @@ export function VerdictCard({ r, decision, onDecide, showDecision, onTryAlt }: {
               <p className="text-sm font-black text-zinc-100">
                 {sc.setup ? `${sc.kind === 'WAIT' ? 'Wait: ' : ''}${sc.setup.toLowerCase()} ${sc.direction!.toLowerCase()}` : 'Stand aside'}
                 {sc.stop !== undefined && <span className="font-mono font-normal text-zinc-300"> · stop {sc.stop.toFixed(2)}</span>}
+                {sc.target !== undefined && <span className="font-mono font-normal text-zinc-300"> · target {sc.target.toFixed(2)}</span>}
               </p>
               {sc.why && <p className="text-xs text-zinc-300">{sc.why}</p>}
-              {sc.trigger && <p className="text-xs text-zinc-400"><span className="font-black text-zinc-500">{sc.kind === 'WAIT' ? 'Needs: ' : 'Working if: '}</span>{sc.trigger}</p>}
+              {sc.trigger && <p className="text-xs text-zinc-400"><span className="font-black text-zinc-500">{sc.kind === 'WAIT' ? 'Enter when: ' : 'Working if: '}</span>{sc.trigger}</p>}
               {sc.setup && onTryAlt && (
                 <button onClick={() => onTryAlt({ direction: sc.direction!, setup: sc.setup!, stop: sc.stop, reason: sc.why })}
                   className="mt-1 h-8 w-full rounded-lg bg-zinc-100 text-black text-[10px] font-black uppercase tracking-wider">

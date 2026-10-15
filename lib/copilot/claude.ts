@@ -154,6 +154,8 @@ export interface Scenario {
   setup?: 'MOMENTUM' | 'REVERSAL';
   direction?: 'LONG' | 'SHORT';
   stop?: number;
+  /** Reversal only: the app's own target (VWAP / POC) for that setup. */
+  target?: number;
   why: string;
   trigger: string;
 }
@@ -172,6 +174,7 @@ function readScenarios(raw: unknown): Scenario[] {
       kind: kind as Scenario['kind'],
       ...(hasSetup ? { setup: setup as Scenario['setup'], direction: direction as Scenario['direction'] } : {}),
       stop: Number.isFinite(stop) && stop > 0 ? stop : undefined,
+      target: Number(o.target) > 0 ? Number(o.target) : undefined,
       why: String(o.why ?? ''), trigger: String(o.trigger ?? ''),
     });
   }
@@ -187,19 +190,24 @@ function readScenarios(raw: unknown): Scenario[] {
 export function checkScenarios(list: Scenario[], message: string): Scenario[] {
   const header = message.match(/^Mode \w+ · [^·]+ · (LONG|SHORT) · (MOMENTUM|REVERSAL) ·/m);
   const ownStop = message.match(/"StopIdea":(\d+(?:\.\d+)?)/);
+  const ownTarget = message.match(/"RoomTo":"(?:VWAP|POC|2-day POC) (\d+(?:\.\d+)?)"/);
+  // reversal target from an ALT line: "room to VWAP 309.78 ..." / "room to POC 266.1 ..." / "room to 2-day POC ..."
+  const altTarget = (line: string) => line.match(/room to (?:VWAP|POC|2-day POC) (\d+(?:\.\d+)?)/)?.[1];
   const out: Scenario[] = [];
   for (const sc of list) {
     if (!sc.setup || !sc.direction) {
-      if (sc.kind === 'WAIT') out.push({ ...sc, stop: undefined });
+      if (sc.kind === 'WAIT') out.push({ ...sc, stop: undefined, target: undefined });
       continue;
     }
     const line = message.match(new RegExp(`^ALT ${sc.setup} ${sc.direction}: stop (\\d+(?:\\.\\d+)?).*$`, 'm'));
     const own = header && header[1] === sc.direction && header[2] === sc.setup;
     if (sc.kind === 'SETUP') {
       if (!line || !/CORE MET/.test(line[0])) continue;
-      out.push({ ...sc, stop: Number(line[1]) });
+      const t = sc.setup === 'REVERSAL' ? altTarget(line[0]) : undefined;
+      out.push({ ...sc, stop: Number(line[1]), target: t ? Number(t) : undefined });
     } else {
-      out.push({ ...sc, stop: line ? Number(line[1]) : own && ownStop ? Number(ownStop[1]) : undefined });
+      const t = sc.setup !== 'REVERSAL' ? undefined : line ? altTarget(line[0]) : own && ownTarget ? ownTarget[1] : undefined;
+      out.push({ ...sc, stop: line ? Number(line[1]) : own && ownStop ? Number(ownStop[1]) : undefined, target: t ? Number(t) : undefined });
     }
   }
   return out.slice(0, 3);

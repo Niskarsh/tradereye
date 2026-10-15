@@ -601,3 +601,34 @@ test('AEQUS 15 Oct 09:26: an opening flush is a reversal long aiming at VWAP, no
   assert.ok(f.RvolDay! < 0.1, `rvol ${f.RvolDay}`);
   assert.equal(f.CoreMet, 'YES', f.CoreMissing);
 });
+
+test('follow-up reversal scenario gets the app target (VWAP / POC); momentum gets none; own setup reads RoomTo', () => {
+  const msg = [
+    'Mode ENTRY · 09:54 IST · LONG · MOMENTUM · ANGELONE · price 310.95 · risk limit 300 INR',
+    'FACTS {"StopIdea":307.1,"RoomTo":"day high 313.35"}',
+    'FLAGS none',
+    'ALT REVERSAL SHORT: stop 313.8 (1.4 ATR) · room to VWAP 309.78 0.57 ATR · core missing: busier than usual',
+    'ALT MOMENTUM SHORT: stop 313.8 (1.4 ATR) · room to day low 306.8 2 ATR · core missing: stock not moving down today',
+  ].join('\n');
+  const out = checkScenarios([
+    { kind: 'WAIT', setup: 'REVERSAL', direction: 'SHORT', stop: 0, target: 999, why: 'push may stall', trigger: 'a 10-min close back below 311.45' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'SHORT', stop: 0, target: 300, why: 'x', trigger: 'y' },
+    { kind: 'WAIT', setup: 'MOMENTUM', direction: 'LONG', stop: 0, target: 320, why: 'x', trigger: 'a close above 313.35' },
+  ], msg);
+  assert.deepEqual(out.map((x) => [x.setup, x.direction, x.stop, x.target]), [
+    ['REVERSAL', 'SHORT', 313.8, 309.78], ['MOMENTUM', 'SHORT', 313.8, undefined], ['MOMENTUM', 'LONG', 307.1, undefined],
+  ]);
+  const own = checkScenarios([{ kind: 'WAIT', setup: 'REVERSAL', direction: 'LONG', stop: 0, why: '', trigger: '' }],
+    'Mode ENTRY · 09:26 IST · LONG · REVERSAL · AEQUS · price 256.35\nFACTS {"StopIdea":255.31,"RoomTo":"VWAP 258.33"}');
+  assert.deepEqual([own[0].stop, own[0].target], [255.31, 258.33]);
+  assert.match(SYSTEM_PROMPT, /FOLLOW-UP/);
+});
+
+test('Nifty: the opening state stays your first-5-minute rule; the current trend is reported separately', () => {
+  // opens flat, then rises steadily from 09:30
+  const n = day('2026-10-12', (m) => { const c = m < 15 ? 24000 : 24000 + (m - 15) * 3; return { o: c, h: c + 2, l: c - 2, c }; }, 60);
+  const f = computeFacts(base({ nifty1m: n, nowMs: IST('2026-10-12', '10:12:20') }));
+  assert.equal(f.NiftyState, 'FLAT');       // the open, his rule
+  assert.equal(f.NiftyNowTrend, 'RISING');  // now
+  assert.ok(f.NiftyLast30Pct! > 0.15);
+});
