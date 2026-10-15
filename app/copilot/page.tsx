@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, MessageCircle, Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import { TokenBar } from '@/components/auth/TokenBar';
 import { useCopilot, type Dir, type SetupT } from '@/components/copilot/useCopilot';
 import { FactsCard, MarketStrip, TodayChecks, VerdictCard } from '@/components/copilot/Cards';
 import { ChatPanel } from '@/components/copilot/ChatPanel';
@@ -12,7 +13,7 @@ import { ChatPanel } from '@/components/copilot/ChatPanel';
  * Claude is only ever called from the Ask button.
  */
 export default function CopilotPage() {
-  const { token, setToken } = useAuth();
+  const { token } = useAuth();
   const c = useCopilot(token);
   const [symbol, setSymbol] = useState('');
   const [stop, setStop] = useState('');
@@ -107,12 +108,7 @@ export default function CopilotPage() {
           )}
         </header>
 
-        {!token && (
-          <div className="flex gap-2 p-2 bg-brand-card rounded-2xl">
-            <Input type="password" placeholder="Dhan Auth Token" value={token} onChange={(e) => setToken(e.target.value)}
-              className="bg-brand-card border-none h-10 text-xs focus-visible:ring-0 font-mono" />
-          </div>
-        )}
+        {!token && <TokenBar />}
 
         <MarketStrip m={c.market} err={c.marketErr} onRefresh={c.reload} />
 

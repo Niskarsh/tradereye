@@ -1,16 +1,16 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Save, RefreshCcw, Send, AlertTriangle, Database, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import TradeAnalytics from '@/components/TradeAnalytics';
 import { useAuth } from '@/context/AuthContext';
+import { TokenBar } from '@/components/auth/TokenBar';
 
 export default function TraderEye() {
-  const { token, setToken } = useAuth();
+  const { token } = useAuth();
   // Fix: Explicitly typing the state to avoid 'never[]' build errors
   const [trades, setTrades] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -126,15 +126,7 @@ export default function TraderEye() {
           </Button>
         </header>
 
-        {/* Credentials Interface */}
-        <div className="flex gap-2 p-2 bg-brand-card rounded-2xl ">
-          <Input
-            type="password" placeholder="Dhan Auth Token"
-            className="bg-brand-card border-none h-10 text-xs focus-visible:ring-0 placeholder:text-brand-text/20 font-mono"
-            value={token} onChange={(e) => setToken(e.target.value)}
-          />
-          <Button size="icon" className="h-10 w-10 bg-brand-accent hover:bg-brand-accent/90 text-white rounded-xl" onClick={() => {}}><Save className="w-4 h-4" /></Button>
-        </div>
+        <TokenBar />
 
         {/* PnL Terminal Board */}
         <div className="bg-brand-card rounded-[2rem] p-8 border border-zinc-800 shadow-2xl space-y-8">

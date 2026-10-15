@@ -73,7 +73,7 @@ export function TradeReview({ raw, sheetTitle, groupId, token, onSaved }: {
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           {busy ? 'Reviewing…' : 'Review this trade'}
         </button>
-        <span className="text-[10px] text-zinc-600">One Claude call (about ₹2–4), saved to your sheet.{!token ? ' Add your Dhan token for the candle-level review.' : ''}</span>
+        <span className="text-[10px] text-zinc-600">One Claude call (about ₹2–4), saved to your sheet.{!token && <> <a href="/dhan-login" className="underline text-zinc-400">Log in to Dhan</a> first for the candle-level review.</>}</span>
         {err && <span className="w-full text-xs font-bold text-rose-400">{err}</span>}
       </div>
     );
