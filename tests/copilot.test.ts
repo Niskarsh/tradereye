@@ -552,7 +552,7 @@ test('ETERNAL-shaped day: a short is momentum by today\'s move; reversal short h
   const rs = facts('SHORT', 'REVERSAL');
   assert.equal(rs.SetupByMove, 'MOMENTUM'); // a short on a falling stock is with the move, whatever the toggle says
   assert.equal(rs.CoreMet, 'NO');
-  assert.match(rs.CoreMissing!, /no up-move to fade/);
+  assert.match(rs.CoreMissing!, /no up-move to fade|not stretched up/);
   const ml = facts('LONG', 'MOMENTUM');
   assert.equal(ml.CoreMet, 'NO');
   assert.match(ml.CoreMissing!, /not moving up today/);
@@ -568,9 +568,9 @@ test('core check rules, one by one', () => {
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'TRENDING_UP' }), 'MOMENTUM', 'SHORT').missing.join(), /Nifty 500 moving up/);
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'FLAT' }), 'MOMENTUM', 'SHORT').missing.join(), /flat/);
   // reversal long: down 50% of range, POC 1.5 ATR above, not busy, Nifty not trending down
-  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
-  assert.match(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 0.4, RoomTo: 'POC 256.6', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
-  assert.match(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
+  assert.deepEqual(coreCheck(f({ Stretch: 'STRETCHED', StretchDir: 'DOWN', StretchRunPct: 80, StretchVwapAtr: 1.1, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
+  assert.match(coreCheck(f({ Stretch: 'STRETCHED', StretchDir: 'DOWN', StretchRunPct: 80, StretchVwapAtr: 1.1, RoomAtr: 0.4, RoomTo: 'POC 256.6', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
+  assert.match(coreCheck(f({ Stretch: 'STRETCHED', StretchDir: 'DOWN', StretchRunPct: 80, StretchVwapAtr: 1.1, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
 });
 
 test('end to end: the check lists the setups that fit now, without asking Claude', async () => {
@@ -693,4 +693,27 @@ test('end to end: the check is judged at his pending entry with his stop, and ge
   assert.equal(r.facts.StopDist, 0.6);
   assert.equal(r.facts.RewardRisk, 3);
   assert.equal(r.pending?.target, 265.4);
+});
+
+test('stretch is measured against the stock\'s own last 20 days; reversal needs it the other way', () => {
+  const f = (o: Partial<Facts>) => ({ NiftyState: 'FLAT', Ema200InPath: '', Climax: '', FailedBreak: '', flags: [], missing: [], RoomAtr: 1.2, RoomTo: 'VWAP 309.78', RvolBusy: 'NO', ...o }) as Facts;
+  // stretched up -> reversal short ok; reversal long not
+  const up = { Stretch: 'STRETCHED', StretchDir: 'UP', StretchRunPct: 85, StretchVwapAtr: 1.2 } as Partial<Facts>;
+  assert.deepEqual(coreCheck(f(up), 'REVERSAL', 'SHORT').missing, []);
+  assert.match(coreCheck(f(up), 'REVERSAL', 'LONG').missing.join(), /no down-move to fade/);
+  // up on the day but not stretched for THIS stock
+  assert.match(coreCheck(f({ Stretch: 'NONE', StretchDir: 'UP', StretchRunPct: 40, StretchVwapAtr: 0.4 }), 'REVERSAL', 'SHORT').missing.join(), /not stretched up: run bigger than 40%/);
+  // his read: Nifty still pushing the stock's way (last 20 min) = not yet; turning against it = fine
+  assert.match(coreCheck(f({ ...up, NiftyVsStock: 'WITH_STOCK' }), 'REVERSAL', 'SHORT').missing.join(), /still pushing up/);
+  assert.deepEqual(coreCheck(f({ ...up, NiftyVsStock: 'AGAINST_STOCK', NiftyState: 'TRENDING_UP' }), 'REVERSAL', 'SHORT').missing, []);
+});
+
+test('stretch numbers: a run bigger than every recent day and far from VWAP is very stretched', () => {
+  // prior days ran 0.5 from open at most; today runs +6 steadily from 300
+  const daily = dailyFlat(800, 300); daily.h.fill(300.5); daily.l.fill(299.5);
+  const f = computeFacts(base({ daily, nowMs: IST('2026-10-12', '09:45:20'), price: 309.2 }));
+  assert.equal(f.StretchDir, 'UP');
+  assert.equal(f.StretchRunPct, 100);
+  assert.ok(f.StretchVwapAtr! > 0.75, `vwap atr ${f.StretchVwapAtr}`);
+  assert.notEqual(f.Stretch, 'NONE');
 });

@@ -131,6 +131,7 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
 
       <Group title="Market">
         <Row label="Nifty 500 open / day" value={`${STATE_TEXT[f.NiftyState] ?? f.NiftyState} / ${f.NiftyNowTrend?.toLowerCase() ?? 'from 09:30'}`} hint="day decides from 09:30" />
+        <Row label="Nifty last 20m vs the stock" value={f.NiftyVsStock ? `${f.NiftyVsStock === 'AGAINST_STOCK' ? 'turning against it' : f.NiftyVsStock === 'WITH_STOCK' ? 'with it' : 'flat'} (${signed(f.Nifty20mPct, 2, '%')})` : 'from 09:30'} />
         <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
       </Group>
 
@@ -145,6 +146,8 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
         <Row label="Prev day high / low" value={`${fmt(f.PdhDistAtr)} / ${fmt(f.PdlDistAtr)}`} hint="ATR" />
         <Row label="VWAP control" value={f.VwapSide ? `${f.VwapSide.toLowerCase()} · ${fmt(f.VwapHeldMin)} min` : '–'} />
         <Row label="vs Nifty (day / last 2 candles)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs20mPct, 2, '%')}`} />
+        <Row label="Stretch" value={f.Stretch ? `${f.Stretch === 'NONE' ? 'not stretched' : f.Stretch === 'VERY_STRETCHED' ? 'very stretched' : 'stretched'} ${f.StretchDir?.toLowerCase() ?? ''}` : '–'}
+          hint={f.StretchRunPct !== undefined ? `run > ${f.StretchRunPct}% of last 20 days · ${fmt(f.StretchVwapAtr)} ATR from VWAP` : undefined} />
         <Row label="Extension from open" value={f.ExtAdrPct !== undefined ? `${signed(f.ExtAdrPct, 0, '%')} of ADR` : '–'} />
         <Row label="POC today / 2-day" value={`${fmt(f.PocPrice)} / ${fmt(f.Poc2d)}`} hint="approx." />
         <Row label="VWAP" value={fmt(f.Vwap)} />
