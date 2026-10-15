@@ -816,3 +816,41 @@ test('your record when Nifty was like now', () => {
   assert.equal(b.LikeNowTrades, 3);
   assert.equal(b.LikeNowWinRate, 0.33);
 });
+
+import { superOrderRows } from '../lib/copilot/pending';
+
+const AEQUS_SUPER = [{
+  orderId: '9001', orderStatus: 'PENDING', transactionType: 'BUY', exchangeSegment: 'NSE_EQ', productType: 'INTRADAY', orderType: 'STOP_LOSS_MARKET',
+  tradingSymbol: 'AEQUS', securityId: '11', quantity: 75, price: 266, triggerPrice: 266, legName: 'ENTRY_LEG', createTime: '2026-10-14 11:00:00', updateTime: '2026-10-14 11:00:00',
+  legDetails: [{ orderId: '9001', legName: 'STOP_LOSS_LEG', transactionType: 'SELL', totalQuatity: 75, remainingQuantity: 75, price: 262, orderStatus: 'PENDING', trailingJump: 0 }],
+}];
+
+test('a TradingView bracket (Dhan super order) gives the pending entry, its stop, and that the entry is a buy-stop', () => {
+  const rows = superOrderRows(AEQUS_SUPER, new Set()).map(normalizeOrder).filter((o): o is NonNullable<typeof o> => !!o);
+  const p = pendingPlan(rows, 'AEQUS', '11')!;
+  assert.deepEqual([p.direction, p.entry, p.stop, p.entryIsStop], ['LONG', 266, 262, true]);
+});
+
+test('end to end: a buy-stop above price is read as "waits for the break", with its stop', async () => {
+  const d = { ...fakeDhan(), async superOrders() { return AEQUS_SUPER; } };
+  const r = await buildCheck({ dhan: d, sheets: new FakeSheets().client(), lookupSecurityId: async () => '11', now: () => IST('2026-10-15', '01:58:00') }, { direction: 'LONG', setup: 'REVERSAL', symbol: 'AEQUS' });
+  assert.equal(r.facts.PendingStop, 262);
+  assert.equal(r.facts.PendingEntryType, 'BREAK');
+  assert.equal(r.facts.EntryTiming, 'WAIT_CONFIRM');
+  assert.match(r.facts.EntryLevelName ?? '', /buy-stop at 266: it fills only on a break above/);
+});
+
+test('reversal style: back above VWAP after a flush is a VWAP reclaim, targeting the next level, no stretch needed', () => {
+  // opens 300, flushes to ~290 in the first 10 minutes, then bases 289-292 for 80 minutes
+  const st = day('2026-10-12', (m) => {
+    const c = m < 10 ? 300 - m : 290 + ((m % 20) < 10 ? (m % 10) * 0.25 : 2.5 - (m % 10) * 0.25);
+    return { o: c, h: c + 0.3, l: c - 0.3, c, v: m < 10 ? 20000 : 3000 };
+  }, 90);
+  const nf = day('2026-10-12', () => ({ o: 24000, h: 24001, l: 23999, c: 24000 }), 90);
+  const f = computeFacts(base({ setup: 'REVERSAL', stock1m: merge(...calm, st), nifty1m: nf, nowMs: IST('2026-10-12', '10:45:20'), price: 293.5 }));
+  assert.ok(f.Vwap !== undefined && f.Vwap < 293.5, `vwap ${f.Vwap}`);
+  assert.equal(f.ReversalStyle, 'RECLAIM');
+  assert.match(f.RoomTo ?? '', /^(first 10-min candle high|2-day POC|POC|day high|5m 200 EMA|10m 200 EMA|prev day high)/);
+  assert.ok(!(f.CoreMissing ?? '').includes('stretch'), f.CoreMissing);
+  assert.equal(f.EntryInvalidName, 'a 10-min close back below VWAP');
+});

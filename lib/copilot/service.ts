@@ -14,7 +14,7 @@ import { buildMessage, PROMPT_VERSION } from './prompt';
 import type { CheckRow } from './store';
 import { settings } from './settings';
 import { getRiskInr } from './userSettings';
-import { OPEN_ORDER_STATUSES, pendingPlan, type PendingPlan } from './pending';
+import { OPEN_ORDER_STATUSES, pendingPlan, superOrderRows, type PendingPlan } from './pending';
 
 export { settings };
 
@@ -94,7 +94,7 @@ export interface FitNow { direction: Direction; setup: Setup; stop?: number; roo
 export interface Alternative { direction: Direction; setup: Setup; facts: Facts }
 
 interface Deps {
-  dhan: Pick<DhanClient, 'intraday' | 'daily' | 'ltp' | 'positions' | 'trades' | 'orders'>;
+  dhan: Pick<DhanClient, 'intraday' | 'daily' | 'ltp' | 'positions' | 'trades' | 'orders'> & Partial<Pick<DhanClient, 'superOrders'>>;
   sheets: SheetsClient;
   clientId?: string;
   lookupSecurityId: (symbol: string) => Promise<string | undefined>;
@@ -162,9 +162,15 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   }
 
   // his own orders in Dhan for this stock = his intention (entry, stop, target)
-  const rawOrders = await deps.dhan.orders().catch(() => [] as any[]);
+  const [rawOrders, rawSupers] = await Promise.all([
+    deps.dhan.orders().catch(() => [] as any[]),
+    deps.dhan.superOrders ? deps.dhan.superOrders().catch(() => [] as any[]) : Promise.resolve([] as any[]),
+  ]);
   const snaps = rawOrders.map(normalizeOrder).filter((o): o is NonNullable<typeof o> => !!o);
-  const pending: PendingPlan | undefined = pendingPlan(snaps, symbol, securityId, mode === 'MANAGE' ? direction : undefined);
+  // super orders (TradingView brackets): their stop and target legs only reach /orders once the entry fills
+  const superSnaps = superOrderRows(rawSupers, new Set(snaps.map((o) => o.orderId))).map(normalizeOrder).filter((o): o is NonNullable<typeof o> => !!o);
+  const intent = [...snaps, ...superSnaps];
+  const pending: PendingPlan | undefined = pendingPlan(intent, symbol, securityId, mode === 'MANAGE' ? direction : undefined);
   let evalPrice = price;
   if (mode === 'ENTRY' && pending) {
     if (pending.direction && pending.direction !== direction) {
@@ -186,6 +192,18 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   });
   if (pending && mode === 'ENTRY') {
     facts.PendingEntry = pending.entry; facts.PendingStop = pending.stop; facts.PendingTarget = pending.target;
+    // a stop-entry beyond the price = he wants the break first: that IS his confirmation, so the entry waits for it
+    const sgnE = direction === 'LONG' ? 1 : -1;
+    if (pending.entryIsStop && pending.entry !== undefined && (pending.entry - price) * sgnE > 0) {
+      const side = direction === 'LONG' ? 'above' : 'below';
+      const vw = facts.Vwap;
+      facts.PendingEntryType = 'BREAK';
+      facts.EntryTiming = 'WAIT_CONFIRM';
+      facts.EntryLevel = pending.entry;
+      facts.EntryLevelName = `your ${direction === 'LONG' ? 'buy' : 'sell'}-stop at ${pending.entry}: it fills only on a break ${side}${vw !== undefined ? ` (VWAP ${vw}, ${Math.abs(Number((pending.entry - vw).toFixed(2)))} ${(pending.entry - vw) * sgnE >= 0 ? 'beyond' : 'short of'} it)` : ''}`;
+      facts.EntryWhy = 'your order already waits for the break: that is the confirmation';
+    } else if (pending.entry !== undefined) facts.PendingEntryType = (pending.entry - price) * sgnE < 0 ? 'PULLBACK' : 'AT_MARKET';
+
     if (pending.target !== undefined && facts.StopDist) {
       facts.RewardRisk = Number((Math.abs(pending.target - evalPrice) / facts.StopDist).toFixed(2));
       const obstacle = Number((facts.RoomTo ?? '').match(/(\d+(?:\.\d+)?)$/)?.[1]);
@@ -243,7 +261,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
     if (currentStop === undefined) notes.push('No stop found for this position (Dhan order book and the live order log).');
     // orders on the entry side that are still open = adds he intends to make
     const entrySide = direction === 'LONG' ? 'BUY' : 'SELL';
-    const adds = snaps.filter((o) => (o.securityId === securityId || String(o.symbol ?? '').toUpperCase() === symbol) && o.side === entrySide
+    const adds = intent.filter((o) => (o.securityId === securityId || String(o.symbol ?? '').toUpperCase() === symbol) && o.side === entrySide
       && OPEN_ORDER_STATUSES.has(String(o.status ?? '').toUpperCase()));
     manage = computeManageFacts({
       date: sess.date, nowMs: sess.asOfMs, price, direction, stock1m, nifty1m, avgEntry, entryMs: entryTs,

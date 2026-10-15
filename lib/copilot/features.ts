@@ -82,6 +82,14 @@ export interface Facts {
   StopIdea?: number; StopIdeaAtr?: number; StopIdeaCapped?: 'YES';
   /** His own orders in Dhan for this stock (his intention): pending entry, stop and target. */
   PendingEntry?: number; PendingStop?: number; PendingTarget?: number;
+  /** What his pending entry order means: BREAK = a stop-entry beyond price (waits for the break), PULLBACK = a limit behind price. */
+  PendingEntryType?: 'BREAK' | 'PULLBACK' | 'AT_MARKET';
+  /**
+   * Reversal style: FADE = selling/buying a stretched run before it turns, back to VWAP / POC (the stretch rule).
+   * RECLAIM = the run has already stopped and price (or his entry) is back across VWAP: the trade is the move on to the
+   * next level, not the fade, so stretch does not apply.
+   */
+  ReversalStyle?: 'FADE' | 'RECLAIM';
   /** Target distance / stop distance, and whether his target sits beyond the next obstacle (RoomTo). */
   RewardRisk?: number; TargetPastObstacle?: 'YES';
   /**
@@ -504,7 +512,23 @@ export function computeFacts(inp: FactsInput): Facts {
   f.DayHigh = r2(dayHi); f.DayLow = r2(dayLo);
   if (atr) {
     let room: number | undefined;
-    if (inp.setup === 'REVERSAL') {
+    // RECLAIM: price (his entry) already back across VWAP his way after a real run against him (25%+ of the daily range)
+    const reclaim = inp.setup === 'REVERSAL' && vwapPx !== undefined && (price - vwapPx) * sign > 0.05 * atr && (f.ExtAdrPct ?? 0) * sign <= -25;
+    if (inp.setup === 'REVERSAL') f.ReversalStyle = reclaim ? 'RECLAIM' : 'FADE';
+    if (reclaim) {
+      // the mean (VWAP / POC) is behind: the target is the next real level beyond it
+      const levels: { name: string; px: number }[] = [
+        { name: sign === 1 ? 'first 10-min candle high' : 'first 10-min candle low', px: (sign === 1 ? f.OrHigh : f.OrLow) ?? NaN },
+        { name: '2-day POC', px: poc2d ?? NaN }, { name: 'POC', px: poc ?? NaN },
+        { name: sign === 1 ? 'day high' : 'day low', px: sign === 1 ? dayHi : dayLo },
+        { name: sign === 1 ? 'prev day high' : 'prev day low', px: n ? (sign === 1 ? daily.h[n - 1] : daily.l[n - 1]) : NaN },
+        { name: '5m 200 EMA', px: e5 ?? NaN }, { name: '10m 200 EMA', px: e10 ?? NaN }, { name: 'daily 200 EMA', px: e1d ?? NaN },
+      ].filter((x) => Number.isFinite(x.px) && (x.px - price) * sign > 0.3 * atr);
+      if (levels.length) {
+        const near = levels.reduce((a, b) => (Math.abs(b.px - price) < Math.abs(a.px - price) ? b : a));
+        room = Math.abs(near.px - price); f.RoomTo = `${near.name} ${r2(near.px)}`;
+      } else { room = 0; f.RoomTo = `no level ${sign === 1 ? 'above' : 'below'} in the data`; }
+    } else if (inp.setup === 'REVERSAL') {
       // The target is where price reverts to. Before 10:15 (fewer than six completed 10-min candles) today's
       // profile is just the opening move, so today's POC sits on the move itself: use the nearer of VWAP and the
       // 2-day POC. From 10:15, today's POC (his rule).
@@ -582,6 +606,12 @@ export function computeFacts(inp: FactsInput): Facts {
         if (pull) { f.EntryLevel = r2(pull.px); f.EntryLevelName = pull.name; }
         if (inv) { f.EntryInvalid = r2(inv.px); f.EntryInvalidName = inv.name; }
       }
+    } else if (f.ReversalStyle === 'RECLAIM' && vwapPx !== undefined) {
+      // back across VWAP: valid while it stays there; a 10-min close back through VWAP means the run is back on
+      f.EntryInvalid = r2(vwapPx - sign * 0.3 * atr);
+      f.EntryInvalidName = `a 10-min close back ${up ? 'below' : 'above'} VWAP`;
+      f.EntryTiming = 'NOW';
+      f.EntryWhy = `price is back ${up ? 'above' : 'below'} VWAP after the run: the reclaim is the confirmation`;
     } else {
       // reversal: is there any sign the run is stopping? (climax / failed break the run's way, or the last
       // completed 10-min candle closing against the run)
@@ -652,6 +682,13 @@ export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missi
     if (f.VwapSide && f.VwapSide !== (up ? 'BUYERS' : 'SELLERS')) missing.push(`${f.VwapSide.toLowerCase()} in control (VWAP)`);
     const breakout = (f.RoomTo ?? '').startsWith('none: price is at the day');
     if (!breakout && f.RoomAtr !== undefined && f.RoomAtr < 0.5) missing.push(`little room: ${f.RoomTo} ${f.RoomAtr} ATR away`);
+  } else if (f.ReversalStyle === 'RECLAIM') {
+    // the run against him has stopped and price is back across VWAP: the trade is the move on to the next level
+    if (f.StockNow === 'PUSHING') missing.push(`the ${up ? 'down' : 'up'}-run is still going in the last 30 min`);
+    if (f.RoomAtr === undefined || f.RoomAtr < 1) missing.push(f.RoomAtr === undefined ? (f.RoomTo ?? 'no level') : `next level ${f.RoomTo} only ${f.RoomAtr} ATR away`);
+    const r = f.NiftyLast30Trend;
+    if (r && (up ? r === 'FALLING' : r === 'RISING')) missing.push(`Nifty 500 ${r.toLowerCase()} in the last 30 min`);
+    else if (!r && f.NiftyVsStock === 'WITH_STOCK') missing.push(`Nifty 500 still pushing ${up ? 'down' : 'up'} with the stock`);
   } else {
     // the stock must be stretched the OTHER way (stretched up for a reversal short), measured against its own history
     const fadeDir = up ? 'DOWN' : 'UP';

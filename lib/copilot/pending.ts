@@ -10,6 +10,8 @@ export const OPEN_ORDER_STATUSES = new Set(['PENDING', 'TRANSIT', 'PART_TRADED',
 export interface PendingPlan {
   direction?: Direction;
   entry?: number;        // pending entry price (limit price, or trigger for a stop-entry); undefined = market / none
+  /** the entry is a stop order: it fills only when price breaks through it (buy-stop above / sell-stop below) */
+  entryIsStop?: boolean;
   stop?: number;
   target?: number;
   source: string;        // short description for the card
@@ -41,7 +43,7 @@ export function pendingPlan(orders: OrderSnapIn[], symbol: string, securityId: s
   if (leg1) {
     const direction: Direction = leg1.side === 'BUY' ? 'LONG' : 'SHORT';
     const leg2 = mine.find((o) => o.legNo === 2), leg3 = mine.find((o) => o.legNo === 3);
-    return check({ direction, entry: leg1.kind === 'MARKET' ? undefined : actPrice(leg1), stop: leg2 ? actPrice(leg2) : undefined, target: leg3 ? actPrice(leg3) : undefined, source: 'your bracket order' });
+    return check({ direction, entry: leg1.kind === 'MARKET' ? undefined : actPrice(leg1), entryIsStop: leg1.kind === 'SL' || leg1.kind === 'SLM', stop: leg2 ? actPrice(leg2) : undefined, target: leg3 ? actPrice(leg3) : undefined, source: 'your bracket order' });
   }
 
   // separate orders: the side that was placed first is the entry; on the other side a trigger order is the stop
@@ -55,6 +57,7 @@ export function pendingPlan(orders: OrderSnapIn[], symbol: string, securityId: s
   const target = latest(exits.filter((o) => o.kind === 'LIMIT' && !pos(o.triggerPrice)));
   return check({
     direction, entry: entryOrder && entryOrder.kind !== 'MARKET' ? actPrice(entryOrder) : undefined,
+    entryIsStop: entryOrder ? entryOrder.kind === 'SL' || entryOrder.kind === 'SLM' : undefined,
     stop: stop ? actPrice(stop) : undefined, target: target ? actPrice(target) : undefined, source: 'your pending orders',
   });
 }
@@ -69,3 +72,31 @@ function check(p: PendingPlan): PendingPlan {
   }
   return p;
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Super orders (GET /super/orders) as plain order-book rows: the entry leg (leg 1) plus its stop-loss leg (2) and
+ * target leg (3), which carry their price in `price` and no symbol of their own. Skips legs already in the order book.
+ */
+export function superOrderRows(supers: any[], have: Set<string>): any[] {
+  const out: any[] = [];
+  for (const so of Array.isArray(supers) ? supers : []) {
+    if (!so?.orderId) continue;
+    const base = { tradingSymbol: so.tradingSymbol, securityId: so.securityId, exchangeSegment: so.exchangeSegment, productType: so.productType, createTime: so.createTime, updateTime: so.updateTime };
+    if (!have.has(String(so.orderId))) out.push({ ...so, legName: 'ENTRY_LEG' });
+    for (const leg of Array.isArray(so.legDetails) ? so.legDetails : []) {
+      const name = String(leg?.legName ?? '').toUpperCase();
+      if (name !== 'STOP_LOSS_LEG' && name !== 'TARGET_LEG') continue;
+      const id = leg.orderId && String(leg.orderId) !== String(so.orderId) ? String(leg.orderId) : `${so.orderId}-${name === 'TARGET_LEG' ? 'T' : 'S'}`;
+      if (have.has(id)) continue;
+      const px = Number(leg.price);
+      out.push({
+        ...base, orderId: id, legName: name, transactionType: leg.transactionType ?? (so.transactionType === 'BUY' ? 'SELL' : 'BUY'),
+        orderType: name === 'TARGET_LEG' ? 'LIMIT' : 'STOP_LOSS_MARKET', price: px, triggerPrice: name === 'TARGET_LEG' ? 0 : px,
+        orderStatus: leg.orderStatus ?? 'PENDING', quantity: leg.totalQuatity ?? leg.totalQuantity ?? leg.remainingQuantity ?? so.quantity, filledQty: 0,
+      });
+    }
+  }
+  return out;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

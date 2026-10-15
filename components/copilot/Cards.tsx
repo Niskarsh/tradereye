@@ -165,6 +165,7 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
         <Row label="Prev day high / low" value={`${fmt(f.PdhDistAtr)} / ${fmt(f.PdlDistAtr)}`} hint="ATR" />
         <Row label="VWAP control" value={f.VwapSide ? `${f.VwapSide.toLowerCase()} · ${fmt(f.VwapHeldMin)} min` : '–'} />
         <Row label="vs Nifty (day / last 2 candles)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs20mPct, 2, '%')}`} />
+        {f.ReversalStyle && <Row label="Reversal style" value={f.ReversalStyle === 'RECLAIM' ? 'VWAP reclaim: target the next level' : 'fade the stretch: target VWAP / POC'} hint={f.ReversalStyle === 'RECLAIM' ? 'stretch not needed' : undefined} />}
         <Row label="Stretch" value={f.Stretch ? `${f.Stretch === 'NONE' ? 'not stretched' : f.Stretch === 'VERY_STRETCHED' ? 'very stretched' : 'stretched'} ${f.StretchDir?.toLowerCase() ?? ''}` : '–'}
           hint={f.StretchRunPct !== undefined ? `run > ${f.StretchRunPct}% of last 20 days · ${fmt(f.StretchVwapAtr)} ATR from VWAP` : undefined} />
         <Row label="Extension from open" value={f.ExtAdrPct !== undefined ? `${signed(f.ExtAdrPct, 0, '%')} of ADR` : '–'} />

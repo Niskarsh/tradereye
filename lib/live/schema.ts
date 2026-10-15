@@ -134,6 +134,7 @@ export const COPILOT_CHECK_COLS = [
   'EntryTiming', 'EntryLevel', 'EntryLevelName', 'EntryInvalid', 'EntryInvalidName', 'EntryWhy',
   'PendingAddPrice', 'PendingAddQty',
   'NiftyLast30Pct', 'NiftyLast30Trend', 'Stock30mAtr', 'StockNow',
+  'ReversalStyle', 'PendingEntryType',
 ] as const;
 
 /** Co-pilot chat: one row per question and answer, in a tab per month ("october-2026-chat"). */
