@@ -25,6 +25,9 @@ export function groupFills(fills: Fill[]): TradeGroup[] {
     let net = 0;       // signed open quantity
     let avgCost = 0;   // average price of the open quantity
     let entryQty = 0, entryVal = 0, exitQty = 0, exitVal = 0;
+    // an add is a NEW entry order; one order split into several fills by the exchange is not an add
+    let entryOrders = new Set<string>();
+    const orderKey = (f: { orderId?: string; ts: number }) => f.orderId || `t${Math.floor(f.ts / 3000)}`;
 
     const finish = (g: TradeGroup) => {
       g.status = g.netQty === 0 ? 'CLOSED' : 'OPEN';
@@ -51,7 +54,7 @@ export function groupFills(fills: Fill[]): TradeGroup[] {
             buyQty: 0, sellQty: 0, buyVal: 0, sellVal: 0,
             entryTs: fill.ts, lastTs: fill.ts, parts: [],
           };
-          net = 0; avgCost = 0; entryQty = 0; entryVal = 0; exitQty = 0; exitVal = 0;
+          net = 0; avgCost = 0; entryQty = 0; entryVal = 0; exitQty = 0; exitVal = 0; entryOrders = new Set();
         }
         const dirSign = cur.direction === 'LONG' ? 1 : -1;
         const isEntry = sign === dirSign;
@@ -66,7 +69,9 @@ export function groupFills(fills: Fill[]): TradeGroup[] {
         cur.lastTs = fill.ts;
 
         if (isEntry) {
-          if (entryQty > 0) cur.adds += 1;
+          const k = orderKey(fill);
+          if (entryQty > 0 && !entryOrders.has(k)) cur.adds += 1;
+          entryOrders.add(k);
           avgCost = (avgCost * Math.abs(net) + fill.price * take) / (Math.abs(net) + take);
           net += sign * take;
           entryQty += take; entryVal += fill.price * take;
