@@ -133,5 +133,12 @@ export const COPILOT_CHECK_COLS = [
   'PendingAddPrice', 'PendingAddQty',
 ] as const;
 
+/** Co-pilot chat: one row per question and answer, in a tab per month ("october-2026-chat"). */
+export const chatTabTitle = (monthTitle: string) => `${monthTitle}-chat`;
+export const COPILOT_CHAT_COLS = [
+  'Date', 'Time', 'CreatedAt', 'CheckId', 'Symbol', 'Mode', 'DataTime', 'Question', 'Answer',
+  'Model', 'InTokens', 'OutTokens', 'CostInr', 'LatencyMs', 'Error',
+] as const;
+
 /** live-trades.Status values */
 export type LiveStatus = 'OPEN' | 'CLOSED' | 'LOGGED' | 'DUPLICATE' | 'STALE';

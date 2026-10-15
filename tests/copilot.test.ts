@@ -9,7 +9,7 @@ import {
 import { computeBehaviour, summarizeTrades, chargeRate } from '../lib/copilot/behaviour';
 import { matchChecks, monthlyColumns } from '../lib/copilot/store';
 import { buildMessage, SYSTEM_PROMPT } from '../lib/copilot/prompt';
-import { askClaude, costInr } from '../lib/copilot/claude';
+import { askClaude, chatClaude, costInr } from '../lib/copilot/claude';
 import { IST } from './helpers';
 
 /* ---- fixtures -------------------------------------------------------------------------------------------- */
@@ -770,4 +770,23 @@ test('re-check in a trade reads stop, target and a pending add the way the Live 
   assert.equal(r.manage!.PendingAddPrice, 264.8);
   assert.equal(r.manage!.PendingAddQty, 50);
   assert.ok(!r.notes.some((n) => /No stop found/.test(n)), r.notes.join(' | '));
+});
+
+test('chat sends the conversation with the facts in the cached system block and returns plain text', async () => {
+  let sent: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const f = (async (_u: string, init: { body: string }) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ content: [{ type: 'text', text: 'Nothing has turned against you yet.' }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 20 } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const r = await chatClaude('DATA fetched at 10:44 IST\nFACTS {}', [{ role: 'user', content: 'why weakening?' }], { apiKey: 'k', fetchImpl: f });
+  assert.equal(r.text, 'Nothing has turned against you yet.');
+  assert.equal(sent.output_config, undefined, 'chat is plain text, not the JSON schema');
+  assert.equal(sent.system.length, 2);
+  assert.match(sent.system[1].text, /CHAT MODE[\s\S]*DATA fetched at 10:44/);
+  assert.deepEqual(sent.messages, [{ role: 'user', content: 'why weakening?' }]);
+});
+
+test('in-trade rules: a stretched stock that is working is not "weakening" by itself', () => {
+  assert.match(SYSTEM_PROMPT, /Conditions that were already there at entry are not signs against/);
+  assert.match(SYSTEM_PROMPT, /MOMENTUM trade, judge Nifty on the day's move/);
 });

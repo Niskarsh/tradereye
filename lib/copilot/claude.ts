@@ -1,4 +1,4 @@
-import { READ_SCHEMA, SYSTEM_PROMPT, VERDICTS, type Verdict } from './prompt';
+import { CHAT_RULES, READ_SCHEMA, SYSTEM_PROMPT, VERDICTS, type Verdict } from './prompt';
 
 /**
  * One call to the Claude Messages API (plain fetch, no SDK). The API key is read on the server only and is never
@@ -55,9 +55,41 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
     messages: [{ role: 'user', content: message }],
   };
   const t0 = now();
+  const json = await postMessages(body, o, f, sleep);
+  const content: { type: string; text?: string }[] = json?.content ?? [];
+  const replyText = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
+  const cutOff = json?.stop_reason === 'max_tokens';
+  const parsed = Object.keys(parseReadFromText(replyText)).length ? parseReadFromText(replyText) : salvageRead(replyText);
+  const v = String(parsed.verdict ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+  let verdict: Verdict | 'RAW' = (VERDICTS as readonly string[]).includes(v) ? (v as Verdict) : 'RAW';
+  let lines = (Array.isArray(parsed.lines) ? parsed.lines : []).map((l: unknown) => String(l)).filter(Boolean).slice(0, 3);
+  let watch = String(parsed.watch ?? '');
+  if (cutOff && verdict !== 'RAW' && lines.length && !watch) watch = '(reply was cut short; the lines above are complete)';
+  // Never throw away a paid answer: if it did not parse, show Claude's text as it is.
+  if (verdict === 'RAW' || !lines.length) {
+    verdict = 'RAW';
+    const why = json?.stop_reason === 'max_tokens' ? ' (cut off: answer too long)' : json?.stop_reason === 'refusal' ? ' (Claude declined)' : '';
+    lines = [replyText ? replyText.slice(0, 800) : `Claude returned no text${why}.`];
+    watch = why ? why.trim() : '';
+  }
+  const scenarios = verdict === 'RAW' ? [] : readScenarios(parsed.scenarios);
+  const u = json?.usage ?? {};
+  return {
+    verdict, lines, watch, model, scenarios,
+    inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+    outTokens: u.output_tokens ?? 0,
+    costInr: costInr(model, u, o.usdInr ?? 88),
+    latencyMs: now() - t0,
+  };
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** POST to the Messages API with one retry when Claude is overloaded; returns the parsed JSON or throws a ClaudeError. */
+async function postMessages(body: unknown, o: ClaudeOptions, f: typeof fetch, sleep: (ms: number) => Promise<void>): Promise<any> {
+  const limit = o.timeoutMs ?? (o.thinking === 'on' ? 30_000 : 15_000);
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? (o.thinking === 'on' ? 30_000 : 15_000));
+    const timer = setTimeout(() => ctl.abort(), limit);
     let res: Response;
     try {
       res = await f(API_URL, {
@@ -68,7 +100,7 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
       });
     } catch (e) {
       clearTimeout(timer);
-      if ((e as Error).name === 'AbortError') throw new ClaudeError(504, 'Claude did not answer within 15 seconds.');
+      if ((e as Error).name === 'AbortError') throw new ClaudeError(504, `Claude did not answer within ${Math.round(limit / 1000)} seconds.`);
       throw new ClaudeError(502, `Could not reach Claude: ${(e as Error).message}`);
     }
     clearTimeout(timer);
@@ -85,34 +117,11 @@ export async function askClaude(message: string, o: ClaudeOptions): Promise<Clau
       if (res.status === 429) throw new ClaudeError(429, 'Claude is rate limiting. Try again in a few seconds.');
       throw new ClaudeError(res.status || 502, `Claude error: ${msg}`);
     }
-    const content: { type: string; text?: string }[] = json?.content ?? [];
-    const replyText = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
-    const cutOff = json?.stop_reason === 'max_tokens';
-    const parsed = Object.keys(parseReadFromText(replyText)).length ? parseReadFromText(replyText) : salvageRead(replyText);
-    const v = String(parsed.verdict ?? '').trim().toUpperCase().replace(/\s+/g, '_');
-    let verdict: Verdict | 'RAW' = (VERDICTS as readonly string[]).includes(v) ? (v as Verdict) : 'RAW';
-    let lines = (Array.isArray(parsed.lines) ? parsed.lines : []).map((l: unknown) => String(l)).filter(Boolean).slice(0, 3);
-    let watch = String(parsed.watch ?? '');
-    if (cutOff && verdict !== 'RAW' && lines.length && !watch) watch = '(reply was cut short; the lines above are complete)';
-    // Never throw away a paid answer: if it did not parse, show Claude's text as it is.
-    if (verdict === 'RAW' || !lines.length) {
-      verdict = 'RAW';
-      const why = json?.stop_reason === 'max_tokens' ? ' (cut off: answer too long)' : json?.stop_reason === 'refusal' ? ' (Claude declined)' : '';
-      lines = [replyText ? replyText.slice(0, 800) : `Claude returned no text${why}.`];
-      watch = why ? why.trim() : '';
-    }
-    const scenarios = verdict === 'RAW' ? [] : readScenarios(parsed.scenarios);
-    const u = json?.usage ?? {};
-    return {
-      verdict, lines, watch, model, scenarios,
-      inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
-      outTokens: u.output_tokens ?? 0,
-      costInr: costInr(model, u, o.usdInr ?? 88),
-      latencyMs: now() - t0,
-    };
+    return json;
   }
   throw new ClaudeError(529, 'Claude is overloaded right now. Try again in a moment.');
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /** Fallback when the model answers in text: the first {...} that holds a verdict. */
 export function parseReadFromText(text: string): Record<string, unknown> {
@@ -211,4 +220,40 @@ export function checkScenarios(list: Scenario[], message: string): Scenario[] {
     }
   }
   return out.slice(0, 3);
+}
+
+export interface ChatTurn { role: 'user' | 'assistant'; content: string }
+export interface ChatReply { text: string; model: string; inTokens: number; outTokens: number; costInr: number; latencyMs: number }
+
+/**
+ * Free chat about the trade: the same system prompt as the one-button read (cached and shared with it), then the chat
+ * rules and the latest facts, then the conversation. Answers in plain text.
+ */
+export async function chatClaude(context: string, turns: ChatTurn[], o: ClaudeOptions): Promise<ChatReply> {
+  const f = o.fetchImpl ?? fetch;
+  const sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const now = o.now ?? Date.now;
+  const model = o.model || DEFAULT_MODEL;
+  const body = {
+    model,
+    max_tokens: o.thinking === 'on' ? 4000 : 1200,
+    ...(o.thinking === 'on' ? {} : { thinking: { type: 'between_tools' } }),
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: `${CHAT_RULES}\n\n${context}`, cache_control: { type: 'ephemeral' } },
+    ],
+    messages: turns,
+  };
+  const t0 = now();
+  const json = await postMessages(body, { ...o, timeoutMs: o.timeoutMs ?? 30_000 }, f, sleep);
+  const content: { type: string; text?: string }[] = json?.content ?? [];
+  let text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
+  if (json?.stop_reason === 'max_tokens') text += text ? '\n\n(cut short)' : 'The answer ran too long. Ask a narrower question.';
+  if (!text) text = json?.stop_reason === 'refusal' ? 'Claude declined to answer that.' : 'Claude returned no text.';
+  const u = json?.usage ?? {};
+  return {
+    text, model,
+    inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+    outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
+  };
 }

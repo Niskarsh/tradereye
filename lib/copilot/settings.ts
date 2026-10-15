@@ -7,6 +7,7 @@ export function settings() {
     emaReachAtr: n(process.env.COPILOT_EMA_REACH_ATR, 2),
     pocRows: Math.round(n(process.env.COPILOT_POC_ROWS, 30)), // matches TradingView volume profile "Number of rows" 30
     dailyLimit: Math.round(n(process.env.COPILOT_DAILY_LIMIT, 25)),
+    chatLimit: Math.round(n(process.env.COPILOT_CHAT_LIMIT, 80)),
     model: process.env.COPILOT_MODEL?.trim() || 'claude-sonnet-5-5',
     usdInr: n(process.env.COPILOT_USD_INR, 88),
     thinking: (process.env.COPILOT_THINKING?.trim().toLowerCase() === 'on' ? 'on' : 'off') as 'on' | 'off',

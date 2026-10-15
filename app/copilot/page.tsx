@@ -1,10 +1,11 @@
 "use client";
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, MessageCircle, Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { useCopilot, type Dir, type SetupT } from '@/components/copilot/useCopilot';
 import { FactsCard, MarketStrip, TodayChecks, VerdictCard } from '@/components/copilot/Cards';
+import { ChatPanel } from '@/components/copilot/ChatPanel';
 
 /**
  * Co-pilot: tap direction, setup and a symbol to see the facts (no Claude); press Ask Claude for a read.
@@ -18,6 +19,7 @@ export default function CopilotPage() {
   const [suggest, setSuggest] = useState<string[]>([]);
   const [editRisk, setEditRisk] = useState(false);
   const [riskDraft, setRiskDraft] = useState('');
+  const [chatOpen, setChatOpen] = useState(false);
   const stopRef = useRef<HTMLInputElement>(null);
 
   // orders already placed in Dhan: fill the Stop box (if empty) and follow the order's direction
@@ -64,8 +66,9 @@ export default function CopilotPage() {
   // after a read, the same button refreshes the data and asks again (repeatable, in a trade or not)
   const onAsk = () => {
     if (!c.check) return;
-    if (!c.read) { c.ask(); return; }
     const st = parseFloat(stop);
+    // first ask: refetch first if the facts on screen are more than a few seconds old
+    if (!c.read) { c.askFresh(held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined); return; }
     c.refreshAndAsk(c.check.symbol, held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined);
     c.reload();
   };
@@ -167,15 +170,23 @@ export default function CopilotPage() {
 
       {c.check && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-900 bg-brand-bg/95 p-3 backdrop-blur">
-          <div className="max-w-xl mx-auto">
+          <div className="max-w-xl mx-auto flex gap-2">
+            <button onClick={() => setChatOpen(true)} disabled={c.busy === 'check'} aria-label="Chat with Claude"
+              className="flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-2xl border-2 border-brand-accent text-brand-accent text-[9px] font-black uppercase disabled:opacity-40">
+              <MessageCircle className="w-5 h-5" />Chat
+            </button>
             <button onClick={onAsk} disabled={!canAsk}
-              className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-accent text-black text-base font-black uppercase tracking-tight disabled:opacity-40">
+              className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-accent text-black text-base font-black uppercase tracking-tight disabled:opacity-40">
               {c.busy !== '' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
               {c.busy === 'check' ? 'Fetching fresh data…' : c.read ? (held ? '↻ Re-check my trade again' : '↻ Refresh & ask again') : held ? 'Re-check my trade' : 'Ask Claude'}
             </button>
-            {c.market && !c.market.hasApiKey && <p className="mt-1 text-center text-[10px] text-data-red">ANTHROPIC_API_KEY is not set in Vercel yet.</p>}
           </div>
+          {c.market && !c.market.hasApiKey && <p className="mt-1 text-center text-[10px] text-data-red">ANTHROPIC_API_KEY is not set in Vercel yet.</p>}
         </div>
+      )}
+      {chatOpen && c.check && (
+        <ChatPanel check={c.check} msgs={c.chat} busy={c.chatBusy} fetching={c.busy === 'check'} onSend={c.sendChat} onClose={() => setChatOpen(false)}
+          onRefresh={() => { const st = parseFloat(stop); c.refreshForChat(held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined); }} />
       )}
     </div>
   );
