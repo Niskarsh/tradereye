@@ -49,6 +49,10 @@ export interface Facts {
   VwapSide?: 'BUYERS' | 'SELLERS'; VwapHeldMin?: number;
   RsVsNiftyPct?: number; Rs20mPct?: number; ExtAdrPct?: number;
   PocPrice?: number; PocDistAtr?: number;
+  /** POC of yesterday + today together (like a 2-day visible-range profile). */
+  Poc2d?: number;
+  /** Session VWAP price (10-minute chart). */
+  Vwap?: number;
   PullbackNo?: number; VolTrend?: 'RISING' | 'FALLING' | 'FLAT'; PushVsPullVol?: number;
   Climax: string; FailedBreak: string;
   StopDist?: number; StopVsAtr2?: number; SizeQty?: number; RiskInr?: number;
@@ -335,6 +339,11 @@ export function computeFacts(inp: FactsInput): Facts {
 
   // ---- session POC
   const poc = pointOfControl(bars, inp.pocRows);
+  const prevDay = stock.filter((x) => x.date < inp.date).at(-1);
+  const poc2d = prevDay ? pointOfControl([...prevDay.bars, ...bars], inp.pocRows) : undefined;
+  if (poc2d !== undefined) f.Poc2d = r2(poc2d);
+  const vwapPx = enr.vwapDistPct !== undefined ? price / (1 + enr.vwapDistPct / 100) : undefined;
+  if (vwapPx !== undefined) f.Vwap = r2(vwapPx);
   if (poc !== undefined) {
     f.PocPrice = r2(poc);
     if (atr) f.PocDistAtr = r2((poc - price) / atr);
@@ -400,8 +409,18 @@ export function computeFacts(inp: FactsInput): Facts {
   if (atr) {
     let room: number | undefined;
     if (inp.setup === 'REVERSAL') {
-      if (poc !== undefined && (poc - price) * sign > 0) { room = Math.abs(poc - price); f.RoomTo = `POC ${r2(poc)}`; }
-      else { room = 0; f.RoomTo = poc !== undefined ? `POC ${r2(poc)} is behind the trade` : 'no POC'; }
+      // The target is where price reverts to. Before 10:15 (fewer than six completed 10-min candles) today's
+      // profile is just the opening move, so today's POC sits on the move itself: use the nearer of VWAP and the
+      // 2-day POC. From 10:15, today's POC (his rule).
+      const early = tensDone.length < 6;
+      const cands = (early
+        ? [{ name: 'VWAP', px: vwapPx ?? NaN }, { name: '2-day POC', px: poc2d ?? NaN }]
+        : [{ name: 'POC', px: poc ?? NaN }]
+      ).filter((x) => Number.isFinite(x.px) && (x.px - price) * sign > 0.05 * atr);
+      if (cands.length) {
+        const t = cands.reduce((a, b) => (Math.abs(b.px - price) < Math.abs(a.px - price) ? b : a));
+        room = Math.abs(t.px - price); f.RoomTo = `${t.name} ${r2(t.px)}`;
+      } else { room = 0; f.RoomTo = `no target ${sign === 1 ? 'above' : 'below'} (${early ? 'VWAP / 2-day POC' : 'POC'})`; }
     } else {
       // at the day's extreme (within 0.5 ATR) that level IS the breakout, not an obstacle
       const levels: { name: string; px: number }[] = [
@@ -442,8 +461,8 @@ export function computeFacts(inp: FactsInput): Facts {
  *  Momentum = with today's move: the stock moving his way today (at least 10% of the average daily range),
  *    Nifty 500 not against him, VWAP control on his side, and room to the next obstacle (0.5 ATR or more,
  *    or price breaking out at the day's extreme).
- *  Reversal = against today's move, back to the POC: the stock moved at least 30% of its daily range the
- *    other way, the POC at least 1 ATR away in his direction, not busier than usual, and Nifty not pushing
+ *  Reversal = against today's move, back to the target: the stock moved at least 30% of its daily range the
+ *    other way, the target (VWAP / 2-day POC before 10:15, today's POC after) at least 0.75 ATR away, not busier than usual, and Nifty not pushing
  *    hard in the stock's direction.
  */
 export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missing: string[] } {
@@ -464,9 +483,8 @@ export function coreCheck(f: Facts, setup: Setup, direction: Direction): { missi
   } else {
     if (ext === undefined) missing.push('today\'s move unknown');
     else if (ext * sign > -30) missing.push(`no ${up ? 'down' : 'up'}-move to fade (${ext > 0 ? '+' : ''}${ext}% of daily range today)`);
-    const toPoc = f.PocDistAtr !== undefined ? f.PocDistAtr * sign : undefined;
-    if (toPoc === undefined) missing.push('POC unknown');
-    else if (toPoc < 1) missing.push(`POC ${toPoc <= 0 ? 'is behind the trade' : `only ${r2(toPoc)} ATR away`}`);
+    if (f.RoomAtr === undefined || (f.RoomTo ?? '').startsWith('no target')) missing.push(f.RoomTo ?? 'no target');
+    else if (f.RoomAtr < 0.75) missing.push(`target ${f.RoomTo} only ${f.RoomAtr} ATR away`);
     if (f.RvolBusy === 'YES') missing.push('busier than usual');
     if (up ? n === 'TRENDING_DOWN' : n === 'TRENDING_UP') missing.push(`Nifty 500 pushing ${up ? 'down' : 'up'}`);
   }

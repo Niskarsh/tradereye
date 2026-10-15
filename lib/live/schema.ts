@@ -126,6 +126,7 @@ export const COPILOT_CHECK_COLS = [
   'RvolSameTime', 'RvolBusy',
   'StopIdea', 'AltDirection', 'AltSetup', 'AltStop', 'AltReason',
   'MoveToday', 'SetupByMove', 'CoreMet', 'CoreMissing', 'FitsNow',
+  'Poc2d', 'Vwap',
 ] as const;
 
 /** live-trades.Status values */

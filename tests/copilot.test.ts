@@ -546,9 +546,9 @@ test('core check rules, one by one', () => {
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'TRENDING_UP' }), 'MOMENTUM', 'SHORT').missing.join(), /Nifty 500 moving up/);
   assert.match(coreCheck(f({ ExtAdrPct: -50, VwapSide: 'SELLERS', RoomAtr: 1, NiftyState: 'FLAT' }), 'MOMENTUM', 'SHORT').missing.join(), /flat/);
   // reversal long: down 50% of range, POC 1.5 ATR above, not busy, Nifty not trending down
-  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 1.5, RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
-  assert.match(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 0.4, RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
-  assert.match(coreCheck(f({ ExtAdrPct: -50, PocDistAtr: 1.5, RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
+  assert.deepEqual(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing, []);
+  assert.match(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 0.4, RoomTo: 'POC 256.6', RvolBusy: 'NO', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /only 0.4 ATR/);
+  assert.match(coreCheck(f({ ExtAdrPct: -50, RoomAtr: 1.5, RoomTo: 'VWAP 258.37', RvolBusy: 'YES', NiftyState: 'FLAT' }), 'REVERSAL', 'LONG').missing.join(), /busier/);
 });
 
 test('end to end: the check lists the setups that fit now, without asking Claude', async () => {
@@ -559,4 +559,23 @@ test('end to end: the check lists the setups that fit now, without asking Claude
   // and a suggestion for any of those setups survives the stop check
   const first = r.alternatives[0];
   assert.ok(checkAlternative({ direction: first.direction, setup: first.setup, stop: 1, reason: '' }, r.payload)?.stop === first.facts.StopIdea);
+});
+
+test('AEQUS 15 Oct 09:26: an opening flush is a reversal long aiming at VWAP, not at the POC under it', () => {
+  // previous day traded 262-268; today flushes 264.95 -> 255.5 in the first 10 minutes, then holds 255.8-256.8
+  const prev = day('2026-10-14', (m) => ({ o: 265 + Math.sin(m / 20), h: 266 + Math.sin(m / 20), l: 264 + Math.sin(m / 20), c: 265 + Math.sin(m / 20), v: 1000 }));
+  const flush = day('2026-10-15', (m) => {
+    if (m < 10) { const c = 264.5 - m * 0.95; return { o: c + 0.4, h: m === 0 ? 264.95 : c + 0.5, l: m === 9 ? 255.5 : c - 0.4, c, v: 3000 }; }
+    return { o: 256.2, h: 256.8, l: 255.8, c: 256.35, v: 1500 }; // rvol ~0.09 at 09:26, as on the day
+  }, 12);
+  const niftyFlat = day('2026-10-15', (m) => ({ o: 24000, h: 24004, l: 23996, c: 24000 + (m % 2) }), 12);
+  const daily = dailyFlat(800, 265); daily.h.fill(275); daily.l.fill(257); // ADR ~18, so -8.5 is about -47%
+  const f = computeFacts(base({ date: '2026-10-15', nowMs: IST('2026-10-15', '09:26:40'), price: 256.35, direction: 'LONG', setup: 'REVERSAL', stock1m: merge(...calm, prev, flush), nifty1m: niftyFlat, daily, plannedStop: 255.55 }));
+  assert.ok(f.PocPrice! < 258, `today's POC ${f.PocPrice} sits on the flush`);
+  assert.ok(f.Vwap! > 257, `vwap ${f.Vwap}`);
+  assert.match(f.RoomTo!, /^VWAP|^2-day POC/);
+  assert.ok(f.RoomAtr! >= 0.75, `room ${f.RoomAtr} ATR to ${f.RoomTo}`);
+  assert.equal(f.SetupByMove, 'REVERSAL');
+  assert.ok(f.RvolDay! < 0.1, `rvol ${f.RvolDay}`);
+  assert.equal(f.CoreMet, 'YES', f.CoreMissing);
 });

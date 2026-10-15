@@ -131,7 +131,8 @@ export function FactsCard({ c, onUseStop, onTryAlt }: { c: CheckResp; onUseStop?
         <Row label="VWAP control" value={f.VwapSide ? `${f.VwapSide.toLowerCase()} · ${fmt(f.VwapHeldMin)} min` : '–'} />
         <Row label="vs Nifty (day / last 2 candles)" value={`${signed(f.RsVsNiftyPct, 2, '%')} / ${signed(f.Rs20mPct, 2, '%')}`} />
         <Row label="Extension from open" value={f.ExtAdrPct !== undefined ? `${signed(f.ExtAdrPct, 0, '%')} of ADR` : '–'} />
-        <Row label="POC" value={f.PocPrice !== undefined ? `${fmt(f.PocPrice)} (${fmt(f.PocDistAtr)} ATR)` : '–'} hint="approx." />
+        <Row label="POC today / 2-day" value={`${fmt(f.PocPrice)} / ${fmt(f.Poc2d)}`} hint="approx." />
+        <Row label="VWAP" value={fmt(f.Vwap)} />
         <Row label="Pullback no." value={fmt(f.PullbackNo)} hint="10m candles" />
         <Row label="Volume trend / push÷pull" hint="10m" value={`${f.VolTrend?.toLowerCase() ?? '–'} / ${fmt(f.PushVsPullVol)}`} />
         <Row label="Climax / failed break" value={`${f.Climax || '–'} / ${f.FailedBreak || '–'}`} />
