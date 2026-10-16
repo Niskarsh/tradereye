@@ -118,3 +118,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
   @apply bg-brand-bg text-brand-text selection:bg-brand-accent selection:text-brand-bg font-sans antialiased;
 }
+
+/* loading bars: a sliding stripe when the size of the job is unknown */
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+@utility progress-indet {
+  animation: progress-slide 1.1s ease-in-out infinite;
+}

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import LivePnl from './livePnl';
 import { TradeReview } from '@/components/journal/TradeReview';
+import { TradeBook } from '@/components/journal/TradeBook';
 import { useAuth } from '@/context/AuthContext';
 
 // --- Functional Helpers ---
@@ -495,6 +496,15 @@ export default function Journal() {
                                         setAnalyticsData(updated);
                                         persistData(updated);
                                     }}
+                                />
+
+                                {/* ORDER BOOK (if the stock was recorded that day): entries / exits marked */}
+                                <TradeBook
+                                    symbol={group.trades[0].Symbol}
+                                    date={selectedDateState}
+                                    direction={group.direction}
+                                    token={token}
+                                    fills={group.trades.map(t => ({ time: t['Time (IST)'] ?? '', side: t.OrderType ?? '', qty: Number(t.Qty) || 0, price: Number(String(t.Price).replace(/,/g, '')) || 0 }))}
                                 />
 
                                 {/* SECTION 2: EXPANDED JOURNAL SPACE */}
