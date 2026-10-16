@@ -91,3 +91,14 @@ test('screenshot reply -> unique tickers', () => {
   assert.deepEqual(cleanSymbols('{"symbols": ["TARIL", "hindpetro", "NSE:LTF", "TARIL"]}'), ['TARIL', 'HINDPETRO', 'LTF']);
   assert.deepEqual(cleanSymbols('Symbols: TARIL, LTF'), ['TARIL', 'LTF']);
 });
+
+test('bias: absorption first, then tape + book near price', () => {
+  const b = new BookModel(); let t = T('11:00:00');
+  b.onDepth({ securityId: '1', side: 'BID', levels: L([[258, 900], [257.95, 800], [257.9, 700]]) }, t);
+  b.onDepth({ securityId: '1', side: 'ASK', levels: L([[258.05, 100], [258.1, 120], [258.15, 90]]) }, t);
+  b.onQuote({ securityId: '1', ltp: 258.05, ltq: 1, ltt: 0, volume: 1000, totalBuy: 0, totalSell: 0, dayHigh: 0, dayLow: 0 }, t);
+  let v = 1000;
+  for (let i = 0; i < 3; i++) b.onQuote({ securityId: '1', ltp: 258.05 + i * 0.05, ltq: 1, ltt: 0, volume: (v += 300), totalBuy: 0, totalSell: 0, dayHigh: 0, dayLow: 0 }, t += 5000);
+  assert.equal(b.bias(t).side, 'UP');
+  assert.match(b.bias(t).why, /book near price/);
+});
