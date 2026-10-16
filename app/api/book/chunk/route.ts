@@ -19,7 +19,9 @@ export async function GET(req: Request) {
     return new Response(bytes as BodyInit, { headers: { 'Content-Type': 'application/gzip', 'Cache-Control': 'no-store' } });
   } catch (e) {
     const name = (e as { name?: string }).name ?? '';
-    if (name === 'AccessDenied') return NextResponse.json({ error: 'S3_ACCESS_DENIED', message: 'The AWS key can upload but not read order-book files: allow s3:GetObject on order-book/*.' }, { status: 403 });
+    // Without s3:ListBucket, S3 answers AccessDenied (not NoSuchKey) for a file that does not exist, e.g. a
+    // 10-minute slot that was never recorded. The key can read (s3:GetObject), so treat it as "not recorded".
+    if (name === 'AccessDenied') return NextResponse.json({ error: 'NOT_FOUND', note: 'missing (or not readable)' }, { status: 404 });
     return NextResponse.json({ error: 'S3_ERROR', message: (e as Error).message }, { status: 502 });
   }
 }
