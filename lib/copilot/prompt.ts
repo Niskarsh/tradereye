@@ -5,7 +5,7 @@ import type { Behaviour } from './behaviour';
 import type { Facts, ManageFacts } from './features';
 
 /** Stored on every check row, so verdicts from different prompt versions are never mixed up. */
-export const PROMPT_VERSION = 'copilot-v3.0';
+export const PROMPT_VERSION = 'copilot-v3.1';
 
 export const SYSTEM_PROMPT = `You are the trading co-pilot inside tradereye, the journal app of Nik, a discretionary intraday trader on the NSE. He is about to place a trade, or is already in one, and has pressed one button to ask you for a read. He has a few seconds. Your job is to catch what he may be missing in the heat of the moment, using only the data in this message, and to say it so that over time he learns to see these things himself.
 
@@ -34,6 +34,7 @@ HOW TO READ THE REQUEST
 - OVEREXTENSION (he cannot quantify it by eye; the app does): Stretch ranks today's run from the open against this stock's OWN last 20 sessions (StretchRunPct = bigger than that % of recent days) and how far price is from VWAP (StretchVwapAtr). STRETCHED = bigger than 70% of recent days and 0.75+ ATR from VWAP; VERY_STRETCHED = 90% and 1.5+ ATR. Never suggest a FADE reversal unless the stock is STRETCHED the other way; say how stretched in plain words ("today's run is bigger than 9 in 10 recent days").
 - REVERSAL has two styles (ReversalStyle, decided by the app). FADE: entering against a stretched run before it turns, target back at VWAP / POC: the stretch rule applies. RECLAIM: the run against him has already stopped and price (or his pending entry) is back across VWAP, after a run of 25%+ of the daily range: the target is the next level beyond VWAP (RoomTo), the stretch rule does NOT apply, and the case rests on the run having stopped (StockNow not PUSHING), room to RoomTo and Nifty not against him. Say "VWAP reclaim" in plain words. Volume is the weak point of a reclaim: a break back across VWAP on volume below normal (RvolBusy NO, low PushVsPullVol) fails more often; when that is the case, say the break needs volume to be real.
 - PendingEntryType BREAK = his entry is a stop order beyond the price: he only gets in if price breaks through it. That is his confirmation; judge the trade as it will be when that order fills, and say what the break must show (a 10-min close beyond it, volume). PULLBACK = a limit behind price: he wants a better price.
+- NIFTY AND HIS DIRECTION (never get this backwards): Nifty rising helps a LONG and hurts a SHORT; Nifty falling helps a SHORT and hurts a LONG. NiftyForYou / NiftyForYouText already say what Nifty's last 30 minutes mean for HIS trade: use that wording. NiftyVsStock is only about a reversal (Nifty against the stock's own run), never about whether Nifty helps him.
 - Now vs the day (his rule): for both Nifty and the stock, the whole day so far is the reference and the last 30 minutes is what is acting on the next move, so the last 30 minutes weighs more. NiftyRead and StockRead say both in plain words; NiftyLast30Trend and StockNow (PUSHING / STALLED / PULLING_BACK, Stock30mAtr) are the numbers. Read them together:
   - Nifty his way now (last 30 min with him): the market is helping.
   - Nifty flat in the last 30 min: the market has stopped helping; a momentum move now runs on the stock alone. If the stock is still PUSHING with volume, that is a stock leading a quiet market (say so: it can work, but it has no tailwind); if the stock has STALLED too, momentum is fading and a reversal setup may be starting. Momentum entry with Nifty flat in the last 30 min is at best MIXED.
@@ -180,7 +181,8 @@ export function buildMessage(m: MessageInput): string {
   const parts = [
     `Mode ${m.mode} · ${m.time} IST · ${m.direction} · ${m.setup} · ${m.symbol} · price ${m.price} · risk limit ${m.riskInr} INR`,
     ...(m.live === false ? ['TEST READ: the session is closed and this is a practice read as of the close. Judge the setup as if it were live; do not mention the time or that it is late.'] : []),
-    `FACTS ${JSON.stringify(compact(facts as Record<string, unknown>))}`,
+    // NiftyVsStock is the reversal read (Nifty vs the stock's run); for momentum it only confuses the direction
+    `FACTS ${JSON.stringify(compact({ ...(facts as Record<string, unknown>), ...(m.setup === 'REVERSAL' ? {} : { NiftyVsStock: undefined }) }))}`,
   ];
   if (m.manage) { const { missing: mm, ...mf } = m.manage; parts.push(`IN_TRADE ${JSON.stringify(compact(mf as Record<string, unknown>))}`); if (mm.length) missing.push(...mm); }
   parts.push(`FLAGS ${flags.length ? flags.join('; ') : 'none'}`);

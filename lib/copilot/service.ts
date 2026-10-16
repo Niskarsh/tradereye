@@ -323,6 +323,10 @@ export async function marketStrip(deps: Pick<Deps, 'dhan' | 'sheets' | 'now'>) {
   const nifty = await niftyFor(deps.dhan, today, nowMs);
   // evening / weekend / holiday: no candles today, so show the last session in the data
   const sessions = toSessions(nifty);
+  // a weekday morning before the first candles: today, not yesterday (your day, asks and checks start fresh)
+  const p = istParts(nowMs);
+  const preOpen = !sessions.some((x) => x.date === today) && p.weekday >= 1 && p.weekday <= 5 && p.minuteOfDay < 9 * 60 + 20;
+  if (preOpen) return { date: today, live: true, asOf: istTime(nowMs), first5: undefined, nowPct: undefined, last10: undefined, last30: undefined, nowTrend: undefined, state: 'PREOPEN' as const };
   const date = sessions.some((x) => x.date === today) ? today : sessions.at(-1)?.date ?? today;
   const asOfMs = date === today ? nowMs : dateKeyToMs(date) + SESSION_CLOSE_MIN * 60_000;
   const nDay = toSessions(nifty).find((x) => x.date === date);
