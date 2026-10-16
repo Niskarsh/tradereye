@@ -80,7 +80,7 @@ export interface CheckRequest { direction: Direction; setup: Setup; symbol: stri
 
 export interface CheckResult {
   checkId: string; mode: 'ENTRY' | 'MANAGE'; date: string; time: string; live: boolean;
-  symbol: string; direction: Direction; setup: Setup; price: number; priceSource: 'LTP' | 'LAST_CANDLE';
+  symbol: string; securityId: string; direction: Direction; setup: Setup; price: number; priceSource: 'LTP' | 'LAST_CANDLE';
   facts: Facts; manage?: ManageFacts; behaviour: Behaviour; row: CheckRow; payload: string; notes: string[];
   alternatives: Alternative[];
   fitsNow: FitNow[];
@@ -312,7 +312,7 @@ export async function buildCheck(deps: Deps, req: CheckRequest): Promise<CheckRe
   }
   for (const k of Object.keys(row)) if ((row as Record<string, unknown>)[k] === undefined) (row as Record<string, unknown>)[k] = '';
 
-  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives, fitsNow, pending };
+  return { checkId, mode, date: sess.date, time, live: sess.live, symbol, securityId, direction, setup: req.setup, price, priceSource, facts, manage, behaviour, row, payload, notes, alternatives, fitsNow, pending };
 }
 
 /** Today's market strip: Nifty 500 state and your day so far. */

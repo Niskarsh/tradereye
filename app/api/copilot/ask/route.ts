@@ -31,7 +31,10 @@ export async function POST(req: Request) {
     if (askedToday(rows, date) >= s.dailyLimit) {
       return NextResponse.json({ error: 'DAILY_LIMIT', message: `Daily limit of ${s.dailyLimit} asks reached. The Facts card still works.` }, { status: 429 });
     }
-    const payload = recall(checkId)?.payload ?? hit.o.PayloadJson;
+    const stored = recall(checkId)?.payload ?? hit.o.PayloadJson;
+    // the live order book from his screen (BookMap), when it is open
+    const book = typeof b?.book === 'string' && b.book.trim() ? b.book.slice(0, 4000) : '';
+    const payload = stored && book ? `${stored}\n${book}` : stored;
     if (!payload) return NextResponse.json({ error: 'NO_PAYLOAD', message: 'Tap the symbol again.' }, { status: 409 });
 
     const found = { title, rowNumber: hit.rowNumber, headers, o: hit.o };
@@ -44,6 +47,7 @@ export async function POST(req: Request) {
         Watch: r.watch, AltDirection: firstSetup?.direction ?? '', AltSetup: firstSetup?.setup ?? '', AltStop: firstSetup?.stop ?? '', AltReason: firstSetup?.why ?? '',
         Scenarios: r.scenarios.map((x) => `${x.kind}${x.setup ? ` ${x.setup} ${x.direction}` : ' stand aside'}${x.stop ? ` stop ${x.stop}` : ''}${x.target ? ` target ${x.target}` : ''}: ${x.why}${x.trigger ? ` | ${x.trigger}` : ''}`).join(' || ').slice(0, 1500),
         InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '',
+        ...(book ? { BookSummary: book.slice(0, 2000) } : {}),
       });
       return NextResponse.json({ ...r, asksLeft: Math.max(0, s.dailyLimit - askedToday(rows, date) - 1) });
     } catch (e) {

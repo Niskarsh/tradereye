@@ -50,7 +50,8 @@ export async function POST(req: Request) {
 
     const nowIst = { time: istTime(Date.now()) };
     const lastRead = typeof b?.lastRead === 'string' && b.lastRead.trim() ? `\n\nEARLIER ONE-BUTTON READ (on this or older data)\n${b.lastRead.slice(0, 1500)}` : '';
-    const context = `DATA fetched at ${dataTime} IST (time now ${nowIst.time} IST)\n${payload}${lastRead}`;
+    const book = typeof b?.book === 'string' && b.book.trim() ? `\n\n${b.book.slice(0, 4000)}\n(order book as of ${nowIst.time} IST, live from his screen)` : '';
+    const context = `DATA fetched at ${dataTime} IST (time now ${nowIst.time} IST)\n${payload}${lastRead}${book}`;
     const question = turns.at(-1)!.content;
     try {
       const r = await chatClaude(context, turns, { apiKey, model: s.model, usdInr: s.usdInr, thinking: s.thinking });
