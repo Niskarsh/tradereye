@@ -855,3 +855,20 @@ test('reversal style: back above VWAP after a flush is a VWAP reclaim, targeting
   assert.ok(!(f.CoreMissing ?? '').includes('stretch'), f.CoreMissing);
   assert.equal(f.EntryInvalidName, 'a 10-min close back below VWAP');
 });
+
+test('Nifty for your trade: rising helps a long and works against a short, in plain words', () => {
+  const n = day('2026-10-12', (m) => { const c = 24000 + m * 2; return { o: c, h: c + 1, l: c - 1, c }; }, 90);
+  const at = { nifty1m: n, nowMs: IST('2026-10-12', '10:45:20') };
+  const long = computeFacts(base({ ...at, direction: 'LONG' }));
+  const short = computeFacts(base({ ...at, direction: 'SHORT' }));
+  assert.equal(long.NiftyForYou, 'WITH_YOU');
+  assert.match(long.NiftyForYouText ?? '', /rising in the last 30 min: helps your long/);
+  assert.equal(short.NiftyForYou, 'AGAINST_YOU');
+  assert.match(SYSTEM_PROMPT, /Nifty rising helps a LONG and hurts a SHORT/);
+});
+
+test('market strip on a weekday before the first candles shows today, not yesterday', async () => {
+  const { marketStrip } = await import('../lib/copilot/service');
+  const m = await marketStrip({ dhan: fakeDhan(), sheets: new FakeSheets().client(), now: () => IST('2026-10-15', '09:14:00') });
+  assert.deepEqual([m.date, m.state, m.nowTrend], ['2026-10-15', 'PREOPEN', undefined]);
+});

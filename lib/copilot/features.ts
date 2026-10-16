@@ -117,6 +117,11 @@ export interface Facts {
   Stretch?: 'NONE' | 'STRETCHED' | 'VERY_STRETCHED'; StretchDir?: 'UP' | 'DOWN'; StretchRunPct?: number; StretchVwapAtr?: number;
   /** From 09:30: Nifty 500's last 20 minutes relative to the stock's run: still WITH it, turning AGAINST it, or FLAT. */
   Nifty20mPct?: number; NiftyVsStock?: 'WITH_STOCK' | 'AGAINST_STOCK' | 'FLAT';
+  /**
+   * Nifty's last 30 minutes judged against HIS trade (not the stock): rising helps a long and hurts a short.
+   * NiftyForYouText says it in plain words, so it can never be read backwards.
+   */
+  NiftyForYou?: 'WITH_YOU' | 'FLAT' | 'AGAINST_YOU'; NiftyForYouText?: string;
   /** Today's move on the 10-minute chart (from the open, in % of the average daily range): UP / DOWN / FLAT. */
   MoveToday?: 'UP' | 'DOWN' | 'FLAT';
   /** What this trade is by today's move: with it = MOMENTUM, against it = REVERSAL. */
@@ -451,6 +456,18 @@ export function computeFacts(inp: FactsInput): Facts {
     const nRecent = f.NiftyLast30Pct ?? f.Nifty20mPct;
     f.NiftyVsStock = (stockUp ? nRecent >= th : nRecent <= -th) ? 'WITH_STOCK'
       : (stockUp ? nRecent <= -th : nRecent >= th) ? 'AGAINST_STOCK' : 'FLAT';
+  }
+  {
+    const nRecent = f.NiftyLast30Pct ?? f.Nifty20mPct;
+    if (asOfMin >= 9 * 60 + 30 && nRecent !== undefined) {
+      const th = inp.niftyDirPct / 3;
+      const moveWord = nRecent >= th ? 'rising' : nRecent <= -th ? 'falling' : 'flat';
+      const youWay = sign === 1 ? nRecent >= th : nRecent <= -th;
+      const against = sign === 1 ? nRecent <= -th : nRecent >= th;
+      f.NiftyForYou = youWay ? 'WITH_YOU' : against ? 'AGAINST_YOU' : 'FLAT';
+      const side = sign === 1 ? 'long' : 'short';
+      f.NiftyForYouText = `Nifty ${moveWord} in the last ${f.NiftyLast30Pct !== undefined ? 30 : 20} min: ${youWay ? `helps your ${side}` : against ? `works against your ${side}` : 'no help either way'}`;
+    }
   }
 
   // ---- move structure: pullbacks follow the trade for momentum, the stock's own run for reversal

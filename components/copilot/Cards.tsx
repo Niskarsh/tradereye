@@ -12,7 +12,7 @@ const signed = (v: number | undefined, digits = 2, unit = '') => (v === undefine
 
 const STATE_TEXT: Record<string, string> = {
   OPENING: 'Opening (first 5 min)', TRENDING_UP: 'Trending up', TRENDING_DOWN: 'Trending down',
-  FADING_UP: 'Up, fading', FADING_DOWN: 'Down, fading', FLAT: 'Flat', FLIPPED: 'Flipped', UNKNOWN: 'No data',
+  PREOPEN: 'Not open yet', FADING_UP: 'Up, fading', FADING_DOWN: 'Down, fading', FLAT: 'Flat', FLIPPED: 'Flipped', UNKNOWN: 'No data',
 };
 const stateTone = (s: string) => (s.startsWith('TRENDING') ? 'text-data-green' : s === 'FLIPPED' ? 'text-data-red' : s.startsWith('FADING') ? 'text-brand-accent' : 'text-zinc-300');
 
@@ -150,7 +150,8 @@ export function FactsCard({ c, onUseStop, onTryAlt, onRefresh, refreshing }: { c
       <Group title="Market">
         <Row label="Nifty 500 day · last 30m" value={f.NiftyRead ?? `opened ${(STATE_TEXT[f.NiftyState] ?? f.NiftyState).toLowerCase()}`} hint={f.NiftyLast30Pct !== undefined ? `${signed(f.NiftyNowPct, 2, '%')} · ${signed(f.NiftyLast30Pct, 2, '%')}` : 'last 30m counts more'} />
         <Row label="Stock day · last 30m" value={f.StockRead ?? 'from 09:45'} />
-        <Row label="Nifty last 30m vs the stock" value={f.NiftyVsStock ? `${f.NiftyVsStock === 'AGAINST_STOCK' ? 'turning against it' : f.NiftyVsStock === 'WITH_STOCK' ? 'with it' : 'flat'}` : 'from 09:30'} />
+        <Row label="Nifty last 30m for your trade" value={f.NiftyForYouText ? <span className={f.NiftyForYou === 'WITH_YOU' ? 'text-data-green' : f.NiftyForYou === 'AGAINST_YOU' ? 'text-data-red-text' : ''}>{f.NiftyForYouText.replace(/^Nifty /, '')}</span> : 'from 09:30'} />
+        {c.setup === 'REVERSAL' && <Row label="Nifty last 30m vs the stock's run" value={f.NiftyVsStock ? `${f.NiftyVsStock === 'AGAINST_STOCK' ? 'turning against it (supports a reversal)' : f.NiftyVsStock === 'WITH_STOCK' ? 'still with it (not yet)' : 'flat'}` : 'from 09:30'} />}
         <Row label="First 5m / now / last 10m" value={`${signed(f.NiftyFirst5Pct, 2, '%')} / ${signed(f.NiftyNowPct, 2, '%')} / ${signed(f.NiftyLast10Pct, 2, '%')}`} />
       </Group>
 
