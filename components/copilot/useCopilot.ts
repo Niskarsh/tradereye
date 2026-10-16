@@ -51,10 +51,6 @@ export function useCopilot(token: string) {
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const chatKey = useRef('');
-  // the live order book (BookMap) registers a summary here; it goes to Claude with every ask and chat question
-  const bookSource = useRef<(() => string) | undefined>(undefined);
-  const setBookSource = useCallback((fn: (() => string) | undefined) => { bookSource.current = fn; }, []);
-  const book = () => { try { return bookSource.current?.() || undefined; } catch { return undefined; } };
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadMarket = useCallback(async () => {
@@ -90,7 +86,7 @@ export function useCopilot(token: string) {
     if (!token || !target) return;
     setBusy('ask'); setError('');
     try {
-      const r = await postWithToken<ReadResp>('/api/copilot/ask', token, { checkId: target.checkId, date: target.date, book: book() });
+      const r = await postWithToken<ReadResp>('/api/copilot/ask', token, { checkId: target.checkId, date: target.date });
       setRead(r);
       setMarket((m) => (m ? { ...m, asksLeft: r.asksLeft } : m));
       loadMarket();
@@ -143,7 +139,7 @@ export function useCopilot(token: string) {
       }
       const lastRead = read ? `${read.verdict}: ${read.lines.join(' / ')}${read.watch ? ` | Watch: ${read.watch}` : ''}` : '';
       const r = await postWithToken<{ text: string; costInr: number; latencyMs: number; dataTime: string }>('/api/copilot/chat', token,
-        { checkId: check.checkId, date: check.date, turns, lastRead, book: book() });
+        { checkId: check.checkId, date: check.date, turns, lastRead });
       setChat((c) => [...c, { role: 'assistant', content: r.text, meta: `data ${r.dataTime.slice(0, 5)} · ${(r.latencyMs / 1000).toFixed(1)}s · ₹${r.costInr.toFixed(2)}` }]);
     } catch (e) {
       setChat((c) => [...c, { role: 'note', content: `Could not answer: ${(e as Error).message}` }]);
@@ -157,5 +153,5 @@ export function useCopilot(token: string) {
     if (fresh) setChat((c) => [...c, { role: 'note', content: `Fresh Dhan data at ${fresh.time.slice(0, 5)}: price ${fresh.price}` }]);
   }, [check, runCheck]);
 
-  return { setBookSource, askFresh, chat, chatBusy, sendChat, refreshForChat, refreshAndAsk, saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
+  return { askFresh, chat, chatBusy, sendChat, refreshForChat, refreshAndAsk, saveRisk, market, marketErr, direction, setDirection, setup, setSetup, check, read, busy, error, decision, runCheck, ask, decide, reload: loadMarket };
 }
