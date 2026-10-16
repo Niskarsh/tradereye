@@ -83,7 +83,7 @@ export default function CopilotPage() {
 
   return (
     <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-36">
-      <div className="max-w-xl mx-auto px-4 pt-2 space-y-4">
+      <div className="page-shell pt-6 space-y-4">
         <header className="flex items-end justify-between border-b border-zinc-900 pb-3">
           <div>
             <h1 className="text-2xl font-black tracking-tighter">Co-pilot</h1>
@@ -110,6 +110,8 @@ export default function CopilotPage() {
 
         {!token && <TokenBar />}
 
+        <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-6 lg:space-y-0 lg:items-start">
+        <div className="space-y-4">
         <MarketStrip m={c.market} err={c.marketErr} onRefresh={c.reload} />
 
         <div className="grid grid-cols-2 gap-2">
@@ -159,6 +161,9 @@ export default function CopilotPage() {
         </form>
 
         {c.error && <div className="rounded-2xl border border-data-red/40 bg-data-red/10 p-3 text-xs font-bold text-data-red">{c.error}</div>}
+        </div>
+
+        <div className="space-y-4">
 
         {c.read && <VerdictCard r={c.read} decision={c.decision} onDecide={c.decide} showDecision={!held}
           onTryAlt={(a) => { c.setDirection(a.direction); c.setSetup(a.setup); setStop(a.stop !== undefined ? String(a.stop) : ''); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
@@ -171,13 +176,15 @@ export default function CopilotPage() {
           <ChatPanel ref={chatInput} check={c.check} msgs={c.chat} busy={c.chatBusy} fetching={c.busy === 'check'} onSend={c.sendChat}
             onRefresh={() => { const st = parseFloat(stop); c.refreshForChat(held ? undefined : Number.isFinite(st) && st > 0 ? st : undefined); }} />
         )}
+        </div>
+        </div>
 
         <TodayChecks m={c.market} />
       </div>
 
       {c.check && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-900 bg-brand-bg/95 p-3 backdrop-blur">
-          <div className="max-w-xl mx-auto flex gap-2">
+          <div className="page-shell flex gap-2">
             <button onClick={openChat} disabled={c.busy === 'check'} aria-label="Chat with Claude"
               className="flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-2xl border-2 border-brand-accent text-brand-accent text-[9px] font-black uppercase disabled:opacity-40">
               <MessageCircle className="w-5 h-5" />Chat

@@ -28,10 +28,10 @@ export default function Header() {
     return (
         <>
             {/* HEADER NAVIGATION */}
-            <header className="sticky top-0 z-50 bg-brand-bg/50 backdrop-blur-md border-b border-brand-card/40 px-6 py-1 sm:py-2 relative">
-                <div className="max-w-7xl mx-auto flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                        <span className="font-mono text-xl font-bold tracking-tight hidden md:block">
+            <header className="sticky top-0 z-50 bg-brand-bg/50 backdrop-blur-md border-b border-brand-card/40 py-1 sm:py-2 relative">
+                <div className="page-shell flex items-center justify-between gap-4">
+                    <div className="flex shrink-0 items-center space-x-2">
+                        <span className="font-mono text-xl font-bold tracking-tight hidden 2xl:block">
                             CANDLES<span className="text-brand-accent">BEFORE</span>CUBICLES
                         </span>
                         <span className="font-mono text-xl tracking-tight">
@@ -40,9 +40,9 @@ export default function Header() {
                     </div>
 
                     <Disclosure as="nav" className="border-none">
-                        <div className="mx-auto border-none max-w-7xl sm:px-2 sm:px-6 lg:px-8">
+                        <div className="border-none">
                             <div className="relative flex border-none h-16 items-center justify-between">
-                                <div className="inset-y-0 left-0 flex items-center sm:hidden">
+                                <div className="inset-y-0 left-0 flex items-center lg:hidden">
                                     <DisclosureButton className="group relative inline-flex items-center justify-center rounded-md text-gray-400 hover:bg-white/5 hover:text-white focus:outline-2 focus:-outline-offset-1 focus:outline-indigo-500">
                                         <span className="absolute -inset-0.5" />
                                         <span className="sr-only">Open main menu</span>
@@ -50,9 +50,9 @@ export default function Header() {
                                         <XMarkIcon aria-hidden="true" className="hidden size-6 group-data-open:block" />
                                     </DisclosureButton>
                                 </div>
-                                <div className="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
-                                    <div className="hidden sm:ml-6 sm:block">
-                                        <div className="flex space-x-4">
+                                <div className="flex flex-1 items-center justify-center lg:items-stretch lg:justify-end">
+                                    <div className="hidden lg:block">
+                                        <div className="flex gap-1">
                                             {navigation.map((item) => (
                                                 <a
                                                     key={item.name}
@@ -62,7 +62,7 @@ export default function Header() {
                                                     aria-current={isUrl(item.href) ? 'page' : undefined}
                                                     className={classNames(
                                                         isUrl(item.href) ? 'bg-gray-950/50 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white',
-                                                        'rounded-md px-3 py-2 text-sm font-medium',
+                                                        'whitespace-nowrap rounded-md px-2.5 py-2 text-sm font-medium',
                                                     )}
                                                 >
                                                     {item.name}
@@ -77,7 +77,7 @@ export default function Header() {
                         {/* FIXED: The panel handles the absolute boundary, while a child pseudo-background div 
                             replicates the exact glass properties of the header cleanly over the page body.
                         */}
-                        <DisclosurePanel className="sm:hidden absolute top-full left-0 right-0 z-50">
+                        <DisclosurePanel className="lg:hidden absolute top-full left-0 right-0 z-50">
                             {/* Background Layer mimicking the header glass identically */}
                             <div className="absolute inset-0 -z-10 bg-brand-bg/90 backdrop-blur-md border-b border-brand-card/40" />
 

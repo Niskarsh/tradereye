@@ -47,7 +47,7 @@ export default function DhanLogin() {
   const ms = expiresAtMs ? expiresAtMs - Date.now() : undefined;
   return (
     <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-24">
-      <div className="max-w-md mx-auto px-4 pt-6 space-y-6">
+      <div className="page-shell pt-6"><div className="max-w-xl space-y-6">
         <header className="border-b border-zinc-900 pb-4">
           <h1 className="text-2xl font-black tracking-tighter">Dhan login</h1>
           <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">One token for the whole app · kept in this browser</p>
@@ -86,7 +86,7 @@ export default function DhanLogin() {
             <button type="submit" className="rounded-lg bg-zinc-100 px-3 text-[11px] font-black text-black">Save</button>
           </form>
         </details>
-      </div>
+      </div></div>
     </div>
   );
 }

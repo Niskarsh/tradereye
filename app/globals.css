@@ -100,6 +100,15 @@
   --color-orange-50: #FDF1E7; --color-orange-100: #FADCC4; --color-orange-200: #F5C29A; --color-orange-300: #F2AE75; --color-orange-400: #EE9A55; --color-orange-500: #E8873A; --color-orange-600: #C9702C; --color-orange-700: #A35A22; --color-orange-800: #6F3E18; --color-orange-900: #432611; --color-orange-950: #2D1A0C;
 }
 
+/* One page width and gutter for every page (and the nav bar), so all tabs line up. */
+@utility page-shell {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+  @media (width >= 48rem) { padding-inline: 1.5rem; }
+}
+
 /* Base resets & styling matching the brand look */
 body {
   background-color: var(--background);

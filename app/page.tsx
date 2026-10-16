@@ -111,7 +111,7 @@ export default function TraderEye() {
         </div>
       )}
 
-      <div className="max-w-4xl mx-auto px-4 pt-10 space-y-8">
+      <div className="page-shell pt-6 space-y-8">
 
         {/* NEW ANALYTICS SECTION */}
         <TradeAnalytics />
