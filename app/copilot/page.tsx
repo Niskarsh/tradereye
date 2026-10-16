@@ -7,15 +7,13 @@ import { TokenBar } from '@/components/auth/TokenBar';
 import { useCopilot, type Dir, type SetupT } from '@/components/copilot/useCopilot';
 import { FactsCard, MarketStrip, TodayChecks, VerdictCard } from '@/components/copilot/Cards';
 import { ChatPanel } from '@/components/copilot/ChatPanel';
-import { BookMap } from '@/components/copilot/BookMap';
 
 /**
  * Co-pilot: tap direction, setup and a symbol to see the facts (no Claude); press Ask Claude for a read.
  * Claude is only ever called from the Ask button.
  */
 export default function CopilotPage() {
-  const { token, clientId } = useAuth();
-  const [showBook, setShowBook] = useState(true);
+  const { token } = useAuth();
   const c = useCopilot(token);
   const [symbol, setSymbol] = useState('');
   const [stop, setStop] = useState('');
@@ -166,17 +164,6 @@ export default function CopilotPage() {
         </div>
 
         <div className="space-y-4">
-
-        {c.check && (showBook ? (
-          <div className="space-y-1">
-            <BookMap symbol={c.check.symbol} securityId={c.check.securityId} token={token} clientId={clientId}
-              registerSummary={c.setBookSource}
-              onAskLevel={(q) => { openChat(); c.sendChat(q); }} />
-            <button onClick={() => setShowBook(false)} className="text-[10px] text-ink-3 underline decoration-dotted underline-offset-2">hide order book</button>
-          </div>
-        ) : (
-          <button onClick={() => setShowBook(true)} className="w-full rounded-2xl border border-line bg-brand-card p-3 text-left text-[11px] font-bold text-ink-2">Show the live order book for {c.check.symbol}</button>
-        ))}
 
         {c.read && <VerdictCard r={c.read} decision={c.decision} onDecide={c.decide} showDecision={!held}
           onTryAlt={(a) => { c.setDirection(a.direction); c.setSetup(a.setup); setStop(a.stop !== undefined ? String(a.stop) : ''); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
