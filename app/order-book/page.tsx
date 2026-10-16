@@ -194,8 +194,18 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
   api: (path: string, init?: RequestInit) => Promise<Response>;
   onChange: (c: ChartCfg) => void; onClose: () => void; onAddToList: (symbol: string) => void;
 }) {
-  const w = list.find((x) => x.symbol === cfg.symbol);
+  const today = istDate(Date.now());
+  const isLive = !cfg.date || cfg.date === today;
+  // a past recorded day can be opened for any stock, on the list or not (files are found by symbol and date)
+  const listed = list.find((x) => x.symbol === cfg.symbol);
+  const w: WatchItem | undefined = listed ?? (!isLive && /^[A-Z0-9&-]{1,30}$/.test(cfg.symbol) ? { symbol: cfg.symbol, securityId: '' } : undefined);
   const [model, setModel] = useState<BookModel | null>(null);
+  const [days, setDays] = useState<{ date: string; from: string; to: string }[]>([]);
+  useEffect(() => {
+    if (!/^[A-Z0-9&-]{2,30}$/.test(cfg.symbol)) { setDays([]); return; }
+    const id = setTimeout(() => { api(`/api/book/days?symbol=${encodeURIComponent(cfg.symbol)}`).then((r) => r.json()).then((j) => setDays(Array.isArray(j.days) ? j.days : [])).catch(() => setDays([])); }, 300);
+    return () => clearTimeout(id);
+  }, [cfg.symbol, api]);
   // full screen: the whole card (controls, status line, chart, answer) fills the screen; the chart takes the height
   const card = useRef<HTMLElement>(null);
   const [full, setFull] = useState(false);
@@ -208,9 +218,6 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
   const toggleFull = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void card.current?.requestFullscreen?.(); };
   const [loading, setLoading] = useState('');
   const [answer, setAnswer] = useState<{ q: string; text?: string; busy: boolean; err?: string; cost?: number } | null>(null);
-  const today = istDate(Date.now());
-  const isLive = !cfg.date || cfg.date === today;
-
   useEffect(() => {
     let cancelled = false;
     setModel(null); setAnswer(null);
@@ -222,13 +229,13 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
       if (!cancelled) { setModel(m); setLoading(''); }
     })().catch((e) => { if (!cancelled) setLoading(`Could not load: ${(e as Error).message}`); });
     return () => { cancelled = true; };
-  }, [w?.securityId, cfg.date, recording]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [w?.symbol, w?.securityId, cfg.date, recording]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ask = async (q: string) => {
     if (!w) return;
     setAnswer({ q, busy: true });
     try {
-      const r = await api('/api/book/ask', { method: 'POST', body: JSON.stringify({ symbol: w.symbol, question: q, book: model?.summary(model.lastEventAt || Date.now()) }), headers: { 'Content-Type': 'application/json' } });
+      const r = await api('/api/book/ask', { method: 'POST', body: JSON.stringify({ symbol: w.symbol, question: q, book: model?.summary(model.lastEventAt || Date.now()), date: isLive ? undefined : cfg.date }), headers: { 'Content-Type': 'application/json' } });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
       setAnswer({ q, text: j.text, busy: false, cost: j.costInr });
@@ -244,7 +251,13 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
         <input type="date" value={cfg.date || today} max={today} onChange={(e) => onChange({ ...cfg, date: e.target.value === today ? '' : e.target.value })}
           className="h-8 rounded-lg border border-line bg-brand-bg px-2 text-xs text-ink-2 outline-none" />
         <span className="text-[11px] text-ink-3">{!w ? '' : isLive ? (recording ? 'live' : 'saved today (not recording)') : 'recorded day'}{loading ? ` · ${loading}` : ''}</span>
-        {!w && cfg.symbol && <button onClick={() => onAddToList(cfg.symbol)} className="h-8 rounded-lg bg-brand-accent px-3 text-xs font-black text-brand-bg">Add {cfg.symbol} to the list</button>}
+        {days.filter((d) => d.date !== (cfg.date || today)).slice(0, 6).map((d) => (
+          <button key={d.date} onClick={() => onChange({ ...cfg, date: d.date === today ? '' : d.date })} title={`recorded ${d.from}–${d.to}`}
+            className="h-7 rounded-md border border-line-strong px-2 text-[11px] font-bold text-ink-2 hover:border-brand-accent">
+            {new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
+          </button>
+        ))}
+        {!w && cfg.symbol && <button onClick={() => onAddToList(cfg.symbol)} className="h-8 rounded-lg bg-brand-accent px-3 text-xs font-black text-brand-bg">Add {cfg.symbol} to the list (to see it live)</button>}
         <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className="ml-auto rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink">
           {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </button>
