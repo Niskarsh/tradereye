@@ -9,7 +9,8 @@ import type { BookModel, Wall } from '@/lib/book/model';
  *    20-level window its last known size stays drawn, faded, until price shows it again.
  *  - Green / red lines: best bid / best ask. Bubbles: trades (green = buyers lifting the ask, red = sellers hitting
  *    the bid). 10-minute candles on the same clock as his chart. Shaded = not recorded.
- *  - Drag to pan, wheel to zoom time, drag the price scale (or wheel over it) to zoom price, double-click = back to live.
+ *  - Drag to pan; wheel zooms time (Ctrl + wheel: around the pointer); drag / wheel on the price scale zooms price;
+ *    double-click = back to live.
  *  - Crosshair with the exact price on the right and time at the bottom.
  *  - Walls listed beside the price scale at their own height; hovering a wall (row or band) shows its Ask button.
  */
@@ -273,7 +274,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
   useEffect(() => { view.current = { end: null, span: view.current.span }; setFollowing(true); }, [model]);
 
   /* ---- interactions ---- */
-  const local = (e: React.PointerEvent | React.WheelEvent | React.MouseEvent) => { const r = cv.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const local = (e: React.PointerEvent | React.MouseEvent) => { const r = cv.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const onMove = (e: React.PointerEvent) => {
     const p = local(e); mouse.current = p;
     const gm = geom.current, d = drag.current;
@@ -305,23 +306,45 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     drag.current = { x: p.x, y: p.y, end: gm.t1, pLo: gm.pLo, pHi: gm.pHi, axis: p.x >= gm.plotW && p.x < gm.plotW + PRICE_W };
   };
   const onUp = () => { drag.current = null; };
-  const onWheel = (e: React.WheelEvent) => {
-    const p = local(e), gm = geom.current;
-    const f = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+  /**
+   * Mouse wheel, like his TradingView chart:
+   *  - wheel: zoom time (scroll up = zoom in), anchored at the right edge (stays live when following live)
+   *  - Ctrl + wheel: zoom time anchored at the vertical line under the mouse pointer
+   *  - wheel over the price scale: zoom price around the pointer
+   * A native listener (not passive) so the page does not scroll and Ctrl + wheel does not zoom the browser.
+   */
+  const onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const r = cv.current!.getBoundingClientRect();
+    const p = { x: e.clientX - r.left, y: e.clientY - r.top }, gm = geom.current;
+    const f = e.deltaY < 0 ? 1 / 1.15 : 1.15; // up = in
     if (p.x >= gm.plotW) {
       const mid = gm.pHi - (p.y / gm.plotH) * (gm.pHi - gm.pLo);
       view.current = { ...view.current, pLo: mid - (mid - gm.pLo) * f, pHi: mid + (gm.pHi - mid) * f };
     } else {
-      const at = gm.t0 + (p.x / gm.plotW) * (gm.t1 - gm.t0);
       const span = Math.max(60_000, Math.min(400 * 60_000, view.current.span * f));
-      const end = at + (gm.t1 - at) * (span / view.current.span);
-      const following2 = view.current.end === null && f < 1 ? true : view.current.end === null && p.x > gm.plotW * 0.9;
-      view.current = { ...view.current, span, end: following2 ? null : Math.min(end, gm.dataEnd + span * 0.4) };
+      if (e.ctrlKey || e.metaKey) {
+        const at = gm.t0 + (Math.max(0, Math.min(p.x, gm.plotW)) / gm.plotW) * (gm.t1 - gm.t0);
+        const end = Math.min(at + (gm.t1 - at) * (span / view.current.span), gm.dataEnd + span * 0.4);
+        view.current = { ...view.current, span, end };
+        setFollowing(false);
+      } else {
+        // right edge stays where it is (and keeps following live if it was)
+        view.current = { ...view.current, span, end: view.current.end === null ? null : Math.min(gm.t1, gm.dataEnd + span * 0.4) };
+      }
       setSpan(span);
-      if (!following2) setFollowing(false);
     }
     draw();
   };
+  const wheelRef = useRef(onWheel);
+  wheelRef.current = onWheel;
+  useEffect(() => {
+    const c = cv.current;
+    if (!c) return;
+    const h = (e: WheelEvent) => wheelRef.current(e);
+    c.addEventListener('wheel', h, { passive: false });
+    return () => c.removeEventListener('wheel', h);
+  }, []);
   const goLive = () => { view.current = { end: null, span: view.current.span }; setFollowing(true); draw(); };
   const setSpanTo = (ms: number) => { view.current = { ...view.current, span: ms, pLo: undefined, pHi: undefined }; setSpan(ms); draw(); };
 
@@ -349,7 +372,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
         <canvas ref={cv} className="block cursor-crosshair"
           onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={onUp}
           onPointerLeave={() => { mouse.current = null; hover(null); draw(); }}
-          onWheel={onWheel} onDoubleClick={() => { view.current = { end: null, span: view.current.span }; setFollowing(true); draw(); }} />
+          onDoubleClick={() => { view.current = { end: null, span: view.current.span }; setFollowing(true); draw(); }} />
         {rows.map(({ w, y }) => {
           const id = `${w.side}${w.price}`;
           return (
