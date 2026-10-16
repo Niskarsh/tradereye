@@ -47,7 +47,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
   const view = useRef<View>({ end: null, span: 10 * 60_000 });
   const mouse = useRef<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; end: number; pLo: number; pHi: number; axis: boolean } | null>(null);
-  const geom = useRef({ W: 0, H: 0, plotW: 0, plotH: 0, t0: 0, t1: 0, pLo: 0, pHi: 1, panel: 0 });
+  const geom = useRef({ W: 0, H: 0, plotW: 0, plotH: 0, t0: 0, t1: 0, pLo: 0, pHi: 1, panel: 0, dataEnd: 0 });
   const [rows, setRows] = useState<{ w: Wall; y: number }[]>([]);
   const [hoverWall, setHoverWall] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
@@ -75,6 +75,8 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     g.fillStyle = '#0A1118'; g.fillRect(0, 0, W, H);
 
     const latest = model.lastEventAt || Date.now();
+    // the last moment there is data for: nothing is drawn after it (panning into the future shows empty space)
+    const dataEnd = live ? Math.max(latest, Date.now()) : latest;
     const v = view.current;
     const t1 = v.end ?? (live ? Math.max(latest, Date.now()) : latest);
     const t0 = t1 - v.span;
@@ -89,7 +91,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
       const pad = Math.max((hi - lo) * 0.35, tick * 12);
       pLo = lo - pad; pHi = hi + pad;
     }
-    geom.current = { W, H, plotW, plotH, t0, t1, pLo, pHi, panel };
+    geom.current = { W, H, plotW, plotH, t0, t1, pLo, pHi, panel, dataEnd };
     const X = (t: number) => ((t - t0) / (t1 - t0)) * plotW;
     const Y = (p: number) => ((pHi! - p) / (pHi! - pLo!)) * plotH;
     const pxTick = plotH / ((pHi - pLo) / tick);
@@ -101,13 +103,15 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     }
 
     // brightness against a wall-sized level (4x the typical level now): normal levels stay dark, walls glow
+    // (measured at the last data, never at an empty future moment, which made everything look like a wall)
     const nowQ: number[] = [];
-    for (const l of model.levels.values()) if (l.qty > 0 && t1 - l.seenAt < 30_000) nowQ.push(l.qty);
+    for (const l of model.levels.values()) if (l.qty > 0 && dataEnd - l.seenAt < 30_000) nowQ.push(l.qty);
+    if (!nowQ.length) for (const s of model.segments) if ((s.t1 ?? dataEnd) >= t0 && s.t0 <= t1) nowQ.push(s.qty);
     nowQ.sort((a, b) => a - b);
     const ref = Math.max(1, 4 * (nowQ[Math.floor(nowQ.length / 2)] ?? 1));
     g.save(); g.beginPath(); g.rect(0, 0, plotW, plotH); g.clip();
     for (const s of model.segments) {
-      const end = s.t1 ?? t1;
+      const end = Math.min(s.t1 ?? dataEnd, dataEnd);
       if (end < t0 || s.t0 > t1) continue;
       const p = s.p / 100;
       if (p < pLo || p > pHi) continue;
@@ -135,7 +139,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
 
     // 10-minute candles (translucent body + wick)
     for (const k of model.candles(t0, t1)) {
-      const xa = X(k.t0 * 1000), xb = X(k.t0 * 1000 + 600_000);
+      const xa = X(k.t0 * 1000), xb = X(Math.min(k.t0 * 1000 + 600_000, dataEnd));
       if (xb < 0 || xa > plotW) continue;
       const up = k.c >= k.o, cx = (xa + xb) / 2, bw = Math.max(4, (xb - xa) * 0.6);
       g.strokeStyle = up ? 'rgba(29,201,149,0.9)' : 'rgba(240,107,124,0.9)';
@@ -192,12 +196,19 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     }
 
     // live walls: hovered one gets an outline
-    const walls = model.walls(t1);
+    const walls = model.walls(Math.min(t1, dataEnd));
     const hv = hoverRef.current;
     for (const w of walls) {
       if (`${w.side}${w.price}` !== hv) continue;
       g.strokeStyle = '#DFB15B'; g.lineWidth = 1.5; g.setLineDash([4, 3]);
       g.strokeRect(0, Y(w.price) - Math.max(rowH, 6) / 2, plotW, Math.max(rowH, 6)); g.setLineDash([]);
+    }
+    // past the last data: a "now" line, then empty space (no future data, nothing drawn)
+    if (dataEnd < t1 && model.lastEventAt) {
+      const xn = X(dataEnd);
+      g.strokeStyle = 'rgba(223,177,91,0.6)'; g.setLineDash([2, 4]); g.lineWidth = 1;
+      g.beginPath(); g.moveTo(xn, 0); g.lineTo(xn, plotH); g.stroke(); g.setLineDash([]);
+      if (plotW - xn > 60) { g.fillStyle = '#4E5B6B'; g.font = '11px sans-serif'; g.fillText(live ? 'now' : 'end of recording', xn + 6, 14); }
     }
     g.restore();
 
@@ -273,7 +284,9 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
       } else {
         const dt = ((p.x - d.x) / gm.plotW) * view.current.span;
         const dp = ((p.y - d.y) / gm.plotH) * (d.pHi - d.pLo);
-        view.current = { ...view.current, end: d.end - dt, pLo: d.pLo + dp, pHi: d.pHi + dp };
+        // never more than ~40% of the screen past the last data
+        const maxEnd = gm.dataEnd + view.current.span * 0.4;
+        view.current = { ...view.current, end: Math.min(d.end - dt, maxEnd), pLo: d.pLo + dp, pHi: d.pHi + dp };
         setFollowing(false);
       }
     }
@@ -303,7 +316,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
       const span = Math.max(60_000, Math.min(400 * 60_000, view.current.span * f));
       const end = at + (gm.t1 - at) * (span / view.current.span);
       const following2 = view.current.end === null && f < 1 ? true : view.current.end === null && p.x > gm.plotW * 0.9;
-      view.current = { ...view.current, span, end: following2 ? null : end };
+      view.current = { ...view.current, span, end: following2 ? null : Math.min(end, gm.dataEnd + span * 0.4) };
       setSpan(span);
       if (!following2) setFollowing(false);
     }
