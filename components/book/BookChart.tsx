@@ -54,6 +54,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
   const [following, setFollowing] = useState(true);
   const [span, setSpan] = useState(10 * 60_000);
   const [flow, setFlow] = useState<ReturnType<BookModel['flow']> | null>(null);
+  const [bias, setBias] = useState<ReturnType<BookModel['bias']> | null>(null);
   const hoverRef = useRef<string | null>(null);
   hoverRef.current = hoverWall;
   // hovering moves between the band and its label: clear only after a short pause, so the Ask button can be reached
@@ -267,7 +268,9 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
       }
       setRows((old) => (JSON.stringify(old.map((o) => [o.w.price, o.w.qty, o.w.status, Math.round(o.y)])) === JSON.stringify(placed.map((o) => [o.w.price, o.w.qty, o.w.status, Math.round(o.y)])) ? old : placed));
     } else setRows((old) => (old.length ? [] : old));
-    if (live) setFlow(model.flow(t1, 60));
+    // the bias line: at the right edge of the view (live = now), always shown
+    const at = Math.min(t1, dataEnd);
+    if (model.lastEventAt) { setFlow(model.flow(at, 600)); setBias((old) => { const b = model.bias(at); return old && old.label === b.label && old.why === b.why ? old : b; }); }
   }, [model, live, height, compact]);
 
   useEffect(() => { const id = setInterval(draw, 250); draw(); return () => clearInterval(id); }, [draw]);
@@ -353,10 +356,16 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        {live && flow && flow.buy + flow.sell > 0 && (
-          <span className="text-[11px] text-ink-2">Last 1 min: buyers <b className="text-data-green">{fmtQ(flow.buy)}</b> vs sellers <b className="text-data-red-text">{fmtQ(flow.sell)}</b> · price {flow.moveTicks >= 0 ? '+' : ''}{flow.moveTicks} ticks</span>
+        {bias && (
+          <span title={bias.why} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-black ${bias.side === 'UP' ? 'border-data-green/60 bg-data-green/10 text-data-green' : bias.side === 'DOWN' ? 'border-data-red/60 bg-data-red/10 text-data-red-text' : 'border-line-strong text-ink-2'}`}>
+            {bias.side === 'UP' ? '▲' : bias.side === 'DOWN' ? '▼' : '■'} {bias.label}
+            <span className="font-normal text-[11px] text-ink-3">· {bias.why}</span>
+          </span>
         )}
-        {live && flow?.absorption && (
+        {flow && flow.buy + flow.sell > 0 && (
+          <span className="text-[11px] text-ink-2">Last 10 min: buyers <b className="text-data-green">{fmtQ(flow.buy)}</b> vs sellers <b className="text-data-red-text">{fmtQ(flow.sell)}</b> · price {flow.moveTicks >= 0 ? '+' : ''}{flow.moveTicks} ticks</span>
+        )}
+        {flow?.absorption && (
           <span className="rounded-md border border-data-caution/70 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-data-caution">
             {flow.absorption === 'BUYING_ABSORBED' ? 'Buying absorbed: not going up' : 'Selling absorbed: not going down'}
           </span>

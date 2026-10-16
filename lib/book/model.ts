@@ -24,6 +24,13 @@ export interface TradeBucket { t: number; buy: number; sell: number; price: numb
 export interface Quote { t: number; bid?: number; ask?: number; ltp?: number }
 export interface Wall { price: number; side: Side; qty: number; maxQty: number; times: number; ageMin: number; traded: number; refills: number; status: WallStatus; endedAgoSec?: number; endedAt?: number; seenAgoSec: number }
 export interface Flow { sec: number; buy: number; sell: number; moveTicks: number; absorption?: 'BUYING_ABSORBED' | 'SELLING_ABSORBED' }
+/** Who looks in control right now, from the book and the tape (a hint for the eye, never a certainty). */
+export interface Bias {
+  side: 'UP' | 'DOWN' | 'NEUTRAL';
+  label: string;               // e.g. "Buyers in control", "Buying absorbed"
+  why: string;                 // one plain line with the numbers behind it
+  score: number;               // -1 (sellers) .. +1 (buyers)
+}
 export interface Candle { t0: number; o: number; h: number; l: number; c: number }
 export interface Gap { from: number; to: number }
 
@@ -178,11 +185,47 @@ export class BookModel {
     const moveTicks = recent.length ? Math.round(((recent[recent.length - 1].ltp - recent[0].ltp) * 100) / this.tick) : 0;
     const f: Flow = { sec, buy, sell, moveTicks };
     // heavy one-sided aggression and price not moving that way = someone is absorbing it (the fakeout tell)
+    // over longer windows a smaller imbalance already means something (it had to persist for minutes)
+    const ratio = sec >= 300 ? 1.6 : 2;
     if (buy + sell > 0 && recent.length >= 5) {
-      if (buy >= 2 * sell && moveTicks <= 1) f.absorption = 'BUYING_ABSORBED';
-      else if (sell >= 2 * buy && moveTicks >= -1) f.absorption = 'SELLING_ABSORBED';
+      if (buy >= ratio * sell && moveTicks <= 1) f.absorption = 'BUYING_ABSORBED';
+      else if (sell >= ratio * buy && moveTicks >= -1) f.absorption = 'SELLING_ABSORBED';
     }
     return f;
+  }
+
+  /**
+   * The bias line on top of the chart. Absorption wins (the fakeout tell): heavy buying with price not rising means
+   * sellers are defending, and the reverse. Otherwise a score from the last 10 minutes of aggressive buying vs
+   * selling (60%) and the resting book near price, 10 ticks each side (40%), nudged by a wall that is holding right
+   * next to price (support below / resistance above). 10 minutes, not 1: steadier, less noise (his choice).
+   */
+  bias(now: number): Bias {
+    const f1 = this.flow(now, 600), f5 = f1;
+    const fmtQ = (q: number) => (q >= 1000 ? `${(q / 1000).toFixed(1)}k` : String(Math.round(q)));
+    if (f1.absorption === 'BUYING_ABSORBED') return { side: 'DOWN', label: 'Buying absorbed', why: `buyers ${fmtQ(f1.buy)} vs sellers ${fmtQ(f1.sell)} in 10 min, price ${f1.moveTicks >= 0 ? '+' : ''}${f1.moveTicks} ticks: sellers are soaking it up`, score: -0.6 };
+    if (f1.absorption === 'SELLING_ABSORBED') return { side: 'UP', label: 'Selling absorbed', why: `sellers ${fmtQ(f1.sell)} vs buyers ${fmtQ(f1.buy)} in 10 min, price ${f1.moveTicks >= 0 ? '+' : ''}${f1.moveTicks} ticks: buyers are soaking it up`, score: 0.6 };
+    const tape = f5.buy + f5.sell > 0 ? (f5.buy - f5.sell) / (f5.buy + f5.sell) : 0;
+    const ref = this.ltp ?? this.bestBid ?? this.bestAsk;
+    let bidQ = 0, askQ = 0;
+    if (ref !== undefined) {
+      const span = 10 * this.tick;
+      for (const [p, l] of this.levels) {
+        if (l.qty <= 0 || now - l.seenAt > 15_000 || Math.abs(p - ref * 100) > span) continue;
+        if (l.side === 'BID') bidQ += l.qty; else askQ += l.qty;
+      }
+    }
+    const book = bidQ + askQ > 0 ? (bidQ - askQ) / (bidQ + askQ) : 0;
+    let score = 0.6 * tape + 0.4 * book;
+    const near = this.walls(now, 1).filter((w) => w.status === 'HOLDING' && ref !== undefined && Math.abs(w.price - ref) <= 3 * this.tick / 100);
+    let wallNote = '';
+    for (const w of near) { score += w.side === 'BID' ? 0.2 : -0.2; wallNote = `, ${w.side === 'BID' ? 'buy' : 'sell'} wall holding at ${w.price.toFixed(2)}`; }
+    score = Math.max(-1, Math.min(1, score));
+    const why = `10 min: buyers ${fmtQ(f5.buy)} vs sellers ${fmtQ(f5.sell)}; book near price: ${fmtQ(bidQ)} to buy vs ${fmtQ(askQ)} to sell${wallNote}`;
+    if (!f5.buy && !f5.sell && !bidQ && !askQ) return { side: 'NEUTRAL', label: 'No data yet', why: 'waiting for trades and the book', score: 0 };
+    if (score >= 0.25) return { side: 'UP', label: score >= 0.5 ? 'Buyers in control' : 'Buyers leaning', why, score };
+    if (score <= -0.25) return { side: 'DOWN', label: score <= -0.5 ? 'Sellers in control' : 'Sellers leaning', why, score };
+    return { side: 'NEUTRAL', label: 'Balanced', why, score };
   }
 
   /** 10-minute candles from the traded price, on the same clock as his chart (09:15, 09:25, ...). */
@@ -236,7 +279,7 @@ export class BookModel {
       `ORDER_BOOK live (20 levels a side${r.below !== undefined ? `, reaching ${r.below} below and ${r.above ?? '?'} above` : ''}), last ${this.ltp?.toFixed(2)}, bid ${this.bestBid?.toFixed(2)} / ask ${this.bestAsk?.toFixed(2)}`,
       ...(w.length ? w.map(line) : ['no walls (no level 4x the normal size)']),
       ...this.endedWalls(now).slice(-4).map((x) => `${x.side === 'ASK' ? 'sell' : 'buy'} wall ${x.price.toFixed(2)} (max ${fmtQ(x.maxQty)}) was ${x.status} ${Math.round((x.endedAgoSec ?? 0) / 60)} min ago`),
-      fl(this.flow(now, 60)), fl(this.flow(now, 300)),
+      fl(this.flow(now, 60)), fl(this.flow(now, 600)),
     ].join('\n');
   }
 }

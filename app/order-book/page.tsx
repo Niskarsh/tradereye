@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
+import { ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { BookChart } from '@/components/book/BookChart';
@@ -196,6 +196,16 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
 }) {
   const w = list.find((x) => x.symbol === cfg.symbol);
   const [model, setModel] = useState<BookModel | null>(null);
+  // full screen: the whole card (controls, status line, chart, answer) fills the screen; the chart takes the height
+  const card = useRef<HTMLElement>(null);
+  const [full, setFull] = useState(false);
+  const [fullH, setFullH] = useState(700);
+  useEffect(() => {
+    const sync = () => { const on = document.fullscreenElement === card.current; setFull(on); if (on) setFullH(Math.max(320, window.innerHeight - 130)); };
+    document.addEventListener('fullscreenchange', sync); window.addEventListener('resize', sync);
+    return () => { document.removeEventListener('fullscreenchange', sync); window.removeEventListener('resize', sync); };
+  }, []);
+  const toggleFull = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void card.current?.requestFullscreen?.(); };
   const [loading, setLoading] = useState('');
   const [answer, setAnswer] = useState<{ q: string; text?: string; busy: boolean; err?: string; cost?: number } | null>(null);
   const today = istDate(Date.now());
@@ -226,7 +236,7 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
   };
 
   return (
-    <section className="rounded-2xl border border-line bg-brand-card p-3 space-y-2">
+    <section ref={card} className={`border border-line bg-brand-card p-3 space-y-2 ${full ? 'overflow-auto rounded-none' : 'rounded-2xl'}`}>
       <div className="flex flex-wrap items-center gap-2">
         <input list="ob-symbols" value={cfg.symbol} onChange={(e) => onChange({ ...cfg, symbol: e.target.value.toUpperCase() })}
           className="h-8 w-36 rounded-lg border border-line bg-brand-bg px-2 text-sm font-black outline-none focus:border-brand-accent" />
@@ -235,9 +245,12 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
           className="h-8 rounded-lg border border-line bg-brand-bg px-2 text-xs text-ink-2 outline-none" />
         <span className="text-[11px] text-ink-3">{!w ? '' : isLive ? (recording ? 'live' : 'saved today (not recording)') : 'recorded day'}{loading ? ` · ${loading}` : ''}</span>
         {!w && cfg.symbol && <button onClick={() => onAddToList(cfg.symbol)} className="h-8 rounded-lg bg-brand-accent px-3 text-xs font-black text-brand-bg">Add {cfg.symbol} to the list</button>}
-        <button onClick={onClose} aria-label="Close chart" className="ml-auto rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>
+        <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className="ml-auto rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink">
+          {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </button>
+        {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
       </div>
-      {w && model && <BookChart model={model} live={isLive && recording} height={560} onAsk={ask} />}
+      {w && model && <BookChart model={model} live={isLive && recording} height={full ? fullH : 560} onAsk={ask} />}
       {answer && (
         <div className="rounded-xl border border-line bg-brand-bg p-3 text-sm space-y-1">
           <p className="text-[11px] text-ink-3"><Sparkles className="mr-1 inline h-3 w-3 text-brand-accent" />{answer.q}</p>
