@@ -72,3 +72,20 @@ export async function findIndex(sheets: SheetsClient, date: string, symbol: stri
   const o = rows.map((r) => rowToObject(headers, r.cells)).find((x) => x.Date === date && x.Symbol === symbol.toUpperCase());
   return o ? { date, symbol: o.Symbol, securityId: o.SecurityId, folder: o.Folder, from: o.From, to: o.To, slots: (o.Slots ?? '').split(' ').filter(Boolean), walls: o.Walls } : undefined;
 }
+
+/** Days that have a recording for a stock (this month's and last month's index tabs), newest first. */
+export async function recordedDays(sheets: SheetsClient, symbol: string, today: string): Promise<{ date: string; from: string; to: string }[]> {
+  const [y, m] = today.split('-').map(Number);
+  const prev = m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`;
+  const out: { date: string; from: string; to: string }[] = [];
+  for (const d of [today, prev]) {
+    const title = indexTabTitle(d);
+    if (!(await sheets.findTab(title))) continue;
+    const { headers, rows } = await sheets.readAll(title);
+    for (const r of rows) {
+      const o = rowToObject(headers, r.cells);
+      if (o.Symbol === symbol.toUpperCase() && o.Date) out.push({ date: o.Date, from: o.From, to: o.To });
+    }
+  }
+  return [...new Map(out.map((x) => [x.date, x])).values()].sort((a, b) => b.date.localeCompare(a.date));
+}
