@@ -109,7 +109,7 @@ export class Recorder {
     const now = Date.now(), date = istDate(now);
     const m = this.model(w.securityId);
     if (m.lastEventAt) return; // already in memory
-    for (const slot of slotsUpTo(date, now)) {
+    for (const slot of await savedSlots(this.api, w.symbol, date, now)) {
       const r = await this.api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(w.symbol, date, slot))}`);
       if (r.status === 404) continue;
       if (!r.ok) { const j = await r.json().catch(() => ({})); this.set({ error: j.message ?? `S3 read failed (HTTP ${r.status})` }); continue; }
@@ -196,8 +196,8 @@ export class Recorder {
     const date = istDate(Date.now());
     const m = new BookModel();
     const cur = this.bufs.get(w.securityId);
-    for (const slot of slotsUpTo(date, Date.now())) {
-      if (cur && slot === cur.slot) break;
+    for (const slot of await savedSlots(this.api, w.symbol, date, Date.now())) {
+      if (cur && slot >= cur.slot) break;
       const r = await this.api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(w.symbol, date, slot))}`);
       if (r.ok) replayChunk(m, decodeLines(await gunzip(await r.arrayBuffer())), w.securityId);
     }
@@ -264,7 +264,7 @@ export class Recorder {
 /** Load a whole past (or today's, view-only) day for one stock from S3 into a fresh model. */
 export async function loadDay(api: (path: string) => Promise<Response>, w: WatchItem, date: string, onProgress?: (done: number, total: number) => void): Promise<BookModel> {
   const m = new BookModel();
-  const slots = slotsUpTo(date, Math.min(Date.now(), slotStart(date, '1525') + 600_000));
+  const slots = await savedSlots(api, w.symbol, date, Math.min(Date.now(), slotStart(date, '1525') + 600_000));
   let done = 0;
   for (const slot of slots) {
     const r = await api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(w.symbol, date, slot))}`);
@@ -272,4 +272,17 @@ export async function loadDay(api: (path: string) => Promise<Response>, w: Watch
     onProgress?.(++done, slots.length);
   }
   return m;
+}
+
+/**
+ * The slots that were actually saved for a stock-day (one S3 listing), so only real files are fetched: no stream
+ * of "404 not found" for times that were never recorded. Without list permission, falls back to trying each slot.
+ */
+export async function savedSlots(api: (path: string) => Promise<Response>, symbol: string, date: string, until: number): Promise<string[]> {
+  const all = slotsUpTo(date, until);
+  try {
+    const r = await api(`/api/book/list?folder=${encodeURIComponent(dayFolder(symbol, date))}`);
+    if (r.ok) { const j = await r.json(); if (Array.isArray(j.slots)) { const have = new Set<string>(j.slots); return all.filter((s) => have.has(s)); } }
+  } catch { /* fall back */ }
+  return all;
 }

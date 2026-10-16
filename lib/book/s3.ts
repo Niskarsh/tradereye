@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 /** Order-book chunks in the same bucket as the screenshots, under order-book/. Server side only. */
 let client: S3Client | null = null;
@@ -22,4 +22,10 @@ export async function getChunk(key: string): Promise<Uint8Array | undefined> {
     if (name === 'NoSuchKey' || name === 'NotFound') return undefined;
     throw e;
   }
+}
+
+/** The 10-minute slots saved in one stock-day folder ("0915", "0925", ...). Needs s3:ListBucket on order-book/. */
+export async function listSlots(folder: string): Promise<string[]> {
+  const r = await s3().send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: `${folder}/`, MaxKeys: 100 }));
+  return ((r.Contents ?? []) as { Key?: string }[]).map((o) => o.Key?.match(/\/(\d{4})\.gz$/)?.[1]).filter((x): x is string => !!x).sort();
 }
