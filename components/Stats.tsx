@@ -132,7 +132,7 @@ export default function Stats() {
   }, [allTrades, startDate, endDate]);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 md:py-10">
+    <div className="page-shell space-y-8 py-6">
       {/* Header Section */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">

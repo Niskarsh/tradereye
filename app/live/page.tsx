@@ -54,7 +54,7 @@ export default function LivePage() {
 
   return (
     <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-24">
-      <div className="max-w-5xl mx-auto px-4 pt-2 space-y-8">
+      <div className="page-shell pt-6 space-y-8">
         <header className="flex justify-between items-center border-b border-zinc-900 pb-6">
           <div className="space-y-0.5">
             <h1 className="text-2xl font-black tracking-tighter">Live Session</h1>

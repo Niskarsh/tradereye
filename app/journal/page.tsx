@@ -357,7 +357,7 @@ export default function Journal() {
                 </div>
             )}
 
-            <div className="max-w-[1600px] mx-auto p-4 md:p-8 flex flex-col lg:flex-row gap-8">
+            <div className="page-shell py-6 flex flex-col lg:flex-row gap-8">
                 {/* Sidebar */}
                 <aside className="w-full lg:w-[380px] space-y-6 shrink-0">
                     <header className="flex items-center justify-between px-2">

@@ -74,7 +74,7 @@ export default function BackfillPage() {
 
   return (
     <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-24">
-      <div className="max-w-4xl mx-auto px-4 pt-2 space-y-8">
+      <div className="page-shell pt-6 space-y-8">
         <header className="space-y-0.5 border-b border-zinc-900 pb-6">
           <h1 className="text-2xl font-black tracking-tighter">Backfill Market Data</h1>
           <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">Stock: relative volume, ATR, excursions, market context • Nifty 500: first-5-min and at-entry move</p>

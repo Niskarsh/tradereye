@@ -111,7 +111,7 @@ export default function TraderEye() {
         </div>
       )}
 
-      <div className="max-w-4xl mx-auto px-4 pt-2 space-y-8">
+      <div className="page-shell pt-6 space-y-8">
 
       
 
@@ -220,7 +220,7 @@ export default function TraderEye() {
 
       {/* Persistent Sync Action */}
       {trades.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-6 bg-black/80 backdrop-blur-2xl border-t border-zinc-900 md:relative md:bg-transparent md:border-none md:max-w-4xl md:mx-auto md:p-0">
+        <div className="fixed bottom-0 left-0 right-0 p-6 bg-black/80 backdrop-blur-2xl border-t border-zinc-900 md:relative md:bg-transparent md:border-none md:max-w-7xl md:mx-auto md:px-6 md:py-0">
           <Button onClick={() => handleSync('SYNC_DATA')} disabled={syncing || selectedIds.length === 0} className="w-full h-16 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-[0_0_50px_rgba(29,201,149,0.2)]">
             {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 mr-3" />}
             {syncing ? "JOURNALING SESSION..." : `SYNC ${selectedIds.length} EXECUTIONS`}
