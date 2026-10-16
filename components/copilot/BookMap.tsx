@@ -12,7 +12,9 @@ import { DEPTH_URL, FEED_URL, parseDepth, parseFeed, subscribeDepth, subscribeQu
  * Streams straight from Dhan in this browser (20-level depth + live quotes); nothing is stored.
  */
 
-const WINDOWS = [{ label: '5m', sec: 300 }, { label: '15m', sec: 900 }, { label: '30m', sec: 1800 }];
+// how much time fits across the map (not a candle size); 10-minute candles are drawn on top in every view
+const WINDOWS = [{ label: '5m', sec: 300 }, { label: '10m', sec: 600 }, { label: '30m', sec: 1800 }, { label: '60m', sec: 3600 }];
+const CANDLE_SEC = 600;
 const GUTTER = 168;
 const H = 440;
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -45,7 +47,7 @@ export function BookMap({ symbol, securityId, token, clientId, onAskLevel, regis
   const box = useRef<HTMLDivElement>(null);
   const model = useRef(new BookModel());
   const range = useRef<{ lo: number; hi: number } | null>(null);
-  const [win, setWin] = useState(900);
+  const [win, setWin] = useState(600);
   const [status, setStatus] = useState<'connecting' | 'live' | 'no-data' | 'error'>('connecting');
   const [err, setErr] = useState('');
   const [tags, setTags] = useState<{ w: Wall; y: number }[]>([]);
@@ -128,10 +130,10 @@ export function BookMap({ symbol, securityId, token, clientId, onAskLevel, regis
       const rowH = Math.max(1.5, (H / ((r.hi - r.lo) / tick)) * 0.95);
       const pxPerSec = W / win;
 
-      // normalise brightness on the bigger levels in view (log scale, so walls stand out without drowning the rest)
       const sizes = cols.slice(-60).flatMap((x) => x.cells.map((cl) => cl.qty)).sort((a, b) => a - b);
-      const p95 = sizes.length ? sizes[Math.floor(sizes.length * 0.97)] : 1;
-      const norm = (q: number) => Math.log1p(q) / Math.log1p(Math.max(p95, 1));
+      // brightness against a WALL-sized level (4x the typical level): normal levels stay dark, walls glow
+      const med = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 1;
+      const norm = (q: number) => Math.pow(Math.min(1, q / Math.max(4 * med, 1)), 0.8);
 
       // heatmap
       for (const col of cols) {
@@ -159,6 +161,30 @@ export function BookMap({ symbol, securityId, token, clientId, onAskLevel, regis
       };
       line((cl) => cl.bid, 'rgba(29,201,149,0.9)');
       line((cl) => cl.ask, 'rgba(240,107,124,0.9)');
+      // 10-minute candles from the live price (same clock as his 10-minute chart: 09:15, 09:25, ...)
+      const day0 = (t: number) => { const d = new Date((t + 19800) * 1000); return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000) - 19800; };
+      const buckets = new Map<number, { o: number; h: number; l: number; c: number; t0: number }>();
+      for (const col of cols) {
+        if (col.ltp === undefined) continue;
+        const open915 = day0(col.t) + 9 * 3600 + 15 * 60;
+        const start = open915 + Math.floor((col.t - open915) / CANDLE_SEC) * CANDLE_SEC;
+        const k = buckets.get(start);
+        if (!k) buckets.set(start, { o: col.ltp, h: col.ltp, l: col.ltp, c: col.ltp, t0: start });
+        else { k.h = Math.max(k.h, col.ltp); k.l = Math.min(k.l, col.ltp); k.c = col.ltp; }
+      }
+      for (const k of buckets.values()) {
+        const x0 = Math.max(0, W - (nowSec - k.t0) * pxPerSec), x1 = Math.min(W, W - (nowSec - (k.t0 + CANDLE_SEC)) * pxPerSec);
+        if (x1 <= 0) continue;
+        const up = k.c >= k.o;
+        const color = up ? 'rgba(29,201,149,0.95)' : 'rgba(240,107,124,0.95)';
+        const bodyW = Math.max(6, (x1 - x0) * 0.55), cx = (x0 + x1) / 2;
+        g.strokeStyle = color; g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(cx, y(k.h)); g.lineTo(cx, y(k.l)); g.stroke();
+        g.strokeRect(cx - bodyW / 2, Math.min(y(k.o), y(k.c)), bodyW, Math.max(1.5, Math.abs(y(k.o) - y(k.c))));
+        // candle boundary
+        g.strokeStyle = 'rgba(124,136,153,0.25)'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(x0, 0); g.lineTo(x0, H); g.stroke();
+      }
       // traded volume bubbles
       const vols = cols.map((cl) => cl.buy + cl.sell).filter((v) => v > 0).sort((a, b) => a - b);
       const medV = vols.length ? vols[Math.floor(vols.length / 2)] : 1;
@@ -246,7 +272,7 @@ export function BookMap({ symbol, securityId, token, clientId, onAskLevel, regis
         ))}
       </div>
       <p className="text-[10px] text-ink-3">
-        Brighter = more shares waiting at that price. Green / red lines = best bid / ask. Bubbles = trades (green: buyers hitting the ask, red: sellers hitting the bid).
+        Brighter = more shares waiting at that price (dark = normal, glowing = a wall). Candles = 10-minute candles since you opened this page. Green / red lines = best bid / ask. Bubbles = trades (green: buyers hitting the ask, red: sellers hitting the bid).
         Faded = last seen outside the 20-level window.{flow?.reach.below !== undefined ? ` 20 levels reach ₹${flow.reach.below} below and ₹${flow.reach.above ?? '?'} above right now.` : ''}
       </p>
     </div>
