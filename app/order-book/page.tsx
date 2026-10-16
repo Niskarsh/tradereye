@@ -4,6 +4,8 @@ import { ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square,
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { BookChart } from '@/components/book/BookChart';
+import { useFullscreen } from '@/components/book/useFullscreen';
+import { LoadingPanel, ProgressBar } from '@/components/ui/progress';
 import { Recorder, loadDay, type RecInfo } from '@/lib/book/recorder';
 import { BookModel } from '@/lib/book/model';
 import { istDate } from '@/lib/book/record';
@@ -44,6 +46,7 @@ export default function OrderBookPage() {
   const [draft, setDraft] = useState('');
   const [ocr, setOcr] = useState<{ busy: boolean; found?: string[]; rejected?: string[]; err?: string }>({ busy: false });
   const [charts, setCharts] = useState<ChartCfg[]>([]);
+  const [listBusy, setListBusy] = useState(false);
 
   useEffect(() => { rec.current!.onChange = () => setInfo({ ...rec.current!.info }); }, []);
   useEffect(() => { setCharts(loadCharts()); }, []);
@@ -56,17 +59,20 @@ export default function OrderBookPage() {
   }, [token, api]);
 
   const saveList = useCallback(async (symbols: string[]) => {
-    const r = await api('/api/book/watchlist', { method: 'POST', body: JSON.stringify({ symbols }), headers: { 'Content-Type': 'application/json' } });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { setListMsg(j.message ?? 'Could not save the list.'); return; }
-    setList(j.list);
-    setListMsg(j.unknown?.length ? `Not NSE equity symbols, skipped: ${j.unknown.join(', ')}` : j.dropped ? `Only the first 50 are recorded (${j.dropped} left out).` : '');
-    const r0 = rec.current!;
-    if (r0.info.status === 'recording') {
-      const now = new Set((j.list as WatchItem[]).map((w) => w.securityId));
-      for (const w of r0.list) if (!now.has(w.securityId)) await r0.remove(w.securityId);
-      await r0.add(j.list);
-    } else r0.list = j.list;
+    setListBusy(true);
+    try {
+      const r = await api('/api/book/watchlist', { method: 'POST', body: JSON.stringify({ symbols }), headers: { 'Content-Type': 'application/json' } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setListMsg(j.message ?? 'Could not save the list.'); return; }
+      setList(j.list);
+      setListMsg(j.unknown?.length ? `Not NSE equity symbols, skipped: ${j.unknown.join(', ')}` : j.dropped ? `Only the first 50 are recorded (${j.dropped} left out).` : '');
+      const r0 = rec.current!;
+      if (r0.info.status === 'recording') {
+        const now = new Set((j.list as WatchItem[]).map((w) => w.securityId));
+        for (const w of r0.list) if (!now.has(w.securityId)) await r0.remove(w.securityId);
+        await r0.add(j.list);
+      } else r0.list = j.list;
+    } finally { setListBusy(false); }
   }, [api]);
 
   const addSymbols = (syms: string[]) => saveList([...list.map((w) => w.symbol), ...syms.map((s) => s.trim().toUpperCase()).filter(Boolean)]);
@@ -96,7 +102,7 @@ export default function OrderBookPage() {
 
   // "Record live" on a chart: add the stock to the list and make sure recording is running
   const recordLive = async (sym: string) => {
-    await addSymbols([sym]);
+    await saveList([...list.map((w) => w.symbol), sym]);
     const r0 = rec.current!;
     if (r0.info.status !== 'recording' && token && clientId) await r0.start(r0.list, token, clientId);
   };
@@ -133,16 +139,24 @@ export default function OrderBookPage() {
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-ink-3">
               {info.status === 'recording' ? `Recording ${info.stocks} stocks${info.lastSave ? ` · saved ${new Date(info.lastSave).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}` : ''}${info.pending ? ` · ${info.pending} waiting to save` : ''}`
-                : info.status === 'loading' ? 'Loading today from S3…'
+                : info.status === 'loading' ? 'Starting: loading today from S3…'
+                : info.status === 'stopping' ? 'Stopping: saving the last minutes…'
                 : info.status === 'other-tab' ? 'Already recording in another tab' : 'Not recording'}
             </span>
-            {recording
-              ? <button onClick={stop} className="flex h-10 items-center gap-2 rounded-xl bg-data-red px-4 text-sm font-black text-ink"><Square className="h-3.5 w-3.5" />Stop recording</button>
+            {recording || info.status === 'stopping'
+              ? <button onClick={stop} disabled={info.status === 'stopping'} className="flex h-10 items-center gap-2 rounded-xl bg-data-red px-4 text-sm font-black text-ink disabled:opacity-60">
+                  {info.status === 'stopping' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}{info.status === 'stopping' ? 'Stopping…' : 'Stop recording'}
+                </button>
               : <button onClick={start} disabled={!token || !clientId || !list.length || info.status === 'loading'} className="flex h-10 items-center gap-2 rounded-xl bg-brand-accent px-4 text-sm font-black text-brand-bg disabled:opacity-40">
-                  {info.status === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-3.5 w-3.5" />}Start recording
+                  {info.status === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-3.5 w-3.5" />}{info.status === 'loading' ? 'Starting…' : 'Start recording'}
                 </button>}
           </div>
         </header>
+        {info.progress && (
+          <ProgressBar className="rounded-xl border border-line bg-brand-card px-3 py-2"
+            value={info.progress.total ? info.progress.done / info.progress.total : undefined}
+            label={`${info.progress.label}${info.progress.total && info.status === 'loading' ? ` · ${Math.floor(info.progress.done)}/${info.progress.total} stocks` : info.progress.total ? ` · ${info.progress.done}/${info.progress.total} files` : '…'}`} />
+        )}
         {!token && <TokenBar />}
         {info.error && <p className="rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">{info.error}</p>}
 
@@ -150,6 +164,7 @@ export default function OrderBookPage() {
         <section className="rounded-2xl bg-brand-card p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-black uppercase tracking-widest text-ink-3">Recording list ({list.length}/50)</span>
+            {listBusy && <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-accent" />}
             {list.map((w) => (
               <span key={w.securityId} className="flex h-8 items-center gap-1 rounded-lg border border-line-strong pl-3 pr-1 text-xs font-bold">
                 <button onClick={() => addChart(w.symbol)} title="Open a chart">{w.symbol}</button>
@@ -160,7 +175,7 @@ export default function OrderBookPage() {
           <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); const s = draft.split(/[\s,;]+/).filter(Boolean); if (s.length) { void addSymbols(s); setDraft(''); } }}>
             <input value={draft} onChange={(e) => setDraft(e.target.value.toUpperCase())} placeholder="Add symbols: TARIL, HINDPETRO, LTF"
               className="h-10 min-w-0 flex-1 rounded-xl border border-line bg-brand-bg px-3 text-sm font-bold outline-none focus:border-brand-accent" />
-            <button type="submit" className="h-10 rounded-xl bg-ink px-4 text-sm font-black text-brand-bg">Add</button>
+            <button type="submit" disabled={listBusy} className="flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-black text-brand-bg disabled:opacity-60">{listBusy && <Loader2 className="h-4 w-4 animate-spin" />}{listBusy ? 'Saving…' : 'Add'}</button>
             <label className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-line-strong px-3 text-xs font-bold text-ink-2">
               {ocr.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}Screener screenshots
               <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { void readShots([...(e.target.files ?? [])]); e.target.value = ''; }} />
@@ -198,7 +213,7 @@ export default function OrderBookPage() {
 function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToList }: {
   cfg: ChartCfg; list: WatchItem[]; rec: Recorder; recording: boolean;
   api: (path: string, init?: RequestInit) => Promise<Response>;
-  onChange: (c: ChartCfg) => void; onClose: () => void; onAddToList: (symbol: string) => void;
+  onChange: (c: ChartCfg) => void; onClose: () => void; onAddToList: (symbol: string) => Promise<void>;
 }) {
   const today = istDate(Date.now());
   const isLive = !cfg.date || cfg.date === today;
@@ -215,27 +230,21 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
     return () => clearTimeout(id);
   }, [cfg.symbol, api]);
   // full screen: the whole card (controls, status line, chart, answer) fills the screen; the chart takes the height
-  const card = useRef<HTMLElement>(null);
-  const [full, setFull] = useState(false);
-  const [fullH, setFullH] = useState(700);
-  useEffect(() => {
-    const sync = () => { const on = document.fullscreenElement === card.current; setFull(on); if (on) setFullH(Math.max(320, window.innerHeight - 130)); };
-    document.addEventListener('fullscreenchange', sync); window.addEventListener('resize', sync);
-    return () => { document.removeEventListener('fullscreenchange', sync); window.removeEventListener('resize', sync); };
-  }, []);
-  const toggleFull = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void card.current?.requestFullscreen?.(); };
-  const [loading, setLoading] = useState('');
+  const { ref: card, full, height: fullH, toggle: toggleFull } = useFullscreen<HTMLElement>();
+  const [loading, setLoading] = useState<{ label: string; done: number; total: number } | null>(null);
+  const [failed, setFailed] = useState('');
+  const [adding, setAdding] = useState(false);
   const [answer, setAnswer] = useState<{ q: string; text?: string; busy: boolean; err?: string; cost?: number } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setModel(null); setAnswer(null);
-    if (!w) return;
+    setModel(null); setAnswer(null); setFailed('');
+    if (!w) { setLoading(null); return; }
+    const progress = (done: number, total: number) => { if (!cancelled) setLoading({ label: total ? 'Loading from S3' : 'Finding saved data', done, total }); };
+    progress(0, 0);
     (async () => {
-      if (liveNow) { setLoading('Loading today…'); const m = await rec.fullModel(listed!); if (!cancelled) { setModel(m); setLoading(''); } return; }
-      setLoading('Loading from S3…');
-      const m = await loadDay(api, w, cfg.date || today, (d, t) => { if (!cancelled) setLoading(`Loading from S3… ${d}/${t}`); });
-      if (!cancelled) { setModel(m); setLoading(''); }
-    })().catch((e) => { if (!cancelled) setLoading(`Could not load: ${(e as Error).message}`); });
+      const m = liveNow ? await rec.fullModel(listed!, progress) : await loadDay(api, w, cfg.date || today, progress);
+      if (!cancelled) { setModel(m); setLoading(null); }
+    })().catch((e) => { if (!cancelled) { setLoading(null); setFailed(`Could not load: ${(e as Error).message}`); } });
     return () => { cancelled = true; };
   }, [w?.symbol, cfg.date, liveNow]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -258,7 +267,7 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
         <datalist id="ob-symbols">{list.map((x) => <option key={x.securityId} value={x.symbol} />)}</datalist>
         <input type="date" value={cfg.date || today} max={today} onChange={(e) => onChange({ ...cfg, date: e.target.value === today ? '' : e.target.value })}
           className="h-8 rounded-lg border border-line bg-brand-bg px-2 text-xs text-ink-2 outline-none" />
-        <span className="text-[11px] text-ink-3">{!w ? '' : liveNow ? 'live (recording)' : isLive ? 'recorded today' : 'recorded day'}{loading ? ` · ${loading}` : ''}</span>
+        <span className="text-[11px] text-ink-3">{!w ? '' : liveNow ? 'live (recording)' : isLive ? 'recorded today' : 'recorded day'}</span>
         {days.filter((d) => d.date !== (cfg.date || today)).slice(0, 6).map((d) => (
           <button key={d.date} onClick={() => onChange({ ...cfg, date: d.date === today ? '' : d.date })} title={`recorded ${d.from}–${d.to}`}
             className="h-7 rounded-md border border-line-strong px-2 text-[11px] font-bold text-ink-2 hover:border-brand-accent">
@@ -266,8 +275,10 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
           </button>
         ))}
         {w && !listed && (
-          <button onClick={() => onAddToList(cfg.symbol)} title="Adds it to the recording list; it streams live while recording is on"
-            className="h-8 rounded-lg border border-brand-accent/60 px-3 text-xs font-black text-brand-accent hover:bg-brand-accent/10">● Record live</button>
+          <button disabled={adding} onClick={() => { setAdding(true); void onAddToList(cfg.symbol).finally(() => setAdding(false)); }} title="Adds it to the recording list; it streams live while recording is on"
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-brand-accent/60 px-3 text-xs font-black text-brand-accent hover:bg-brand-accent/10 disabled:opacity-60">
+            {adding ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Adding…</> : '● Record live'}
+          </button>
         )}
         <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className="ml-auto rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink">
           {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -275,6 +286,11 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
         {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
       </div>
       {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} onAsk={ask} />}
+      {w && !model && loading && (
+        <LoadingPanel height={full ? fullH : 560} value={loading.total ? loading.done / loading.total : undefined}
+          label={loading.total ? `${loading.label} · ${loading.done}/${loading.total} pieces (10 min each)` : `${loading.label}…`} />
+      )}
+      {failed && <p className="text-xs text-data-red-text">{failed}</p>}
       {answer && (
         <div className="rounded-xl border border-line bg-brand-bg p-3 text-sm space-y-1">
           <p className="text-[11px] text-ink-3"><Sparkles className="mr-1 inline h-3 w-3 text-brand-accent" />{answer.q}</p>

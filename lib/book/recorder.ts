@@ -16,8 +16,10 @@ import type { WatchItem } from './sheet';
  * Only one tab records at a time (a lock in localStorage); other tabs just view.
  */
 
-export type RecStatus = 'idle' | 'loading' | 'recording' | 'other-tab' | 'stopped';
-export interface RecInfo { status: RecStatus; stocks: number; lastSave?: number; pending: number; error?: string; bytesToday: number }
+export type RecStatus = 'idle' | 'loading' | 'recording' | 'stopping' | 'other-tab' | 'stopped';
+/** What a long step is doing right now (shown as a progress bar): done / total, total 0 = size not known yet. */
+export interface RecProgress { label: string; done: number; total: number }
+export interface RecInfo { status: RecStatus; stocks: number; lastSave?: number; pending: number; error?: string; bytesToday: number; progress?: RecProgress }
 
 interface Buf { symbol: string; securityId: string; date: string; slot: string; key: ReturnType<typeof keyframe>; events: Event[]; dirty: boolean; lastDepth: Record<string, string>; lastSeen: Record<string, number> }
 
@@ -60,13 +62,17 @@ export class Recorder {
     this.running = true; this.token = token; this.clientId = clientId; this.list = list.slice(0, 50);
     this.beat();
     this.timers.push(setInterval(() => this.beat(), 5_000));
-    this.set({ status: 'loading', error: undefined });
-    await Promise.all(this.list.map((w) => this.restore(w).catch(() => {})));
+    // progress: each stock counts equally; within a stock, by the share of its saved chunks loaded
+    const share = new Map<string, number>();
+    const report = () => this.set({ progress: { label: "Loading today's saved data", done: [...share.values()].reduce((a, b) => a + b, 0), total: this.list.length } });
+    this.set({ status: 'loading', error: undefined, progress: { label: "Loading today's saved data", done: 0, total: this.list.length } });
+    await Promise.all(this.list.map((w) => this.restore(w, (d, t) => { share.set(w.securityId, t ? d / t : 1); report(); }).catch(() => {}).finally(() => { share.set(w.securityId, 1); report(); })));
     if (!this.running) return;
+    this.set({ progress: { label: 'Connecting to Dhan', done: 0, total: 0 } });
     this.connect();
     this.timers.push(setInterval(() => { void this.saveAll(false); }, SAVE_EVERY_MS));
     window.addEventListener('pagehide', this.onHide);
-    this.set({ status: 'recording' });
+    this.set({ status: 'recording', progress: undefined });
   }
 
   async stop() {
@@ -77,10 +83,12 @@ export class Recorder {
     for (const ws of this.sockets) { try { ws.send(JSON.stringify({ RequestCode: 12 })); } catch { /* closing */ } ws.close(); }
     this.sockets = [];
     window.removeEventListener('pagehide', this.onHide);
-    await this.saveAll(true);
+    this.set({ status: 'stopping', progress: { label: 'Saving to S3', done: 0, total: this.queue.size + this.bufs.size } });
+    await this.saveAll(true, (d, t) => this.set({ progress: { label: 'Saving to S3', done: d, total: t } }));
+    this.set({ progress: { label: 'Updating the index', done: 0, total: 0 } });
     await this.saveIndex();
     this.release();
-    this.set({ status: 'stopped' });
+    this.set({ status: 'stopped', progress: undefined });
   }
 
   /** Add stocks while recording (they start immediately). */
@@ -105,19 +113,17 @@ export class Recorder {
   }
 
   /* ---- S3 restore: today's chunks, so a refresh or another device picks up the morning ---- */
-  private async restore(w: WatchItem) {
+  private async restore(w: WatchItem, onProgress?: Progress) {
     const now = Date.now(), date = istDate(now);
     const m = this.model(w.securityId);
     if (m.lastEventAt) return; // already in memory
-    for (const slot of await savedSlots(this.api, w.symbol, date, now)) {
-      const r = await this.api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(w.symbol, date, slot))}`);
-      if (r.status === 404) continue;
-      if (!r.ok) { const j = await r.json().catch(() => ({})); this.set({ error: j.message ?? `S3 read failed (HTTP ${r.status})` }); continue; }
-      const c = decodeLines(await gunzip(await r.arrayBuffer()));
+    const slots = await savedSlots(this.api, w.symbol, date, now);
+    const err = await loadChunks(this.api, w.symbol, date, slots, (slot, c) => {
       replayChunk(m, c, w.securityId);
       // the current slot keeps growing: continue appending to what is already saved
       if (slot === slotOf(now) && c.key) this.bufs.set(w.securityId, { symbol: w.symbol, securityId: w.securityId, date, slot, key: c.key, events: c.events, dirty: false, lastDepth: {}, lastSeen: {} });
-    }
+    }, onProgress);
+    if (err) this.set({ error: err });
     if (m.lastEventAt && now - m.lastEventAt > 60_000) m.markGap(m.lastEventAt, now);
   }
 
@@ -190,17 +196,14 @@ export class Recorder {
   }
 
   /** A stock's full day for a chart: rebuilt from S3 (earlier chunks) plus the chunk being recorded now. */
-  async fullModel(w: WatchItem): Promise<BookModel> {
+  async fullModel(w: WatchItem, onProgress?: Progress): Promise<BookModel> {
     const live = this.models.get(w.securityId);
     if (live && !live.trimmedBefore) return live;
     const date = istDate(Date.now());
     const m = new BookModel();
     const cur = this.bufs.get(w.securityId);
-    for (const slot of await savedSlots(this.api, w.symbol, date, Date.now())) {
-      if (cur && slot >= cur.slot) break;
-      const r = await this.api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(w.symbol, date, slot))}`);
-      if (r.ok) replayChunk(m, decodeLines(await gunzip(await r.arrayBuffer())), w.securityId);
-    }
+    const slots = (await savedSlots(this.api, w.symbol, date, Date.now())).filter((s) => !cur || s < cur.slot);
+    await loadChunks(this.api, w.symbol, date, slots, (_, c) => replayChunk(m, c, w.securityId), onProgress);
     if (cur) replayChunk(m, { key: cur.key, events: cur.events }, w.securityId);
     this.models.set(w.securityId, m);
     return m;
@@ -227,9 +230,11 @@ export class Recorder {
     }
   }
 
-  async saveAll(final: boolean) {
-    for (const [key, bytes] of [...this.queue]) await this.upload(key, bytes);
-    for (const buf of this.bufs.values()) await this.save(buf, final);
+  async saveAll(final: boolean, onProgress?: Progress) {
+    const jobs = [...[...this.queue].map(([key, bytes]) => () => this.upload(key, bytes)), ...[...this.bufs.values()].map((buf) => () => this.save(buf, final))];
+    let done = 0;
+    onProgress?.(0, jobs.length);
+    await Promise.all(jobs.map((j) => limited(j).finally(() => onProgress?.(++done, jobs.length))));
   }
 
   /** One row per stock per day in the sheet index (batched, every 10 minutes and on stop). */
@@ -261,16 +266,55 @@ export class Recorder {
   };
 }
 
-/** Load a whole past (or today's, view-only) day for one stock from S3 into a fresh model. */
-export async function loadDay(api: (path: string) => Promise<Response>, w: WatchItem, date: string, onProgress?: (done: number, total: number) => void): Promise<BookModel> {
-  const m = new BookModel();
-  const slots = await savedSlots(api, w.symbol, date, Math.min(Date.now(), slotStart(date, '1525') + 600_000));
-  let done = 0;
-  for (const slot of slots) {
-    const r = await api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(w.symbol, date, slot))}`);
-    if (r.ok) replayChunk(m, decodeLines(await gunzip(await r.arrayBuffer())), w.securityId);
+type Api = (path: string, init?: RequestInit) => Promise<Response>;
+/** done / total chunks (total 0 = still finding out which chunks exist). */
+export type Progress = (done: number, total: number) => void;
+
+/* At most 8 S3 downloads / uploads at once across the whole tab (fast, without flooding the browser). */
+const MAX_PARALLEL = 8;
+let running = 0;
+const waiting: (() => void)[] = [];
+async function limited<T>(fn: () => Promise<T>): Promise<T> {
+  while (running >= MAX_PARALLEL) await new Promise<void>((ok) => waiting.push(ok));
+  running++;
+  try { return await fn(); } finally { running--; waiting.shift()?.(); }
+}
+
+/**
+ * Download a stock-day's chunks in parallel and hand them over strictly in time order (the replay needs order).
+ * Returns an error message if any chunk could not be read (missing chunks are fine).
+ */
+export async function loadChunks(api: Api, symbol: string, date: string, slots: string[], onChunk: (slot: string, c: ReturnType<typeof decodeLines>) => void, onProgress?: Progress): Promise<string | undefined> {
+  const got: (ReturnType<typeof decodeLines> | null | undefined)[] = slots.map(() => undefined);
+  let next = 0, done = 0, error: string | undefined;
+  const flush = () => {
+    while (next < slots.length && got[next] !== undefined) {
+      const c = got[next]; got[next] = null;
+      if (c) onChunk(slots[next], c);
+      next++;
+    }
+  };
+  onProgress?.(0, slots.length);
+  await Promise.all(slots.map((slot, i) => limited(async () => {
+    let c: ReturnType<typeof decodeLines> | null = null;
+    try {
+      const r = await api(`/api/book/chunk?key=${encodeURIComponent(chunkKey(symbol, date, slot))}`);
+      if (r.ok) c = decodeLines(await gunzip(await r.arrayBuffer()));
+      else if (r.status !== 404) { const j = await r.json().catch(() => ({})); error = j.message ?? `S3 read failed (HTTP ${r.status})`; }
+    } catch (e) { error = (e as Error).message; }
+    got[i] = c;
+    flush();
     onProgress?.(++done, slots.length);
-  }
+  })));
+  return error;
+}
+
+/** Load a whole past (or today's, view-only) day for one stock from S3 into a fresh model. */
+export async function loadDay(api: Api, w: WatchItem, date: string, onProgress?: Progress): Promise<BookModel> {
+  const m = new BookModel();
+  onProgress?.(0, 0);
+  const slots = await savedSlots(api, w.symbol, date, Math.min(Date.now(), slotStart(date, '1525') + 600_000));
+  await loadChunks(api, w.symbol, date, slots, (_, c) => replayChunk(m, c, w.securityId), onProgress);
   return m;
 }
 
@@ -278,7 +322,7 @@ export async function loadDay(api: (path: string) => Promise<Response>, w: Watch
  * The slots that were actually saved for a stock-day (one S3 listing), so only real files are fetched: no stream
  * of "404 not found" for times that were never recorded. Without list permission, falls back to trying each slot.
  */
-export async function savedSlots(api: (path: string) => Promise<Response>, symbol: string, date: string, until: number): Promise<string[]> {
+export async function savedSlots(api: Api, symbol: string, date: string, until: number): Promise<string[]> {
   const all = slotsUpTo(date, until);
   try {
     const r = await api(`/api/book/list?folder=${encodeURIComponent(dayFolder(symbol, date))}`);

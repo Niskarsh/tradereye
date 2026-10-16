@@ -2,6 +2,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { BookModel, Wall } from '@/lib/book/model';
+import type { TradeMark } from '@/lib/book/marks';
+export type { TradeMark };
 
 /**
  * Bookmap-style chart of one stock's order book.
@@ -10,7 +12,8 @@ import type { BookModel, Wall } from '@/lib/book/model';
  *  - Green / red lines: best bid / best ask. Bubbles: trades (green = buyers lifting the ask, red = sellers hitting
  *    the bid). 10-minute candles on the same clock as his chart. Shaded = not recorded.
  *  - Drag to pan; wheel zooms time (Ctrl + wheel: around the pointer); drag / wheel on the price scale zooms price;
- *    double-click = back to live.
+ *    double-click = back to live (or back to his trade, in the journal).
+ *  - Journal: his entries / adds / exits as arrows with labels, the trade's time shaded, average entry dashed.
  *  - Crosshair with the exact price on the right and time at the bottom.
  *  - Walls listed beside the price scale at their own height; hovering a wall (row or band) shows its Ask button.
  */
@@ -40,19 +43,30 @@ const TIME_STEPS = [10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3
 
 interface View { end: number | null; span: number; pLo?: number; pHi?: number }
 
-export function BookChart({ model, live, height = 520, onAsk, compact = false }: {
+
+/** Window that shows a trade: from a few minutes before the entry to a few minutes after the exit. */
+function focusView(f: { from: number; to: number }): View {
+  const pad = Math.max(3 * 60_000, (f.to - f.from) * 0.4);
+  return { end: f.to + pad, span: Math.min(400 * 60_000, Math.max(5 * 60_000, f.to - f.from + 2 * pad)) };
+}
+
+export function BookChart({ model, live, height = 520, onAsk, compact = false, marks, focus }: {
   model: BookModel; live: boolean; height?: number; onAsk?: (question: string) => void; compact?: boolean;
+  /** his entries / adds / exits, drawn as arrows with labels */
+  marks?: TradeMark[];
+  /** open zoomed on this time window (his trade); a "Trade" button comes back to it */
+  focus?: { from: number; to: number };
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
-  const view = useRef<View>({ end: null, span: 10 * 60_000 });
+  const view = useRef<View>(focus ? focusView(focus) : { end: null, span: 10 * 60_000 });
   const mouse = useRef<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; end: number; pLo: number; pHi: number; axis: boolean } | null>(null);
   const geom = useRef({ W: 0, H: 0, plotW: 0, plotH: 0, t0: 0, t1: 0, pLo: 0, pHi: 1, panel: 0, dataEnd: 0 });
   const [rows, setRows] = useState<{ w: Wall; y: number }[]>([]);
   const [hoverWall, setHoverWall] = useState<string | null>(null);
-  const [following, setFollowing] = useState(true);
-  const [span, setSpan] = useState(10 * 60_000);
+  const [following, setFollowing] = useState(!focus);
+  const [span, setSpan] = useState(view.current.span);
   const [flow, setFlow] = useState<ReturnType<BookModel['flow']> | null>(null);
   const [bias, setBias] = useState<ReturnType<BookModel['bias']> | null>(null);
   const hoverRef = useRef<string | null>(null);
@@ -89,6 +103,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     if (pLo === undefined || pHi === undefined) {
       let lo = Infinity, hi = -Infinity;
       for (const q of model.quotes) if (q.t >= t0 && q.t <= t1) for (const p of [q.bid, q.ask, q.ltp]) if (p !== undefined) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+      for (const mk of marks ?? []) if (mk.t >= t0 && mk.t <= t1) { lo = Math.min(lo, mk.price); hi = Math.max(hi, mk.price); }
       if (!Number.isFinite(lo)) { const ref = model.ltp ?? model.bestBid ?? 0; lo = ref - tick * 10; hi = ref + tick * 10; }
       const pad = Math.max((hi - lo) * 0.35, tick * 12);
       pLo = lo - pad; pHi = hi + pad;
@@ -205,6 +220,40 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
       g.strokeStyle = '#DFB15B'; g.lineWidth = 1.5; g.setLineDash([4, 3]);
       g.strokeRect(0, Y(w.price) - Math.max(rowH, 6) / 2, plotW, Math.max(rowH, 6)); g.setLineDash([]);
     }
+    // his trade: shaded from first entry to last exit, dashed line at the average entry, arrows + labels per order
+    if (marks?.length) {
+      const sorted = [...marks].sort((a, b) => a.t - b.t);
+      const ins = sorted.filter((m) => m.role !== 'EXIT');
+      const last = sorted[sorted.length - 1];
+      const tIn = sorted[0].t, tOut = sorted.some((m) => m.role === 'EXIT') ? last.t : dataEnd;
+      if (tOut >= t0 && tIn <= t1) {
+        g.fillStyle = 'rgba(223,177,91,0.06)';
+        g.fillRect(X(Math.max(tIn, t0)), 0, X(Math.min(tOut, t1)) - X(Math.max(tIn, t0)), plotH);
+        if (ins.length) {
+          const avg = ins.reduce((a, m) => a + m.price * m.qty, 0) / Math.max(1, ins.reduce((a, m) => a + m.qty, 0));
+          g.strokeStyle = 'rgba(223,177,91,0.75)'; g.setLineDash([6, 4]); g.lineWidth = 1;
+          g.beginPath(); g.moveTo(X(Math.max(tIn, t0)), Y(avg)); g.lineTo(X(Math.min(tOut, t1)), Y(avg)); g.stroke(); g.setLineDash([]);
+        }
+      }
+      for (const m of sorted) {
+        if (m.t < t0 || m.t > t1) continue;
+        const x = X(m.t), y = Y(m.price), buy = m.side === 'BUY';
+        g.strokeStyle = 'rgba(232,234,240,0.35)'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(x, 0); g.lineTo(x, plotH); g.stroke();
+        // buy: arrow under the price pointing up; sell: above pointing down
+        const tip = buy ? y + 2 : y - 2, base = buy ? y + 16 : y - 16;
+        g.fillStyle = buy ? '#1DC995' : '#F06B7C'; g.strokeStyle = '#0A1118'; g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(x, tip); g.lineTo(x - 7, base); g.lineTo(x + 7, base); g.closePath(); g.fill(); g.stroke();
+        const text = `${m.role === 'ENTRY' ? 'Entry' : m.role === 'ADD' ? 'Add' : 'Exit'} ${buy ? 'buy' : 'sell'} ${m.qty} @ ${m.price.toFixed(2)} · ${hhmm(m.t, true)}`;
+        g.font = 'bold 11px sans-serif';
+        const tw = g.measureText(text).width + 12;
+        const bx = Math.min(Math.max(2, x - tw / 2), plotW - tw - 2), by = buy ? base + 3 : base - 21;
+        g.fillStyle = buy ? 'rgba(10,40,32,0.95)' : 'rgba(48,14,20,0.95)'; g.fillRect(bx, by, tw, 18);
+        g.strokeStyle = buy ? '#1DC995' : '#F06B7C'; g.lineWidth = 1; g.strokeRect(bx + 0.5, by + 0.5, tw - 1, 17);
+        g.fillStyle = '#E8EAF0'; g.fillText(text, bx + 6, by + 13);
+      }
+    }
+
     // past the last data: a "now" line, then empty space (no future data, nothing drawn)
     if (dataEnd < t1 && model.lastEventAt) {
       const xn = X(dataEnd);
@@ -271,10 +320,14 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     // the bias line: at the right edge of the view (live = now), always shown
     const at = Math.min(t1, dataEnd);
     if (model.lastEventAt) { setFlow(model.flow(at, 600)); setBias((old) => { const b = model.bias(at); return old && old.label === b.label && old.why === b.why ? old : b; }); }
-  }, [model, live, height, compact]);
+  }, [model, live, height, compact, marks]);
 
   useEffect(() => { const id = setInterval(draw, 250); draw(); return () => clearInterval(id); }, [draw]);
-  useEffect(() => { view.current = { end: null, span: view.current.span }; setFollowing(true); }, [model]);
+  const focusKey = focus ? `${focus.from}-${focus.to}` : '';
+  useEffect(() => {
+    if (focus) { view.current = focusView(focus); setSpan(view.current.span); setFollowing(false); }
+    else { view.current = { end: null, span: view.current.span }; setFollowing(true); }
+  }, [model, focusKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- interactions ---- */
   const local = (e: React.PointerEvent | React.MouseEvent) => { const r = cv.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
@@ -348,6 +401,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
     c.addEventListener('wheel', h, { passive: false });
     return () => c.removeEventListener('wheel', h);
   }, []);
+  const goTrade = () => { if (!focus) return; view.current = focusView(focus); setSpan(view.current.span); setFollowing(false); draw(); };
   const goLive = () => { view.current = { end: null, span: view.current.span }; setFollowing(true); draw(); };
   const setSpanTo = (ms: number) => { view.current = { ...view.current, span: ms, pLo: undefined, pHi: undefined }; setSpan(ms); draw(); };
 
@@ -374,6 +428,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
           {SPANS.map((s) => (
             <button key={s.label} onClick={() => setSpanTo(s.ms)} className={`h-7 rounded-md px-2 text-[11px] font-bold ${Math.abs(span - s.ms) < 1000 ? 'bg-brand-accent text-brand-bg' : 'border border-line-strong text-ink-2'}`}>{s.label}</button>
           ))}
+          {focus && <button onClick={goTrade} title="Back to your trade" className="h-7 rounded-md border border-brand-accent/70 px-2 text-[11px] font-black text-brand-accent">Trade</button>}
           {live && !following && <button onClick={goLive} className="h-7 rounded-md bg-data-green px-2 text-[11px] font-black text-brand-bg">Live ▸</button>}
         </span>
       </div>
@@ -381,7 +436,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false }:
         <canvas ref={cv} className="block cursor-crosshair"
           onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={onUp}
           onPointerLeave={() => { mouse.current = null; hover(null); draw(); }}
-          onDoubleClick={() => { view.current = { end: null, span: view.current.span }; setFollowing(true); draw(); }} />
+          onDoubleClick={() => { if (focus && !live) { goTrade(); return; } view.current = { end: null, span: view.current.span }; setFollowing(true); draw(); }} />
         {rows.map(({ w, y }) => {
           const id = `${w.side}${w.price}`;
           return (
