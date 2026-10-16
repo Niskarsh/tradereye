@@ -11,6 +11,7 @@ export default function Header() {
         { name: 'Fetch Today\'s Trades', href: '/sync-trades', current: false },
         { name: 'Live', href: '/live', current: false },
         { name: 'Co-pilot', href: '/copilot', current: false },
+        { name: 'Order Book', href: '/order-book', current: false },
         { name: 'Backfill', href: '/backfill', current: false },
         { name: 'Dhan login', href: '/dhan-login', current: false },
         { name: 'Youtube', href: 'https://www.youtube.com/@CandlesBeforeCubicles?sub_confirmation=1', current: false },
