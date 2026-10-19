@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
+import { ownerRequired } from '@/lib/auth/owner';
 
 export async function POST(request: Request) {
+  const denied = ownerRequired(request); // signed-in owner only (second lock behind proxy.ts)
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { trades, direction, pnl, type } = body;

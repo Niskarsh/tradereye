@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { decodeJwt } from '@/lib/live/time';
+import { ownerRequired } from '@/lib/auth/owner';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,8 @@ export const dynamic = 'force-dynamic';
  * (DHAN_CLIENT_ID, DHAN_MPIN) and are never sent to the browser or logged. Body: { totp: "123456" }.
  */
 export async function POST(req: Request) {
+  const denied = ownerRequired(req); // signed-in owner only (second lock behind proxy.ts)
+  if (denied) return denied;
   const clientId = (process.env.DHAN_CLIENT_ID || process.env.ALLOWED_DHAN_CLIENT_ID || '').trim();
   const pin = (process.env.DHAN_MPIN || '').trim();
   if (!clientId || !pin) {

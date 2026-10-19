@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { DhanClient, DhanError, clientIdFromToken } from '../dhan';
 import { SheetsApiError } from '../sheetsApi';
+import { ownerRequired } from '../auth/owner';
 
 /** Reads the Dhan token from the request. It is sent in a header, never in a URL, and never logged. */
 export function tokenFrom(req: Request): string {
@@ -16,6 +17,9 @@ export type Guarded = { ok: true; token: string; clientId?: string; dhan: DhanCl
  * (Dhan itself still validates the token on every call; this is an extra lock, not a replacement.)
  */
 export function guard(req: Request): Guarded {
+  // the owner's Google session first (second lock behind proxy.ts): no session, no Dhan, sheet or AI access
+  const denied = ownerRequired(req);
+  if (denied) return { ok: false, res: denied };
   const token = tokenFrom(req);
   if (!token) return { ok: false, res: NextResponse.json({ error: 'TOKEN_MISSING', message: 'Paste your Dhan access token first.' }, { status: 401 }) };
   const clientId = clientIdFromToken(token);
