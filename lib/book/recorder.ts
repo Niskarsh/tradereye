@@ -1,5 +1,5 @@
 import { BookModel } from './model';
-import { DEPTH_URL, FEED_URL, parseDepth, parseFeed } from './feed';
+import { DEPTH_URL, FEED_URL, disconnectCode, disconnectReason, parseDepth, parseFeed } from './feed';
 import {
   applyEvent, chunkKey, dayFolder, decodeLines, depthEvent, encodeLines, gunzip, gzip, istDate, keyframe, quoteEvent, replayChunk,
   slotOf, slotStart, slotsUpTo, type Event,
@@ -39,6 +39,9 @@ export class Recorder {
   /** frozen books (Dhan resending one stock's same snapshot): per stock, since when, and how often we reconnected */
   stale = new Map<string, { since: number; tries: number; gaveUp: boolean }>();
   private lastDepthReconnect = 0;
+  /** when each feed last sent anything, and when the watchdog last restarted it */
+  private lastMsg = { depth: 0, feed: 0 };
+  private lastKick = { depth: 0, feed: 0 };
   private bufs = new Map<string, Buf>();
   private queue = new Map<string, Uint8Array>(); // failed saves, by key
   private sockets: WebSocket[] = [];
@@ -78,6 +81,7 @@ export class Recorder {
     this.set({ progress: { label: 'Connecting to Dhan', done: 0, total: 0 } });
     this.connect();
     this.timers.push(setInterval(() => { void this.saveAll(false); }, SAVE_EVERY_MS));
+    this.timers.push(setInterval(() => this.watchdog(), 10_000));
     window.addEventListener('pagehide', this.onHide);
     this.set({ status: 'recording', progress: undefined });
   }
@@ -139,10 +143,17 @@ export class Recorder {
     const qs = `token=${encodeURIComponent(this.token)}&clientId=${encodeURIComponent(this.clientId)}&authType=2`;
     const open = (url: string, code: 17 | 23, onMsg: (b: ArrayBuffer) => void, attempt = 0) => {
       if (!this.running) return;
+      const kind = code === 23 ? 'depth' : 'feed';
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => { attempt = 0; this.sendSubs(ws, code, this.list); };
-      ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) onMsg(e.data); };
+      ws.onopen = () => { attempt = 0; this.lastMsg[kind] = Date.now(); this.sendSubs(ws, code, this.list); };
+      ws.onmessage = (e) => {
+        if (!(e.data instanceof ArrayBuffer)) return;
+        this.lastMsg[kind] = Date.now();
+        const dc = disconnectCode(e.data, kind);
+        if (dc !== undefined) { this.set({ error: `${kind === 'depth' ? 'Order book' : 'Trade / price'} feed: ${disconnectReason(dc)}. Reconnecting.` }); return; }
+        onMsg(e.data);
+      };
       ws.onclose = () => {
         this.sockets = this.sockets.filter((s) => s !== ws);
         if (this.running) setTimeout(() => open(url, code, onMsg, attempt + 1), Math.min(30_000, 1000 * 2 ** attempt));
@@ -150,8 +161,28 @@ export class Recorder {
       ws.onerror = () => this.set({ error: 'Dhan feed connection dropped (reconnecting).' });
       this.sockets.push(ws);
     };
+    this.lastMsg = { depth: Date.now(), feed: Date.now() };
     open(`${DEPTH_URL}?${qs}`, 23, (b) => { const t = Date.now(); for (const d of parseDepth(b)) this.onEvent(d.securityId, depthEvent(d, t)); });
     open(`${FEED_URL}?version=2&${qs}`, 17, (b) => { const t = Date.now(); for (const q of parseFeed(b)) this.onEvent(q.securityId, quoteEvent(q, t)); });
+  }
+
+  /**
+   * Watchdog (every 10 s): a feed that has sent nothing for 30 s while the other one keeps flowing is stuck (open
+   * but silent, or dropped without coming back). Restart just that one, at most once a minute. Both silent =
+   * market closed or the network is down: nothing to fix here.
+   */
+  private watchdog() {
+    const now = Date.now();
+    for (const [kind, other] of [['feed', 'depth'], ['depth', 'feed']] as const) {
+      if (now - this.lastMsg[kind] < 30_000 || now - this.lastMsg[other] > 10_000 || now - this.lastKick[kind] < 60_000) continue;
+      this.lastKick[kind] = now;
+      const silent = Math.round((now - this.lastMsg[kind]) / 1000);
+      this.set({ error: `${kind === 'feed' ? 'Trade / price feed (bubbles, last price)' : 'Order book feed'} silent for ${silent} s while the other kept updating: reconnecting it.` });
+      const isDepth = kind === 'depth';
+      const ws = this.sockets.find((s) => s.url.includes('twentydepth') === isDepth);
+      // its onclose opens a fresh one; no socket at all means a reconnect is already scheduled (never open a second)
+      if (ws) { try { ws.close(); } catch { /* closing */ } }
+    }
   }
 
   private sendSubs(ws: WebSocket, code: 17 | 23, items: WatchItem[]) {

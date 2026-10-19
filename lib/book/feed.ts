@@ -65,3 +65,28 @@ export const subscribeDepth = (securityId: string, segment = 'NSE_EQ') =>
   JSON.stringify({ RequestCode: 23, InstrumentCount: 1, InstrumentList: [{ ExchangeSegment: segment, SecurityId: securityId }] });
 export const subscribeQuote = (securityId: string, segment = 'NSE_EQ') =>
   JSON.stringify({ RequestCode: 17, InstrumentCount: 1, InstrumentList: [{ ExchangeSegment: segment, SecurityId: securityId }] });
+
+/**
+ * Dhan's "you are disconnected" packet (feed response code 50): the reason code sits right after the header
+ * (8-byte header on the live market feed, 12-byte header on the depth feed). Undefined if this is not one.
+ */
+export function disconnectCode(buf: ArrayBuffer, kind: 'feed' | 'depth'): number | undefined {
+  const dv = new DataView(buf);
+  const hdr = kind === 'feed' ? 8 : 12;
+  const codeAt = kind === 'feed' ? 0 : 2;
+  if (buf.byteLength < hdr + 2 || dv.getUint8(codeAt) !== 50) return undefined;
+  return dv.getInt16(hdr, true);
+}
+
+/** Dhan's disconnect reasons in plain words (Annexure of the DhanHQ docs). */
+export function disconnectReason(code: number): string {
+  switch (code) {
+    case 805: return 'too many Dhan data connections (Dhan allows 5 per account; it drops the oldest). Close other apps or tabs using the Dhan API';
+    case 806: return 'the Dhan Data API plan is not active on this account';
+    case 807: return 'the Dhan access token has expired: generate a new one';
+    case 808: return 'invalid client ID';
+    case 809: return 'Dhan authentication failed: check the token';
+    default: return `Dhan disconnected it (code ${code})`;
+  }
+}
+
