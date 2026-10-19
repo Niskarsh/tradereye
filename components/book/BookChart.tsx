@@ -9,7 +9,10 @@ export type { TradeMark };
  * Bookmap-style chart of one stock's order book.
  *  - Heatmap: shares waiting at each price over time (dark = normal, glowing = a wall). After a price leaves the
  *    20-level window its last known size stays drawn, faded, until price shows it again.
- *  - Green / red lines: best bid / best ask. Bubbles: trades (green = buyers lifting the ask, red = sellers hitting
+ *  - Green / red lines: best bid / best ask over time (solid = what happened). The CURRENT bid, ask and last price
+ *    continue as dashed lines to the right edge, so the live values are easy to follow (live view keeps a little
+ *    empty space on the right for them). Last price is a dashed gold line across the whole chart.
+ *  - Bubbles: trades (green = buyers lifting the ask, red = sellers hitting
  *    the bid). 10-minute candles on the same clock as his chart. Shaded = not recorded.
  *  - Drag to pan; wheel zooms time (Ctrl + wheel: around the pointer); drag / wheel on the price scale zooms price;
  *    double-click = back to live (or back to his trade, in the journal).
@@ -40,6 +43,11 @@ function heat(t: number): string {
 const fmtQ = (q: number) => (q >= 1000 ? `${(q / 1000).toFixed(1)}k` : String(Math.round(q)));
 const hhmm = (t: number, sec = false) => new Date(t + 19800_000).toISOString().slice(11, sec ? 19 : 16);
 const TIME_STEPS = [10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3];
+/** Live view: share of the width left empty on the right, where the current bid / ask / price run dashed. */
+const LIVE_PAD = 0.08;
+
+/** A reversal alert drawn on the chart: where and when it fired. */
+export interface AlertMark { t: number; price: number; side: 'LONG' | 'SHORT' }
 
 interface View { end: number | null; span: number; pLo?: number; pHi?: number }
 
@@ -50,12 +58,15 @@ function focusView(f: { from: number; to: number }): View {
   return { end: f.to + pad, span: Math.min(400 * 60_000, Math.max(5 * 60_000, f.to - f.from + 2 * pad)) };
 }
 
-export function BookChart({ model, live, height = 520, onAsk, compact = false, marks, focus }: {
+export function BookChart({ model, live, height = 520, onAsk, compact = false, marks, focus, focusLabel = 'Trade', alertMark }: {
   model: BookModel; live: boolean; height?: number; onAsk?: (question: string) => void; compact?: boolean;
   /** his entries / adds / exits, drawn as arrows with labels */
   marks?: TradeMark[];
   /** open zoomed on this time window (his trade); a "Trade" button comes back to it */
-  focus?: { from: number; to: number };
+  focus?: { from: number; to: number; n?: number };
+  /** label of the button that comes back to `focus` */
+  focusLabel?: string;
+  alertMark?: AlertMark;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
@@ -94,7 +105,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     // the last moment there is data for: nothing is drawn after it (panning into the future shows empty space)
     const dataEnd = live ? Math.max(latest, Date.now()) : latest;
     const v = view.current;
-    const t1 = v.end ?? (live ? Math.max(latest, Date.now()) : latest);
+    const t1 = v.end ?? (live ? dataEnd + v.span * LIVE_PAD : latest);
     const t0 = t1 - v.span;
     const tick = model.tick / 100;
 
@@ -185,6 +196,22 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     stepLine('bid', 'rgba(29,201,149,0.9)');
     stepLine('ask', 'rgba(240,107,124,0.9)');
 
+    // current bid / ask: dashed from the last data to the right edge (only where there is space after the data)
+    const xLast = model.lastEventAt ? X(Math.max(model.lastEventAt, t0)) : plotW;
+    if (model.lastEventAt && model.lastEventAt <= t1 && xLast < plotW) {
+      g.lineWidth = 1.4; g.setLineDash([5, 4]);
+      for (const [p, col] of [[model.bestBid, 'rgba(29,201,149,0.9)'], [model.bestAsk, 'rgba(240,107,124,0.9)']] as [number | undefined, string][]) {
+        if (p === undefined) continue;
+        g.strokeStyle = col; g.beginPath(); g.moveTo(xLast, Y(p)); g.lineTo(plotW, Y(p)); g.stroke();
+      }
+      g.setLineDash([]);
+    }
+    // last traded price: dashed gold line across the chart, moving with the price (label on the price scale)
+    if (model.ltp !== undefined && model.ltp >= pLo && model.ltp <= pHi) {
+      g.strokeStyle = 'rgba(223,177,91,0.75)'; g.lineWidth = 1; g.setLineDash([3, 4]);
+      g.beginPath(); g.moveTo(0, Y(model.ltp)); g.lineTo(plotW, Y(model.ltp)); g.stroke(); g.setLineDash([]);
+    }
+
     // trades: grouped per few pixels so zooming out stays readable
     const bucketMs = Math.max(1000, (t1 - t0) / Math.max(60, plotW / 5));
     const groups = new Map<number, { buy: number; sell: number; price: number; t: number }>();
@@ -254,6 +281,21 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
       }
     }
 
+    // reversal alert: gold dashed time line, a ring at the wall, a label
+    if (alertMark && alertMark.t >= t0 && alertMark.t <= t1) {
+      const x = X(alertMark.t), y = Y(alertMark.price), long = alertMark.side === 'LONG';
+      g.strokeStyle = 'rgba(223,177,91,0.8)'; g.lineWidth = 1; g.setLineDash([4, 3]);
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, plotH); g.stroke(); g.setLineDash([]);
+      g.strokeStyle = '#DFB15B'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.stroke();
+      const text = `Reversal ${long ? 'long' : 'short'} @ ${alertMark.price.toFixed(2)} · ${hhmm(alertMark.t, true)}`;
+      g.font = 'bold 11px sans-serif';
+      const tw = g.measureText(text).width + 12;
+      const bx = Math.min(Math.max(2, x - tw / 2), plotW - tw - 2), by = long ? Math.min(plotH - 22, y + 14) : Math.max(2, y - 32);
+      g.fillStyle = 'rgba(42,36,25,0.95)'; g.fillRect(bx, by, tw, 18);
+      g.strokeStyle = '#DFB15B'; g.lineWidth = 1; g.strokeRect(bx + 0.5, by + 0.5, tw - 1, 17);
+      g.fillStyle = '#E8EAF0'; g.fillText(text, bx + 6, by + 13);
+    }
+
     // past the last data: a "now" line, then empty space (no future data, nothing drawn)
     if (dataEnd < t1 && model.lastEventAt) {
       const xn = X(dataEnd);
@@ -320,10 +362,10 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     // the bias line: at the right edge of the view (live = now), always shown
     const at = Math.min(t1, dataEnd);
     if (model.lastEventAt) { setFlow(model.flow(at, 600)); setBias((old) => { const b = model.bias(at); return old && old.label === b.label && old.why === b.why ? old : b; }); }
-  }, [model, live, height, compact, marks]);
+  }, [model, live, height, compact, marks, alertMark]);
 
   useEffect(() => { const id = setInterval(draw, 250); draw(); return () => clearInterval(id); }, [draw]);
-  const focusKey = focus ? `${focus.from}-${focus.to}` : '';
+  const focusKey = focus ? `${focus.from}-${focus.to}-${focus.n ?? ''}` : '';
   useEffect(() => {
     if (focus) { view.current = focusView(focus); setSpan(view.current.span); setFollowing(false); }
     else { view.current = { end: null, span: view.current.span }; setFollowing(true); }
@@ -428,7 +470,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
           {SPANS.map((s) => (
             <button key={s.label} onClick={() => setSpanTo(s.ms)} className={`h-7 rounded-md px-2 text-[11px] font-bold ${Math.abs(span - s.ms) < 1000 ? 'bg-brand-accent text-brand-bg' : 'border border-line-strong text-ink-2'}`}>{s.label}</button>
           ))}
-          {focus && <button onClick={goTrade} title="Back to your trade" className="h-7 rounded-md border border-brand-accent/70 px-2 text-[11px] font-black text-brand-accent">Trade</button>}
+          {focus && <button onClick={goTrade} title={`Back to the ${focusLabel.toLowerCase()}`} className="h-7 rounded-md border border-brand-accent/70 px-2 text-[11px] font-black text-brand-accent">{focusLabel}</button>}
           {live && !following && <button onClick={goLive} className="h-7 rounded-md bg-data-green px-2 text-[11px] font-black text-brand-bg">Live ▸</button>}
         </span>
       </div>

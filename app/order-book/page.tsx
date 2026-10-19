@@ -1,26 +1,37 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
+import { Bell, BellRing, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
-import { BookChart } from '@/components/book/BookChart';
+import { BookChart, type AlertMark } from '@/components/book/BookChart';
 import { useFullscreen } from '@/components/book/useFullscreen';
 import { LoadingPanel, ProgressBar } from '@/components/ui/progress';
 import { Recorder, loadDay, type RecInfo } from '@/lib/book/recorder';
 import { BookModel } from '@/lib/book/model';
 import { istDate } from '@/lib/book/record';
 import type { WatchItem } from '@/lib/book/sheet';
+import type { ReversalAlert } from '@/lib/book/reversal';
 
 /**
  * Order Book tab: curate the list (type / paste symbols, or paste screener screenshots read by Gemini), press
  * Start recording, and keep this tab open. Every stock on the list is recorded to S3 whether or not its chart is
  * open. Charts are views: open as many as you like, stacked; each can show today (live) or a past recorded day.
+ *
+ * Reversal alerts: every recorded stock is checked as its data arrives (lib/book/reversal.ts, plain code, free).
+ * An alert stays on screen (and as a desktop notification) until he closes it; clicking it opens that stock's chart
+ * below the others (or reuses its open chart), zoomed to the moment the alert fired, with the wall marked.
  */
 
-interface ChartCfg { id: string; symbol: string; date: string } // date '' = today
+interface ChartCfg { id: string; symbol: string; date: string; focus?: { from: number; to: number; n?: number }; alert?: AlertMark } // date '' = today
 const CHARTS_KEY = 'tradereye-orderbook-charts';
 const CHANNEL = 'tradereye-orderbook';
 const loadCharts = (): ChartCfg[] => { try { const v = JSON.parse(localStorage.getItem(CHARTS_KEY) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+const ALERTS_KEY = 'tradereye-reversal-alerts';
+type Alert = ReversalAlert & { opened?: boolean };
+const loadAlerts = (): Alert[] => {
+  try { const v = JSON.parse(localStorage.getItem(ALERTS_KEY) ?? '[]'); return Array.isArray(v) ? v.filter((a) => istDate(a.at) === istDate(Date.now())) : []; } catch { return []; }
+};
+const clock = (t: number) => new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
 
 /** Screenshots are shrunk before upload (Gemini only needs to read tickers). */
 async function shrink(file: File): Promise<string> {
@@ -47,8 +58,33 @@ export default function OrderBookPage() {
   const [ocr, setOcr] = useState<{ busy: boolean; found?: string[]; rejected?: string[]; err?: string }>({ busy: false });
   const [charts, setCharts] = useState<ChartCfg[]>([]);
   const [listBusy, setListBusy] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [notifyPerm, setNotifyPerm] = useState<NotificationPermission | 'unsupported'>('default');
+  const notes = useRef(new Map<string, Notification>());
+  const openRef = useRef<(a: ReversalAlert) => void>(() => {});
 
   useEffect(() => { rec.current!.onChange = () => setInfo({ ...rec.current!.info }); }, []);
+
+  // reversal alerts: kept (also across a refresh, for today) until he closes them
+  useEffect(() => { setAlerts(loadAlerts()); setNotifyPerm(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission); }, []);
+  useEffect(() => { try { localStorage.setItem(ALERTS_KEY, JSON.stringify(alerts)); } catch { /* ignore */ } }, [alerts]);
+  useEffect(() => {
+    rec.current!.onAlert = (a) => {
+      setAlerts((all) => [a, ...all].slice(0, 30));
+      // desktop notification too (he may be on another tab): stays until he closes or clicks it
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        try {
+          const n = new Notification(`${a.symbol}: reversal ${a.side === 'LONG' ? 'long' : 'short'} at ${a.wallPrice.toFixed(2)}`, { body: a.why, tag: a.id, requireInteraction: true });
+          n.onclick = () => { window.focus(); openRef.current(a); n.close(); };
+          notes.current.set(a.id, n);
+        } catch { /* some browsers only allow notifications from a service worker */ }
+      }
+    };
+    return () => { if (rec.current) rec.current.onAlert = undefined; };
+  }, []);
+  const dismiss = (id: string) => { notes.current.get(id)?.close(); notes.current.delete(id); setAlerts((all) => all.filter((a) => a.id !== id)); };
+  const dismissAll = () => { for (const n of notes.current.values()) n.close(); notes.current.clear(); setAlerts([]); };
+  const askNotify = async () => { if (typeof Notification === 'undefined') return; setNotifyPerm(await Notification.requestPermission()); };
   useEffect(() => { setCharts(loadCharts()); }, []);
   useEffect(() => { try { localStorage.setItem(CHARTS_KEY, JSON.stringify(charts)); } catch { /* ignore */ } }, [charts]);
 
@@ -126,6 +162,24 @@ export default function OrderBookPage() {
   }, [viewed]);
 
   const addChart = (symbol = list[0]?.symbol ?? '') => setCharts((c) => [...c, { id: Math.random().toString(36).slice(2), symbol, date: '' }]);
+
+  // clicking an alert: that stock's live chart (reused if open, else added below the others), zoomed to the alert
+  const [scrollTo, setScrollTo] = useState<{ id: string; n: number } | null>(null);
+  const openAlert = (a: ReversalAlert) => {
+    const focus = { from: a.at - 4 * 60_000, to: a.at, n: Date.now() };
+    const alert: AlertMark = { t: a.at, price: a.wallPrice, side: a.side };
+    const open = charts.find((c) => c.symbol === a.symbol && !c.date);
+    const id = open?.id ?? Math.random().toString(36).slice(2);
+    setCharts((all) => (open ? all.map((c) => (c.id === id ? { ...c, focus, alert } : c)) : [...all, { id, symbol: a.symbol, date: '', focus, alert }]));
+    setAlerts((all) => all.map((x) => (x.id === a.id ? { ...x, opened: true } : x)));
+    setScrollTo({ id, n: focus.n });
+  };
+  openRef.current = openAlert;
+  useEffect(() => {
+    if (!scrollTo) return;
+    const t = setTimeout(() => document.getElementById(`chart-${scrollTo.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    return () => clearTimeout(t);
+  }, [scrollTo]);
   const recording = info.status === 'recording';
 
   return (
@@ -195,6 +249,9 @@ export default function OrderBookPage() {
           {listMsg && <p className="text-xs text-data-caution">{listMsg}</p>}
         </section>
 
+        {/* reversal alerts: bottom right, on top of everything, until closed */}
+        <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} />
+
         {/* charts */}
         {charts.map((c) => (
           <ChartCard key={c.id} cfg={c} list={list} rec={rec.current!} recording={recording} api={api}
@@ -206,6 +263,43 @@ export default function OrderBookPage() {
           <Plus className="h-4 w-4" />Add chart
         </button>
       </div>
+    </div>
+  );
+}
+
+function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissAll, onAskPerm }: {
+  alerts: Alert[]; recording: boolean; perm: NotificationPermission | 'unsupported';
+  onOpen: (a: ReversalAlert) => void; onDismiss: (id: string) => void; onDismissAll: () => void; onAskPerm: () => void;
+}) {
+  if (!alerts.length && !(recording && perm === 'default')) return null;
+  return (
+    <div className="fixed bottom-4 right-4 z-40 flex max-h-[75vh] w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto">
+      {recording && perm === 'default' && (
+        <button onClick={onAskPerm} className="flex items-center gap-2 rounded-xl border border-brand-accent/60 bg-brand-card px-3 py-2 text-left text-xs font-bold text-brand-accent shadow-lg">
+          <Bell className="h-4 w-4 shrink-0" />Turn on desktop alerts, so reversals reach you on other tabs too
+        </button>
+      )}
+      {alerts.length > 1 && (
+        <button onClick={onDismissAll} className="self-end rounded-lg border border-line-strong bg-brand-card px-2 py-1 text-[11px] font-bold text-ink-2 shadow">Close all ({alerts.length})</button>
+      )}
+      {alerts.map((a) => {
+        const long = a.side === 'LONG';
+        return (
+          <div key={a.id} className={`relative rounded-xl border bg-brand-card shadow-lg ${long ? 'border-data-green/70' : 'border-data-red/70'} ${a.opened ? 'opacity-75' : ''}`}>
+            <button onClick={() => onOpen(a)} className="block w-full px-3 py-2 pr-9 text-left" title="Open the chart at this moment">
+              <span className="flex items-center gap-1.5 text-sm font-black">
+                <BellRing className={`h-4 w-4 ${long ? 'text-data-green' : 'text-data-red-text'}`} />
+                {a.symbol}
+                <span className={long ? 'text-data-green' : 'text-data-red-text'}>{long ? '▲ Reversal long' : '▼ Reversal short'}</span>
+                <span className="ml-auto font-mono text-[11px] font-normal text-ink-3">{clock(a.at)}</span>
+              </span>
+              <span className="mt-0.5 block font-mono text-[11px] text-brand-accent">{long ? 'Buy' : 'Sell'} wall {a.wallPrice.toFixed(2)} · last {a.ltp.toFixed(2)}</span>
+              <span className="mt-1 block text-[11px] leading-snug text-ink-2">{a.why}</span>
+            </button>
+            <button onClick={() => onDismiss(a.id)} aria-label="Close alert" className="absolute right-1.5 top-1.5 rounded p-1 text-ink-3 hover:text-ink"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -260,16 +354,16 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
   };
 
   return (
-    <section ref={card} className={`border border-line bg-brand-card p-3 space-y-2 ${full ? 'overflow-auto rounded-none' : 'rounded-2xl'}`}>
+    <section ref={card} id={`chart-${cfg.id}`} className={`scroll-mt-4 border border-line bg-brand-card p-3 space-y-2 ${full ? 'overflow-auto rounded-none' : 'rounded-2xl'}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <input list="ob-symbols" value={cfg.symbol} onChange={(e) => onChange({ ...cfg, symbol: e.target.value.toUpperCase() })}
+        <input list="ob-symbols" value={cfg.symbol} onChange={(e) => onChange({ id: cfg.id, date: cfg.date, symbol: e.target.value.toUpperCase() })}
           className="h-8 w-36 rounded-lg border border-line bg-brand-bg px-2 text-sm font-black outline-none focus:border-brand-accent" />
         <datalist id="ob-symbols">{list.map((x) => <option key={x.securityId} value={x.symbol} />)}</datalist>
-        <input type="date" value={cfg.date || today} max={today} onChange={(e) => onChange({ ...cfg, date: e.target.value === today ? '' : e.target.value })}
+        <input type="date" value={cfg.date || today} max={today} onChange={(e) => onChange({ id: cfg.id, symbol: cfg.symbol, date: e.target.value === today ? '' : e.target.value })}
           className="h-8 rounded-lg border border-line bg-brand-bg px-2 text-xs text-ink-2 outline-none" />
         <span className="text-[11px] text-ink-3">{!w ? '' : liveNow ? 'live (recording)' : isLive ? 'recorded today' : 'recorded day'}</span>
         {days.filter((d) => d.date !== (cfg.date || today)).slice(0, 6).map((d) => (
-          <button key={d.date} onClick={() => onChange({ ...cfg, date: d.date === today ? '' : d.date })} title={`recorded ${d.from}–${d.to}`}
+          <button key={d.date} onClick={() => onChange({ id: cfg.id, symbol: cfg.symbol, date: d.date === today ? '' : d.date })} title={`recorded ${d.from}–${d.to}`}
             className="h-7 rounded-md border border-line-strong px-2 text-[11px] font-bold text-ink-2 hover:border-brand-accent">
             {new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
           </button>
@@ -285,7 +379,7 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
         </button>
         {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
       </div>
-      {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} onAsk={ask} />}
+      {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} onAsk={ask} focus={cfg.focus} focusLabel="Alert" alertMark={cfg.alert} />}
       {w && !model && loading && (
         <LoadingPanel height={full ? fullH : 560} value={loading.total ? loading.done / loading.total : undefined}
           label={loading.total ? `${loading.label} · ${loading.done}/${loading.total} pieces (10 min each)` : `${loading.label}…`} />
