@@ -36,6 +36,9 @@ export class Recorder {
   /** a reversal setup on a recorded stock (live events only, never the morning replayed from S3) */
   onAlert?: (a: ReversalAlert) => void;
   private watch = new ReversalWatch((a) => this.onAlert?.(a));
+  /** frozen books (Dhan resending one stock's same snapshot): per stock, since when, and how often we reconnected */
+  stale = new Map<string, { since: number; tries: number; gaveUp: boolean }>();
+  private lastDepthReconnect = 0;
   private bufs = new Map<string, Buf>();
   private queue = new Map<string, Uint8Array>(); // failed saves, by key
   private sockets: WebSocket[] = [];
@@ -193,6 +196,31 @@ export class Recorder {
     buf.events.push(e);
     buf.dirty = true;
     this.watch.check(securityId, w.symbol, m, t);
+    this.checkStale(securityId, m, t);
+  }
+
+  /**
+   * A frozen book is fixed by a fresh depth connection (Dhan then sends the real book again). Reconnecting drops
+   * every stock's depth for a second or two, so at most once every 2 minutes, and 3 tries per frozen stock before
+   * giving up (the chart then says the book is not updating). A book that moves again clears the flag.
+   */
+  private checkStale(securityId: string, m: BookModel, t: number) {
+    const since = m.staleSince(t);
+    const s = this.stale.get(securityId);
+    if (since === undefined) { if (s) { this.stale.delete(securityId); this.set({}); } return; }
+    if (s && s.since !== since) { s.since = since; s.tries = 0; s.gaveUp = false; }
+    const cur = s ?? { since, tries: 0, gaveUp: false };
+    if (!s) { this.stale.set(securityId, cur); this.set({}); }
+    if (cur.gaveUp || t - this.lastDepthReconnect < 120_000) return;
+    if (cur.tries >= 3) { cur.gaveUp = true; this.set({}); return; }
+    cur.tries++;
+    this.lastDepthReconnect = t;
+    this.reconnectDepth();
+  }
+
+  /** Close the depth socket; its onclose handler opens a fresh one and subscribes the whole list again. */
+  private reconnectDepth() {
+    for (const ws of this.sockets) if (ws.url.includes('twentydepth')) { try { ws.close(); } catch { /* already closing */ } }
   }
 
   /** Stocks not on screen keep only their last 15 minutes in memory (the rest is in S3). */

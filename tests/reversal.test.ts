@@ -34,7 +34,9 @@ function fallIntoBuyWall(opts: { eat?: boolean; noMove?: boolean } = {}) {
     t += 5_000;
     // eaten: from here on price trades below the wall and the wall is gone
     if (opts.eat && i >= 25) { book(m, r2(startBid - 0.2), t); trade(m, r2(startBid - 0.2), 400, t); continue; }
-    book(m, startBid, t, wall);
+    // trades eat into the wall and it refills: the book keeps changing, as a live one does
+    const live = Object.fromEntries(Object.entries(wall).map(([k, q]) => [k, i % 2 ? q - 400 : q]));
+    book(m, startBid, t, live);
     trade(m, startBid, 400, t);
   }
   return { m, t };
@@ -57,7 +59,7 @@ test('reversal short: the mirror image (rose into a holding sell wall, buying ab
   // asks start at bid + 0.05: the wall at 262.05 is the best ask once the bid reaches 262
   book(m, 260, t); trade(m, 260.05, 1, t);
   for (let p = 260; p < 261.96; p = r2(p + 0.05)) { t += 9_000; book(m, p, t, { '262.05': 5000 }); trade(m, r2(p + 0.05), 300, t); }
-  for (let i = 0; i < 30; i++) { t += 5_000; book(m, 262, t, { '262.05': 5000 }); trade(m, 262.05, 400, t); }
+  for (let i = 0; i < 30; i++) { t += 5_000; book(m, 262, t, { '262.05': i % 2 ? 4600 : 5000 }); trade(m, 262.05, 400, t); }
   const r = detectReversal(m, t);
   assert.ok(r, 'expected a reversal');
   assert.equal(r.side, 'SHORT');

@@ -308,13 +308,15 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
 
     // book bars at the right edge of the view: the book at that moment (last known size, if seen in the last minute)
     const tb = Math.min(t1, dataEnd);
+    // a frozen book (Dhan resending the same snapshot while price moves away) is not drawn as bars: it would lie
+    const frozenSince = model.staleSince(Math.min(t1, model.lastEventAt || t1));
     const bars = new Map<number, { qty: number; side: 'BID' | 'ASK' }>();
     for (const s of model.segments) {
       if (s.t0 > tb || (s.t1 !== undefined && s.t1 <= tb) || tb - s.seenTill > 60_000) continue;
       const p = s.p / 100;
       if (p >= pLo && p <= pHi) bars.set(s.p, { qty: s.qty, side: s.side });
     }
-    if (bars.size) {
+    if (bars.size && frozenSince === undefined) {
       const maxQ = Math.max(...[...bars.values()].map((b) => b.qty));
       const barW = Math.min(110, plotW * 0.18);
       const bh = Math.max(1, rowH - 0.5);
@@ -336,6 +338,17 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     if (model.lastEventAt && !bars.size && !model.segments.some((s) => (s.t1 ?? dataEnd) >= t0 && s.t0 <= t1)) {
       g.fillStyle = '#7C8899'; g.font = '12px sans-serif';
       g.fillText('No order book (depth) data in this view: only trades arrived for this stock.', 16, plotH - 14);
+    }
+
+    if (frozenSince !== undefined) {
+      const text = live
+        ? `Order book frozen since ${hhmm(frozenSince)}: Dhan keeps sending the same book while price has moved. The levels shown are old. Reconnecting the feed…`
+        : `Order book was frozen from ${hhmm(frozenSince)} (Dhan sent the same book while price moved): levels after that are old.`;
+      g.font = 'bold 11px sans-serif';
+      const tw = Math.min(plotW - 16, g.measureText(text).width + 14);
+      g.fillStyle = 'rgba(58,36,20,0.95)'; g.fillRect(8, 8, tw, 20);
+      g.strokeStyle = '#E8873A'; g.lineWidth = 1; g.strokeRect(8.5, 8.5, tw - 1, 19);
+      g.fillStyle = '#F2C08F'; g.fillText(text, 15, 22, tw - 14);
     }
 
     // past the last data: a "now" line, then empty space (no future data, nothing drawn)

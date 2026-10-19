@@ -33,6 +33,7 @@ const fmtQ = (q: number) => (q >= 1000 ? `${(q / 1000).toFixed(1)}k` : String(Ma
 export function detectReversal(model: BookModel, now: number): Reversal | undefined {
   const ltp = model.ltp, bid = model.bestBid, ask = model.bestAsk;
   if (ltp === undefined || bid === undefined || ask === undefined) return undefined;
+  if (model.staleSince(now) !== undefined) return undefined; // a frozen book's walls are not real
   const tick = model.tick / 100;
   const f = model.flow(now, ABSORB_SEC);
   if (!f.absorption) return undefined;

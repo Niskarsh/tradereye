@@ -47,6 +47,14 @@ export class BookModel {
   bestBid?: number; bestAsk?: number; ltp?: number;
   lastEventAt = 0;
   lastVolume = 0;
+  /**
+   * Frozen-feed check. Dhan sometimes keeps sending one stock's book as the SAME snapshot (it looks alive, but
+   * nothing moves) while its trades keep coming. Two tells: price trades well outside the book (2+ ticks beyond
+   * the best bid / ask for 15 s), or 90 s of no change at all in the book while trades keep printing.
+   */
+  bookChangedAt = 0;
+  private tradesSinceChange = 0;
+  private outsideSince?: number;
   private tradeLog: { t: number; buy: number; sell: number; ltp: number }[] = [];
   private ended: { w: Wall; at: number }[] = [];
 
@@ -95,6 +103,12 @@ export class BookModel {
       this.tradeLog.push({ t: now, buy, sell, ltp: q.ltp });
       if (this.tradeLog.length > 20000) this.tradeLog.splice(0, 5000);
     }
+    if (this.lastVolume > 0 && q.volume > this.lastVolume) {
+      this.tradesSinceChange++;
+      const tk = this.tick / 100;
+      const outside = (this.bestBid !== undefined && q.ltp < this.bestBid - 2 * tk - 1e-9) || (this.bestAsk !== undefined && q.ltp > this.bestAsk + 2 * tk + 1e-9);
+      if (!outside) this.outsideSince = undefined; else this.outsideSince ??= now;
+    }
     if (q.volume > 0) this.lastVolume = q.volume;
     this.pushQuote(now);
   }
@@ -114,6 +128,7 @@ export class BookModel {
   private set(p: number, side: Side, qty: number, now: number) {
     const lv = this.levels.get(p);
     if (!lv || lv.side !== side) {
+      if (qty > 0 || lv) this.bookChanged(now);
       if (lv && lv.qty > 0) {
         // the price changed sides: price traded through it. Real only if shares actually traded there.
         this.endWall(p, lv, now, lv.traded >= lv.maxQty * 0.5 ? 'EATEN' : 'PULLED');
@@ -125,6 +140,7 @@ export class BookModel {
       return;
     }
     if (qty === lv.qty) { lv.seenAt = now; lv.seg.seenTill = now; return; }
+    this.bookChanged(now);
     if (qty < lv.qty) lv.lastDrop = now;
     else if (lv.lastDrop && now - lv.lastDrop < 120_000 && lv.traded > 0) lv.refills++;
     if (qty === 0 && lv.qty > 0) this.endWall(p, lv, now, lv.traded >= lv.maxQty * 0.5 ? 'EATEN' : 'PULLED');
@@ -135,6 +151,16 @@ export class BookModel {
     lv.seg = seg;
     lv.qty = qty; lv.seenAt = now; lv.maxQty = Math.max(lv.maxQty, qty);
     if (qty === 0) { lv.firstAt = now; lv.maxQty = 0; lv.traded = 0; lv.refills = 0; }
+  }
+
+  private bookChanged(now: number) { this.bookChangedAt = now; this.tradesSinceChange = 0; this.outsideSince = undefined; }
+
+  /** Since when the book has looked frozen (undefined = it is live). */
+  staleSince(now: number): number | undefined {
+    if (!this.bookChangedAt) return undefined; // no book at all is a different problem
+    if (this.outsideSince !== undefined && now - this.outsideSince >= 15_000) return this.bookChangedAt;
+    if (now - this.bookChangedAt >= 90_000 && this.tradesSinceChange >= 5) return this.bookChangedAt;
+    return undefined;
   }
 
   private endWall(p: number, lv: Level, now: number, status: WallStatus) {
