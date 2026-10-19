@@ -6,6 +6,7 @@ import {
 } from './record';
 import type { WatchItem } from './sheet';
 import { ReversalWatch, type ReversalAlert } from './reversal';
+import { FeedProbe, diagKey, type Snapshot } from './probe';
 
 /**
  * Records the order book of every stock on the list while the Order Book tab is open (browser only: the Dhan feed
@@ -36,6 +37,8 @@ export class Recorder {
   /** a reversal setup on a recorded stock (live events only, never the morning replayed from S3) */
   onAlert?: (a: ReversalAlert) => void;
   private watch = new ReversalWatch((a) => this.onAlert?.(a));
+  /** what Dhan actually sends; a stock with trades but no book gets a saved diagnostic snapshot */
+  probe = new FeedProbe();
   /** frozen books (Dhan resending one stock's same snapshot): per stock, since when, and how often we reconnected */
   stale = new Map<string, { since: number; tries: number; gaveUp: boolean }>();
   private lastDepthReconnect = 0;
@@ -49,7 +52,17 @@ export class Recorder {
   private running = false;
   private token = ''; private clientId = '';
 
-  constructor(private api: (path: string, init?: RequestInit) => Promise<Response>) {}
+  constructor(private api: (path: string, init?: RequestInit) => Promise<Response>) {
+    this.probe.onSnapshot = (snap) => { this.set({}); void this.saveSnapshot(snap); };
+  }
+
+  /** The probe's snapshot goes to S3 (a few KB, gzip'd JSON), so it can be studied after the session. */
+  private async saveSnapshot(snap: Snapshot) {
+    try {
+      const bytes = await gzip(JSON.stringify(snap));
+      await this.api(`/api/book/chunk?key=${encodeURIComponent(diagKey(snap.symbol, snap.takenAt))}`, { method: 'POST', body: bytes as BodyInit, headers: { 'Content-Type': 'application/gzip' } });
+    } catch { /* the download on the chart still has it */ }
+  }
 
   /** Model for a stock (created on demand, so a chart can show it before recording starts). */
   model(securityId: string) { let m = this.models.get(securityId); if (!m) { m = new BookModel(); this.models.set(securityId, m); } return m; }
@@ -146,15 +159,18 @@ export class Recorder {
       const kind = code === 23 ? 'depth' : 'feed';
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => { attempt = 0; this.lastMsg[kind] = Date.now(); this.sendSubs(ws, code, this.list); };
+      ws.onopen = () => { attempt = 0; this.lastMsg[kind] = Date.now(); this.probe.event(kind, 'open'); this.sendSubs(ws, code, this.list); };
       ws.onmessage = (e) => {
         if (!(e.data instanceof ArrayBuffer)) return;
         this.lastMsg[kind] = Date.now();
+        if (kind === 'depth') this.probe.depthMessage(e.data, new Set(this.list.map((w) => w.securityId)));
+        else this.probe.feedMessage(e.data);
         const dc = disconnectCode(e.data, kind);
-        if (dc !== undefined) { this.set({ error: `${kind === 'depth' ? 'Order book' : 'Trade / price'} feed: ${disconnectReason(dc)}. Reconnecting.` }); return; }
+        if (dc !== undefined) { this.probe.event(kind, `dhan disconnect ${dc}`); this.set({ error: `${kind === 'depth' ? 'Order book' : 'Trade / price'} feed: ${disconnectReason(dc)}. Reconnecting.` }); return; }
         onMsg(e.data);
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        this.probe.event(kind, `close ${ev.code}${ev.reason ? ` ${ev.reason}` : ''}`);
         this.sockets = this.sockets.filter((s) => s !== ws);
         if (this.running) setTimeout(() => open(url, code, onMsg, attempt + 1), Math.min(30_000, 1000 * 2 ** attempt));
       };
@@ -188,7 +204,9 @@ export class Recorder {
   private sendSubs(ws: WebSocket, code: 17 | 23, items: WatchItem[]) {
     for (let i = 0; i < items.length; i += 50) {
       const part = items.slice(i, i + 50);
-      ws.send(JSON.stringify({ RequestCode: code, InstrumentCount: part.length, InstrumentList: part.map((w) => ({ ExchangeSegment: 'NSE_EQ', SecurityId: w.securityId })) }));
+      const msg = JSON.stringify({ RequestCode: code, InstrumentCount: part.length, InstrumentList: part.map((w) => ({ ExchangeSegment: 'NSE_EQ', SecurityId: w.securityId })) });
+      this.probe.event(code === 23 ? 'depth' : 'feed', `subscribe ${msg}`);
+      ws.send(msg);
     }
   }
   private subscribe(items: WatchItem[]) {
@@ -228,6 +246,7 @@ export class Recorder {
     buf.dirty = true;
     this.watch.check(securityId, w.symbol, m, t);
     this.checkStale(securityId, m, t);
+    if (e[0] === 'Q') { this.probe.quote(securityId, t); this.probe.check(securityId, w.symbol, this.list, t); }
   }
 
   /**

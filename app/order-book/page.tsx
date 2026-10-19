@@ -420,6 +420,21 @@ function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, on
           label={loading.total ? `${loading.label} · ${loading.done}/${loading.total} pieces (10 min each)` : `${loading.label}…`} />
       )}
       {failed && <p className="text-xs text-data-red-text">{failed}</p>}
+      {liveNow && listed && (() => {
+        const snap = rec.probe.snapshots.get(listed.securityId);
+        if (!snap) return null;
+        const save = () => {
+          const url = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 1)], { type: 'application/json' }));
+          const a = document.createElement('a'); a.href = url; a.download = `${snap.symbol}-feed-diagnostic.json`; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        };
+        return (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">
+            <span>Dhan is sending trades for {snap.symbol} but not one order book packet ({snap.stock.quotes} trades, 0 book packets). A diagnostic with the raw feed was saved to S3.</span>
+            <button onClick={save} className="ml-auto h-7 rounded-lg border border-data-caution/70 px-2.5 font-black">Download diagnostic</button>
+          </div>
+        );
+      })()}
       {answer && (
         <div className="rounded-xl border border-line bg-brand-bg p-3 text-sm space-y-1">
           <p className="text-[11px] text-ink-3"><Sparkles className="mr-1 inline h-3 w-3 text-brand-accent" />{answer.q}</p>
