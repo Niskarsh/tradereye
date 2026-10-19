@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
 import { lookupSecurityId } from '@/lib/dhan';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard, dhanTokenRequired } from '@/lib/live/guard';
 import { istDateKey, istTime } from '@/lib/live/time';
 import { buildCheck } from '@/lib/copilot/service';
 import { chatClaude, ClaudeError } from '@/lib/copilot/claude';
@@ -18,7 +18,7 @@ export const maxDuration = 60;
  * the checks tab.
  */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return NextResponse.json({ error: 'NO_API_KEY', message: 'ANTHROPIC_API_KEY is not set in Vercel.' }, { status: 503 });
@@ -40,6 +40,8 @@ export async function POST(req: Request) {
       await appendChat(sheets, date, { Date: date, Time: istTime(Date.now()), CreatedAt: Date.now(), CheckId: `ORDER-BOOK ${pastDay}`, Symbol: symbol, Mode: 'REVIEW', DataTime: pastDay, Question: question, Answer: r.text.slice(0, 4000), Model: r.model, InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '' }).catch(() => {});
       return NextResponse.json({ text: r.text, costInr: r.costInr, latencyMs: r.latencyMs });
     }
+    // today's question uses the live market facts: that part needs Dhan
+    if (!g.dhan) return dhanTokenRequired("A question about today's book");
     // a reversal alert's "Should I take this?" names the trade; a plain wall question reads the stock both ways
     const dir = b?.direction === 'LONG' || b?.direction === 'SHORT' ? b.direction as 'LONG' | 'SHORT' : undefined;
     const setup = dir && (b?.setup === 'REVERSAL' || b?.setup === 'MOMENTUM') ? b.setup as 'REVERSAL' | 'MOMENTUM' : 'MOMENTUM';

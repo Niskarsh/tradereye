@@ -83,7 +83,7 @@ export function useCopilot(token: string) {
 
   const ask = useCallback(async (forCheck?: CheckResp) => {
     const target = forCheck ?? check;
-    if (!token || !target) return;
+    if (!target) return; // reads a saved check: Google sign-in is enough
     setBusy('ask'); setError('');
     try {
       const r = await postWithToken<ReadResp>('/api/copilot/ask', token, { checkId: target.checkId, date: target.date });
@@ -95,14 +95,13 @@ export function useCopilot(token: string) {
   }, [token, check, loadMarket]);
 
   const decide = useCallback(async (d: 'TOOK' | 'SKIPPED') => {
-    if (!token || !check) return;
+    if (!check) return;
     setDecision(d);
     try { await postWithToken('/api/copilot/decision', token, { checkId: check.checkId, date: check.date, decision: d }); loadMarket(); }
     catch (e) { setError((e as Error).message); setDecision(''); }
   }, [token, check, loadMarket]);
 
   const saveRisk = useCallback(async (riskInr: number) => {
-    if (!token) return;
     try {
       const r = await postWithToken<{ riskInr: number }>('/api/copilot/settings', token, { riskInr });
       setMarket((m) => (m ? { ...m, riskInr: r.riskInr } : m));
@@ -125,7 +124,7 @@ export function useCopilot(token: string) {
   /** Chat: free questions about the stock / trade on screen, answered on the latest facts the app fetched. */
   const sendChat = useCallback(async (text: string) => {
     const q = text.trim();
-    if (!token || !check || !q) return;
+    if (!check || !q) return; // chats about the fetched check: no Dhan needed
     const next: ChatMsg[] = [...chat, { role: 'user', content: q }];
     setChat(next); setChatBusy(true);
     try {

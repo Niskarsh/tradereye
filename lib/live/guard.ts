@@ -11,8 +11,33 @@ export function tokenFrom(req: Request): string {
 
 export type Guarded = { ok: true; token: string; clientId?: string; dhan: DhanClient } | { ok: false; res: NextResponse };
 
+/** Signed in as the owner; the Dhan client only when a (matching) token came with the request. */
+export type OwnerGuarded = { ok: true; token?: string; clientId?: string; dhan?: DhanClient } | { ok: false; res: NextResponse };
+
 /**
- * Every live/backfill route goes through this. These routes can write to your sheet, so when
+ * For routes that do NOT need Dhan (saved order books, charts already in S3, the sheet, Claude): the owner's Google
+ * session is the lock. A Dhan token is still used when one is sent (e.g. to fetch a chart that is not saved yet).
+ */
+export function ownerGuard(req: Request): OwnerGuarded {
+  const denied = ownerRequired(req);
+  if (denied) return { ok: false, res: denied };
+  const token = tokenFrom(req);
+  if (!token) return { ok: true };
+  const clientId = clientIdFromToken(token);
+  const allowed = process.env.ALLOWED_DHAN_CLIENT_ID?.trim();
+  if (allowed && clientId !== allowed) {
+    return { ok: false, res: NextResponse.json({ error: 'FORBIDDEN', message: 'This token belongs to a different Dhan account.' }, { status: 403 }) };
+  }
+  return { ok: true, token, clientId, dhan: new DhanClient({ token }) };
+}
+
+/** The answer for a step that needs fresh data from Dhan when no Dhan token was sent. */
+export function dhanTokenRequired(what = 'This'): NextResponse {
+  return NextResponse.json({ error: 'TOKEN_MISSING', message: `${what} needs fresh data from Dhan: log in on the Dhan login tab first.` }, { status: 401 });
+}
+
+/**
+ * Routes that need Dhan right now (live data, orders, backfill) go through this. These routes can write to your sheet, so when
  * ALLOWED_DHAN_CLIENT_ID is set only a token issued for that Dhan account is accepted.
  * (Dhan itself still validates the token on every call; this is an extra lock, not a replacement.)
  */

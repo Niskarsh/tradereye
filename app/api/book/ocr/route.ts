@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { lookupSecurityId } from '@/lib/dhan';
-import { guard } from '@/lib/live/guard';
+import { ownerGuard } from '@/lib/live/guard';
 import { symbolsFromImages } from '@/lib/book/ocr';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 /** Body { images: [dataURL, ...] } -> { symbols (valid NSE equities), rejected (read but not on NSE) }. Uses Gemini, not Claude. */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) return NextResponse.json({ error: 'NO_GEMINI_KEY', message: 'Add GEMINI_API_KEY in Vercel (free from Google AI Studio), then redeploy.' }, { status: 503 });

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { chatClaude, ClaudeError, type ChatTurn } from '@/lib/copilot/claude';
 import { appendChat, chatsToday, readChecks, recall } from '@/lib/copilot/store';
 import { settings } from '@/lib/copilot/settings';
@@ -16,7 +16,7 @@ const MAX_TURNS = 24;
  * The facts come from the check (the latest one the app fetched: tap "Latest Dhan data" in the chat for a new one).
  */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return NextResponse.json({ error: 'NO_API_KEY', message: 'ANTHROPIC_API_KEY is not set in Vercel.' }, { status: 503 });

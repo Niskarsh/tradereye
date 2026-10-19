@@ -10,7 +10,8 @@ import { dayFolder, istDate } from '@/lib/book/record';
 import type { BookModel } from '@/lib/book/model';
 
 /**
- * The order book behind one journal trade (only if that stock was recorded that day in the Order Book tab).
+ * The order book behind one journal trade (only if that stock was recorded that day in the Order Book tab). Saved
+ * recordings need only the Google sign-in, no Dhan token.
  * Opens zoomed on the trade, with his entries, adds and exits marked; same chart as the Order Book tab (drag, wheel
  * zoom, crosshair, walls with Ask, full screen). Loaded only when he presses the button.
  */
@@ -30,14 +31,14 @@ export function TradeBook({ symbol, date, direction, fills, token }: { symbol: s
   // is there a recording? (one small S3 listing, no data downloaded)
   const [slots, setSlots] = useState<string[] | null | 'error'>(null);
   useEffect(() => {
-    if (!token || !ok) return;
+    if (!ok) return;
     let gone = false;
     setSlots(null);
     api(`/api/book/list?folder=${encodeURIComponent(dayFolder(sym, date))}`)
       .then(async (r) => { const j = await r.json().catch(() => ({})); if (!gone) setSlots(r.ok && Array.isArray(j.slots) ? j.slots : 'error'); })
       .catch(() => { if (!gone) setSlots('error'); });
     return () => { gone = true; };
-  }, [sym, date, token, ok, api]);
+  }, [sym, date, ok, api]);
 
   const [open, setOpen] = useState(false);
   const [model, setModel] = useState<BookModel | null>(null);
@@ -74,7 +75,6 @@ export function TradeBook({ symbol, date, direction, fills, token }: { symbol: s
       <BarChart3 size={14} /><span className="text-[10px] font-black uppercase tracking-widest">Order book</span>
     </div>
   );
-  if (!token) return <div className="px-6 pb-4">{head}<p className="text-[11px] text-zinc-600">Log in on the Dhan login tab to see the recorded order book for this trade.</p></div>;
   if (slots === null) return <div className="px-6 pb-4">{head}<p className="flex items-center gap-2 text-[11px] text-zinc-600"><Loader2 className="h-3 w-3 animate-spin" />Checking for a recording…</p></div>;
   if (slots === 'error') return <div className="px-6 pb-4">{head}<p className="text-[11px] text-zinc-600">Could not check S3 for a recording of {sym} that day.</p></div>;
   if (!slots.length) return <div className="px-6 pb-4">{head}<p className="text-[11px] text-zinc-600">{sym} was not recorded on {date}. Add it to the Order Book list before you trade it to see the book here.</p></div>;

@@ -88,7 +88,7 @@ export default function BackfillPage() {
         <TokenBar />
 
         <div className="flex flex-wrap items-center gap-4">
-          <Button onClick={doPlan} disabled={!token || !!busy} className="h-10 bg-brand-accent hover:bg-brand-accent/90 text-black font-black uppercase tracking-tighter">
+          <Button onClick={doPlan} disabled={!!busy} className="h-10 bg-brand-accent hover:bg-brand-accent/90 text-black font-black uppercase tracking-tighter">
             {busy === 'plan' ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}Check what needs filling
           </Button>
           <label className="flex items-center gap-2 text-xs text-zinc-400"><input type="checkbox" checked={redo} onChange={(e) => setRedo(e.target.checked)} className="accent-indigo-600" />Redo trades already filled</label>
