@@ -5,8 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import {
     Calendar, ChevronLeft, ChevronRight, MessageSquare, Save,
     Loader2, RefreshCcw, TrendingUp, TrendingDown, Layers,
-    CheckCircle2, XCircle, Maximize2, X, Download,
-    Camera, Upload
+    CheckCircle2, XCircle, X, Download
 } from "lucide-react";
 import LivePnl from './livePnl';
 import { TradeReview } from '@/components/journal/TradeReview';
@@ -352,6 +351,10 @@ export default function Journal() {
             {/* Lightbox */}
             {fullScreenImage && (
                 <div className="fixed inset-0 z-[100] bg-black/98 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setFullScreenImage(null)}>
+                    <Button variant="ghost" title="Download" className="absolute top-6 right-20 text-white rounded-full h-12 w-12 bg-white/5 hover:bg-white/10"
+                        onClick={(e) => { e.stopPropagation(); void handleDownload(fullScreenImage, 'chart'); }}>
+                        <Download size={22} />
+                    </Button>
                     <Button variant="ghost" className="absolute top-6 right-6 text-white rounded-full h-12 w-12 bg-white/5 hover:bg-white/10" onClick={() => setFullScreenImage(null)}>
                         <X size={32} />
                     </Button>
@@ -561,66 +564,13 @@ export default function Journal() {
                                     lastStop={group.trades.find(t => t.LastStop)?.LastStop}
                                     target={group.trades.find(t => t.TpLast)?.TpLast}
                                     fills={group.trades.map(t => ({ time: t['Time (IST)'] ?? '', side: t.OrderType ?? '', qty: Number(t.Qty) || 0, price: Number(String(t.Price).replace(/,/g, '')) || 0 }))}
+                                    uploadedChart={pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl || undefined}
+                                    uploading={uploadStatus[groupId] === 'uploading'}
+                                    onViewUploaded={(url) => setFullScreenImage(url)}
+                                    onUpload={(file) => handleScreenshotUpload(groupId, file, group.trades[0], 'chart-screenshot')}
                                 />
                                 </div>
 
-                                {/* SECTION 3: SCREENSHOT WITH DOWNLOAD */}
-                                <div className="px-6 pb-8 bg-zinc-950/30">
-                                    <div className="flex items-center gap-2 mb-4 text-zinc-500"><Camera size={14} /><span className="text-[10px] font-black uppercase tracking-widest">Chart Analysis</span></div>
-
-                                    <div className="relative group w-full min-h-[260px] md:min-h-[450px] rounded-[24px] overflow-hidden border border-zinc-800/80 bg-zinc-900/20 shadow-inner">
-                                        {(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl) ? (
-                                            <>
-                                                <img
-                                                    src={pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl}
-                                                    alt="Trade Screenshot"
-                                                    className="w-full h-auto min-h-[260px] object-contain bg-black/40 cursor-pointer"
-                                                    onClick={() => setFullScreenImage(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl || null)}
-                                                />
-                                                <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Button
-                                                        size="icon"
-                                                        className="bg-black/80 hover:bg-cyan-600 rounded-full h-10 w-10 backdrop-blur-md border border-white/10"
-                                                        onClick={() => handleDownload(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl!, group.trades[0].Symbol)}
-                                                    >
-                                                        <Download size={18} />
-                                                    </Button>
-                                                    <Button
-                                                        size="icon"
-                                                        className="bg-black/80 hover:bg-cyan-600 rounded-full h-10 w-10 backdrop-blur-md border border-white/10"
-                                                        onClick={() => setFullScreenImage(pendingScreenshots[groupId] || group.trades[0].ScreenshotUrl || null)}
-                                                    >
-                                                        <Maximize2 size={18} />
-                                                    </Button>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <div className="absolute inset-0 flex flex-col items-center justify-center p-8">
-                                                <input
-                                                    type="file"
-                                                    accept="image/*"
-                                                    onChange={(e) => {
-                                                        const file = e.target.files?.[0];
-                                                        if (file) handleScreenshotUpload(groupId, file, group.trades[0], 'chart-screenshot');
-                                                    }}
-                                                    className="hidden"
-                                                    id={`screenshot-${groupId}`}
-                                                />
-                                                <label htmlFor={`screenshot-${groupId}`} className="w-full h-full cursor-pointer flex flex-col items-center justify-center gap-4">
-                                                    <div className="w-16 h-16 rounded-full bg-zinc-800/50 flex items-center justify-center border border-zinc-700/50">
-                                                        {uploadStatus[groupId] === 'uploading' ? <Loader2 className="w-8 h-8 animate-spin text-cyan-400" /> : <Upload className="w-8 h-8 text-zinc-600" />}
-                                                    </div>
-                                                    <div className="text-center">
-                                                        <span className="text-[10px] font-black text-zinc-500 block uppercase tracking-[0.2em] mb-1">
-                                                            {uploadStatus[groupId] === 'uploading' ? 'Syncing to Cloud' : 'Upload Technical Chart'}
-                                                        </span>
-                                                        <span className="text-[9px] text-zinc-700 block">PNG, JPG up to 10MB</span>
-                                                    </div>
-                                                </label>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
                             </div>
                         ))}
                     </div>
