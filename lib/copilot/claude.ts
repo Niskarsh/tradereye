@@ -291,3 +291,27 @@ export async function structuredClaude(rules: string, message: string, schema: o
     outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
   };
 }
+
+/**
+ * A plain call with its own system prompt (none of the trading co-pilot's), for tasks that are not trade advice:
+ * the Order Book "Check feed" audit of Dhan's data. Plain text back.
+ */
+export async function plainClaude(system: string, message: string, o: ClaudeOptions, maxTokens = 1200): Promise<ChatReply> {
+  const f = o.fetchImpl ?? fetch;
+  const sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const now = o.now ?? Date.now;
+  const model = o.model || DEFAULT_MODEL;
+  const body = { model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: message }] };
+  const t0 = now();
+  const json = await postMessages(body, { ...o, timeoutMs: o.timeoutMs ?? 45_000 }, f, sleep);
+  const content: { type: string; text?: string }[] = json?.content ?? [];
+  let text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
+  if (json?.stop_reason === 'max_tokens') text += ' …(cut short)';
+  if (!text) text = 'Claude returned no text.';
+  const u = json?.usage ?? {};
+  return {
+    text, model,
+    inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+    outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
+  };
+}
