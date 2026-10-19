@@ -46,3 +46,16 @@ test('probe: raw messages are kept whole and byte-exact (a 25-stock depth messag
   assert.ok(back.equals(Buffer.from(big)), 'decodes to the exact bytes Dhan sent');
   assert.equal(back[back.length - 1], 0xab);
 });
+
+test('probe: whole-session snapshot has every stock\'s counts and when each feed last spoke', () => {
+  const p = new FeedProbe();
+  const list = [{ symbol: 'PFC', securityId: '14299' }, { symbol: 'ITC', securityId: '1660' }];
+  p.depthMessage(cat(depth(41, 14299), depth(51, 14299)), new Set(['14299', '1660']), 1000);
+  p.quote('1660', 2000);
+  const s = p.snapshotAll('trade feed silent 60 s while the depth feed kept flowing', list, { depth: 5000, feed: 2000 }, 6000);
+  assert.equal(s.symbol, 'ALL');
+  assert.deepEqual(s.allStocks?.PFC, { depthBid: 1, depthAsk: 1, quotes: 0, firstDepthAt: 1000, lastDepthAt: 1000 });
+  assert.equal(s.allStocks?.ITC.quotes, 1);
+  assert.equal(s.lastMsg?.feed, 2000);
+  assert.ok(DIAG_RE.test(diagKey(s.symbol, s.takenAt)));
+});

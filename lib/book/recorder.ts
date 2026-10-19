@@ -55,6 +55,7 @@ export class Recorder {
   /** when each feed last sent anything, and when the watchdog last restarted it */
   private lastMsg = { depth: 0, feed: 0 };
   private lastKick = { depth: 0, feed: 0 };
+  private lastFeedSilentSnap = 0;
   private bufs = new Map<string, Buf>();
   private queue = new Map<string, Uint8Array>(); // failed saves, by key
   private sockets: WebSocket[] = [];
@@ -114,6 +115,13 @@ export class Recorder {
       wallPrice: r.wall.price, wallSide: r.wall.side, wallQty: r.wall.qty, times: r.wall.times, traded: r.wall.traded, refills: r.wall.refills,
       ltp: r.ltp, at: t, why: r.why, plan: r.plan, zone: r.zone,
     });
+  }
+
+  /** The whole session's feed log right now (the Feed log button): downloadable, and saved to S3 as well. */
+  feedLog() {
+    const snap = this.probe.snapshotAll('saved by hand (Feed log button)', this.list, this.lastMsg);
+    void this.saveSnapshot(snap);
+    return snap;
   }
 
   /** The probe's snapshot goes to S3 (a few KB, gzip'd JSON), so it can be studied after the session. */
@@ -258,6 +266,12 @@ export class Recorder {
    */
   private watchdog() {
     const now = Date.now();
+    // the reverse of the no-book case: book flowing, not one trade packet for 60 s. Save the evidence (S3, once
+    // every 10 min) before any restart, so the file shows what the connection did.
+    if (now - this.lastMsg.feed >= 60_000 && now - this.lastMsg.depth < 10_000 && now - this.lastFeedSilentSnap >= 600_000) {
+      this.lastFeedSilentSnap = now;
+      void this.saveSnapshot(this.probe.snapshotAll(`trade feed silent ${Math.round((now - this.lastMsg.feed) / 1000)} s while the depth feed kept flowing`, this.list, this.lastMsg, now));
+    }
     for (const [kind, other] of [['feed', 'depth'], ['depth', 'feed']] as const) {
       // the trade feed never goes quiet for 30 s in market hours; the depth stream can (sparse, and ~30 s silent
       // after every connect, 19 Oct), so it gets 2 minutes and at most one restart every 5, or the restart itself

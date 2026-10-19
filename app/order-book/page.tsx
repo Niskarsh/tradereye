@@ -228,6 +228,15 @@ export default function OrderBookPage() {
                 : info.status === 'stopping' ? 'Stopping: saving the last minutes…'
                 : info.status === 'other-tab' ? 'Already recording in another tab' : 'Not recording'}
             </span>
+            {recording && (
+              <button onClick={() => {
+                const snap = rec.current!.feedLog();
+                const url = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 1)], { type: 'application/json' }));
+                const a = document.createElement('a'); a.href = url; a.download = `feed-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.json`; a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }} title="Everything Dhan sent this session: packet counts per stock, connects / disconnects, raw messages. Also saved to S3."
+                className="h-10 rounded-xl border border-line-strong px-3 text-xs font-bold text-ink-2 hover:border-brand-accent">Feed log</button>
+            )}
             {recording || info.status === 'stopping'
               ? <button onClick={stop} disabled={info.status === 'stopping'} className="flex h-10 items-center gap-2 rounded-xl bg-data-red px-4 text-sm font-black text-ink disabled:opacity-60">
                   {info.status === 'stopping' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}{info.status === 'stopping' ? 'Stopping…' : 'Stop recording'}

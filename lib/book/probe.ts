@@ -28,6 +28,10 @@ export interface Snapshot {
   rawDepth: { t: number; bytes: number; b64: string; packets: string[] }[];
   rawFeed: { t: number; bytes: number; b64: string }[];
   oddDepth: { t: number; bytes: number; b64: string; packets: string[] }[];
+  /** every listed stock's packet counts this session (depth bid / ask, quotes), by symbol */
+  allStocks?: Record<string, StockStats>;
+  /** when each connection last delivered anything */
+  lastMsg?: { depth: number; feed: number };
 }
 
 /** The whole message, byte for byte (no cap: a cut copy could drop exactly the packets being looked for). */
@@ -104,6 +108,21 @@ export class FeedProbe {
     };
     this.snapshots.set(securityId, snap);
     this.onSnapshot?.(snap);
+  }
+
+  /**
+   * A snapshot of the whole session, not one stock: on demand (the Feed log button), or when the trade feed has
+   * been silent while the depth feed kept flowing (the reverse of the no-book case).
+   */
+  snapshotAll(reason: string, list: { symbol: string; securityId: string }[], lastMsg: { depth: number; feed: number }, t = Date.now()): Snapshot {
+    const allStocks: Record<string, StockStats> = {};
+    for (const w of list) allStocks[w.symbol] = { ...(this.stats.get(w.securityId) ?? { depthBid: 0, depthAsk: 0, quotes: 0 }) };
+    return {
+      v: 1, reason, takenAt: t, symbol: 'ALL', securityId: '', stock: { depthBid: 0, depthAsk: 0, quotes: 0 },
+      list: list.map((w) => ({ symbol: w.symbol, securityId: w.securityId })),
+      headers: { ...this.headers }, unknownIds: { ...this.unknownIds }, events: [...this.events],
+      rawDepth: [...this.rawDepth], rawFeed: [...this.rawFeed], oddDepth: [...this.oddDepth], allStocks, lastMsg: { ...lastMsg },
+    };
   }
 
   /** Per stock: has the depth feed sent anything for it this session? (undefined = not enough trades to tell) */
