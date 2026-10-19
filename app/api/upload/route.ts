@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { ownerRequired } from '@/lib/auth/owner';
 
 const s3Client = new S3Client({
     region: process.env.AWS_REGION!,
@@ -11,6 +12,8 @@ const s3Client = new S3Client({
 });
 
 export async function POST(request: Request) {
+  const denied = ownerRequired(request); // signed-in owner only (second lock behind proxy.ts)
+  if (denied) return denied;
     try {
         const body = await request.json();
         const { fileName, fileType, folderPath } = body;

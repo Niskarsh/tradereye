@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
+import { ownerSessionSync } from '@/lib/auth/owner';
+
+/** What the public Home page needs per fill row: the P&L totals, nothing about how or why the trade was taken. */
+const PUBLIC_FIELDS = ['TradeGroupId', 'date', 'GrossPnL', 'NetPnL', 'TotalCharges'] as const;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const startParam = searchParams.get('start');
-  const endParam = searchParams.get('end');
+  // Signed out (the public Home page): the current month only, and only the P&L fields.
+  const owner = !!ownerSessionSync(request);
+  const startParam = owner ? searchParams.get('start') : null;
+  const endParam = owner ? searchParams.get('end') : null;
 
   const monthNames = [
     "january", "february", "march", "april", "may", "june",
@@ -128,6 +134,12 @@ export async function GET(request: Request) {
         }
       })
     );
+
+    if (!owner) {
+      for (const k of Object.keys(tradeData)) {
+        tradeData[k] = (tradeData[k] as Record<string, unknown>[]).map((r) => Object.fromEntries(PUBLIC_FIELDS.map((f) => [f, r[f]])));
+      }
+    }
 
     // 4. Return combined response
     return NextResponse.json({

@@ -7,6 +7,7 @@ import { istDateTime } from '@/lib/live/time';
 import { ClaudeError, structuredClaude } from '@/lib/copilot/claude';
 import { gatherReview, REVIEW_RULES, REVIEW_SCHEMA, reviewCells, toStoredReview } from '@/lib/copilot/review';
 import { settings } from '@/lib/copilot/settings';
+import { ownerRequired } from '@/lib/auth/owner';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -20,6 +21,8 @@ const q = (t: string) => `'${t.replace(/'/g, "''")}'`;
  * review includes the candles, the market at entry and exit, and what price did after the exit.
  */
 export async function POST(req: Request) {
+  const denied = ownerRequired(req); // signed-in owner only (second lock behind proxy.ts)
+  if (denied) return denied;
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return NextResponse.json({ error: 'NO_API_KEY', message: 'ANTHROPIC_API_KEY is not set in Vercel.' }, { status: 503 });
   try {

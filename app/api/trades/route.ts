@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
+import { ownerRequired } from '@/lib/auth/owner';
 
 export async function GET(request: Request) {
+  const denied = ownerRequired(request); // signed-in owner only (second lock behind proxy.ts)
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   // the token comes in a header (never in the URL, where it would be logged); the query is a fallback for old clients
   const token = request.headers.get('x-dhan-token')?.trim() || searchParams.get('token');
