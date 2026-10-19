@@ -157,9 +157,18 @@ export class BookModel {
 
   /** Since when the book has looked frozen (undefined = it is live). */
   staleSince(now: number): number | undefined {
+    return this.staleKind(now) ? this.bookChangedAt : undefined;
+  }
+
+  /**
+   * Which tell fired. OUTSIDE (price trading 2+ ticks beyond the book for 15 s) is proof the book is stale.
+   * UNCHANGED (no change in 90 s while trades print) can also be Dhan's depth stream just being sparse, which it
+   * sometimes is (19 Oct: 4 of 20 stocks updated in a minute): enough to distrust the book, not to reconnect for.
+   */
+  staleKind(now: number): 'OUTSIDE' | 'UNCHANGED' | undefined {
     if (!this.bookChangedAt) return undefined; // no book at all is a different problem
-    if (this.outsideSince !== undefined && now - this.outsideSince >= 15_000) return this.bookChangedAt;
-    if (now - this.bookChangedAt >= 90_000 && this.tradesSinceChange >= 5) return this.bookChangedAt;
+    if (this.outsideSince !== undefined && now - this.outsideSince >= 15_000) return 'OUTSIDE';
+    if (now - this.bookChangedAt >= 90_000 && this.tradesSinceChange >= 5) return 'UNCHANGED';
     return undefined;
   }
 
