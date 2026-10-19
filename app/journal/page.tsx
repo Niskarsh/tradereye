@@ -11,6 +11,7 @@ import {
 import LivePnl from './livePnl';
 import { TradeReview } from '@/components/journal/TradeReview';
 import { TradeBook } from '@/components/journal/TradeBook';
+import { TradeCharts } from '@/components/journal/TradeCharts';
 import { useAuth } from '@/context/AuthContext';
 
 // --- Functional Helpers ---
@@ -54,6 +55,13 @@ interface TradeEntry {
     Source?: string;
     EntryTime?: string;
     InitialStop?: string;
+    SecurityId?: string;
+    AvgEntry?: string;
+    AvgExit?: string;
+    InitialStopDist?: string;
+    LastStop?: string;
+    TpLast?: string;
+    RBasis?: string;
     RiskInr?: string;
     ExitType?: string;
     Setup?: string;
@@ -538,6 +546,22 @@ export default function Journal() {
                                         value={pendingComments[groupId] ?? group.trades[0].Comment}
                                         onChange={(e) => handleCommentChange(groupId, e.target.value)}
                                     />
+                                </div>
+
+                                {/* CHARTS rebuilt from saved candles (daily + 10-minute), entries / exits / signals marked */}
+                                <div className="pt-6 bg-zinc-950/30 border-t border-zinc-800/50">
+                                <TradeCharts
+                                    symbol={group.trades[0].Symbol}
+                                    date={selectedDateState}
+                                    direction={group.direction}
+                                    token={token}
+                                    securityId={group.trades.find(t => t.SecurityId)?.SecurityId}
+                                    initialStop={group.trades.find(t => t.InitialStop)?.InitialStop}
+                                    stopDist={group.trades.find(t => t.InitialStopDist)?.InitialStopDist}
+                                    lastStop={group.trades.find(t => t.LastStop)?.LastStop}
+                                    target={group.trades.find(t => t.TpLast)?.TpLast}
+                                    fills={group.trades.map(t => ({ time: t['Time (IST)'] ?? '', side: t.OrderType ?? '', qty: Number(t.Qty) || 0, price: Number(String(t.Price).replace(/,/g, '')) || 0 }))}
+                                />
                                 </div>
 
                                 {/* SECTION 3: SCREENSHOT WITH DOWNLOAD */}

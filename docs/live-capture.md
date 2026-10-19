@@ -33,3 +33,19 @@ change easy to spot. After stops are filled, run Backfill with "Redo trades alre
 
 ## Sheets rate limit (429)
 Google allows about 60 read requests per minute. A quiet refresh now costs 2 reads (header and tab lists are cached, tails are read in one batch), the page refreshes every 8s (open trade) or 20s (flat), the activity log every 30s, and order-feed frames are grouped for 2.5s. If Google still answers 429, the server retries briefly (honouring Retry-After) and the page pauses 30s and carries on; nothing is lost.
+
+## Journal charts (daily + 10-minute, rebuilt from candles)
+Each journal trade shows its own charts above the screenshot upload (which still works as before): daily candles on
+the left (a month in view, about 2 years to drag back through; tap a day to open it on the 10-minute chart) and the
+10-minute chart on the right with your entries / adds / exits, stop, target, 1R, VWAP, 200 EMA, the day's volume
+profile and Nifty 500 underneath. Signals that fired while you were in are marked: 0.8R reached (and whether Nifty was
+moving against you), half the peak given back, VWAP lost on heavy volume. Both charts drag, zoom (wheel, pinch, +/-)
+and have a crosshair (tap on a phone); double-click or **Trade** goes back to the trade.
+
+Candles are saved in the same S3 bucket, found from the stock and date alone (nothing in the sheet):
+- `candles/1m/<year>/<month>/<SYMBOL>_<date>.json.gz` - one day of 1-minute candles (Nifty 500 as `NIFTY500_...`)
+- `candles/daily/<year>/<month>/<SYMBOL>_<date>.json.gz` - about 2 years of daily candles ending that day
+
+The first time a trade's charts open, the missing days come from Dhan (Data API plan, about 3 requests) and are saved;
+after that they load from S3 only. Today is shown live and saved after 15:35. The AWS key needs `s3:GetObject` and
+`s3:PutObject` on `candles/*` (like `order-book/*`); if a save fails the chart still shows and says so.
