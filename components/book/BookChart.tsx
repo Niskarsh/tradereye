@@ -18,6 +18,8 @@ export type { TradeMark };
  *    double-click = back to live (or back to his trade, in the journal).
  *  - Journal: his entries / adds / exits as arrows with labels, the trade's time shaded, average entry dashed.
  *  - Crosshair with the exact price on the right and time at the bottom.
+ *  - Book bars beside the price scale: shares waiting at each price at the right edge of the view (green = to buy,
+ *    red = to sell), so the biggest levels ahead are readable at a glance.
  *  - Walls listed beside the price scale at their own height; hovering a wall (row or band) shows its Ask button.
  */
 
@@ -131,12 +133,20 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     }
 
     // brightness against a wall-sized level (4x the typical level now): normal levels stay dark, walls glow
-    // (measured at the last data, never at an empty future moment, which made everything look like a wall)
+    // (measured at the last data, never at an empty future moment, which made everything look like a wall).
+    // A deep, even book (big banks: every level similar, no 4x wall) would then draw almost black, so the scale
+    // drops to the biggest levels actually in view (98th percentile), but never below 1.5x typical: the largest
+    // levels still stand out as resistance / support, and noise is not blown up into "walls".
     const nowQ: number[] = [];
     for (const l of model.levels.values()) if (l.qty > 0 && dataEnd - l.seenAt < 30_000) nowQ.push(l.qty);
     if (!nowQ.length) for (const s of model.segments) if ((s.t1 ?? dataEnd) >= t0 && s.t0 <= t1) nowQ.push(s.qty);
     nowQ.sort((a, b) => a - b);
-    const ref = Math.max(1, 4 * (nowQ[Math.floor(nowQ.length / 2)] ?? 1));
+    const med = nowQ[Math.floor(nowQ.length / 2)] ?? 1;
+    const inView: number[] = [];
+    for (const s of model.segments) if ((s.t1 ?? dataEnd) >= t0 && s.t0 <= t1 && s.p / 100 >= pLo && s.p / 100 <= pHi) inView.push(s.qty);
+    inView.sort((a, b) => a - b);
+    const p98 = inView[Math.floor(inView.length * 0.98)] ?? 4 * med;
+    const ref = Math.max(1, Math.min(4 * med, Math.max(1.5 * med, p98)));
     g.save(); g.beginPath(); g.rect(0, 0, plotW, plotH); g.clip();
     for (const s of model.segments) {
       const end = Math.min(s.t1 ?? dataEnd, dataEnd);
@@ -294,6 +304,38 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
       g.fillStyle = 'rgba(42,36,25,0.95)'; g.fillRect(bx, by, tw, 18);
       g.strokeStyle = '#DFB15B'; g.lineWidth = 1; g.strokeRect(bx + 0.5, by + 0.5, tw - 1, 17);
       g.fillStyle = '#E8EAF0'; g.fillText(text, bx + 6, by + 13);
+    }
+
+    // book bars at the right edge of the view: the book at that moment (last known size, if seen in the last minute)
+    const tb = Math.min(t1, dataEnd);
+    const bars = new Map<number, { qty: number; side: 'BID' | 'ASK' }>();
+    for (const s of model.segments) {
+      if (s.t0 > tb || (s.t1 !== undefined && s.t1 <= tb) || tb - s.seenTill > 60_000) continue;
+      const p = s.p / 100;
+      if (p >= pLo && p <= pHi) bars.set(s.p, { qty: s.qty, side: s.side });
+    }
+    if (bars.size) {
+      const maxQ = Math.max(...[...bars.values()].map((b) => b.qty));
+      const barW = Math.min(110, plotW * 0.18);
+      const bh = Math.max(1, rowH - 0.5);
+      for (const [k, b] of bars) {
+        const w = (b.qty / maxQ) * barW;
+        g.fillStyle = b.side === 'BID' ? 'rgba(29,201,149,0.5)' : 'rgba(224,63,83,0.5)';
+        g.fillRect(plotW - w, Y(k / 100) - bh / 2, w, bh);
+      }
+      // the biggest on each side: its size, so the eye can compare without hovering
+      g.font = '10px monospace'; g.fillStyle = '#E8EAF0';
+      for (const side of ['BID', 'ASK'] as const) {
+        let best: [number, number] | undefined;
+        for (const [k, b] of bars) if (b.side === side && (!best || b.qty > best[1])) best = [k, b.qty];
+        if (best && rowH >= 2) { const label = fmtQ(best[1]); g.fillText(label, plotW - (best[1] / maxQ) * barW - g.measureText(label).width - 4, Y(best[0] / 100) + 3); }
+      }
+    }
+
+    // trades but no book: say so (a stock whose depth feed is not arriving would otherwise just look empty)
+    if (model.lastEventAt && !bars.size && !model.segments.some((s) => (s.t1 ?? dataEnd) >= t0 && s.t0 <= t1)) {
+      g.fillStyle = '#7C8899'; g.font = '12px sans-serif';
+      g.fillText('No order book (depth) data in this view: only trades arrived for this stock.', 16, plotH - 14);
     }
 
     // past the last data: a "now" line, then empty space (no future data, nothing drawn)
