@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Maximize2, Minimize2, RefreshCcw, TrendingUp } from 'lucide-react';
+import { Camera, Loader2, Maximize2, Minimize2, RefreshCcw, TrendingUp, Upload } from 'lucide-react';
 import { CandleChart, type ChartFlag, type ChartHLine, type ChartMark } from '@/components/journal/CandleChart';
 import { useFullscreen } from '@/components/book/useFullscreen';
 import { tradeMarks, type Fill } from '@/lib/book/marks';
@@ -40,8 +40,10 @@ function useWide() {
   return wide;
 }
 
-export function TradeCharts({ symbol, date, direction, fills, token, securityId, initialStop, stopDist, lastStop, target }: {
+export function TradeCharts({ symbol, date, direction, fills, token, securityId, initialStop, stopDist, lastStop, target, uploadedChart, uploading, onViewUploaded, onUpload }: {
   symbol: string; date: string; direction: string; fills: Fill[]; token: string;
+  /** a chart screenshot uploaded by hand (older trades): shown on demand, not as a big box */
+  uploadedChart?: string; uploading?: boolean; onViewUploaded?: (url: string) => void; onUpload?: (file: File) => void;
   securityId?: string; initialStop?: string; stopDist?: string; lastStop?: string; target?: string;
 }) {
   const sym = symbol.trim().toUpperCase();
@@ -146,12 +148,32 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
   const hIntra = full ? fullH : wide ? 460 : 380;
   const hDaily = full ? (wide ? fullH : Math.round(fullH * 0.45)) : wide ? 460 : 260;
 
-  if (!ok) return null;
+  const fileInput = useRef<HTMLInputElement>(null);
+  const pill = 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-bold transition-colors disabled:opacity-60';
   const head = (
-    <div className="flex items-center gap-2 mb-3 text-zinc-500">
+    <div className="flex flex-wrap items-center gap-2 mb-3 text-zinc-500">
       <TrendingUp size={14} /><span className="text-[10px] font-black uppercase tracking-widest">Charts</span>
+      <div className="ml-auto flex items-center gap-2">
+        {uploadedChart && onViewUploaded && (
+          <button onClick={() => onViewUploaded(uploadedChart)} className={`${pill} border-brand-accent/60 text-brand-accent hover:bg-brand-accent/10`}>
+            <Camera className="h-3.5 w-3.5" />Uploaded chart
+          </button>
+        )}
+        {onUpload && (
+          <>
+            <input ref={fileInput} type="file" accept="image/*" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }} />
+            <button onClick={() => fileInput.current?.click()} disabled={uploading} title={uploadedChart ? 'Replace the uploaded chart' : 'Upload a chart screenshot (PNG, JPG up to 10MB)'}
+              className={`${pill} border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-white`}>
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {uploading ? 'Uploading…' : uploadedChart ? 'Replace' : 'Upload chart'}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
+  if (!ok) return <div className="px-6 pb-4">{head}</div>;
 
   const pickedState = extra[picked];
   const c = data?.counts;
