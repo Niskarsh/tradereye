@@ -5,6 +5,7 @@ import {
   slotOf, slotStart, slotsUpTo, type Event,
 } from './record';
 import type { WatchItem } from './sheet';
+import { ReversalWatch, type ReversalAlert } from './reversal';
 
 /**
  * Records the order book of every stock on the list while the Order Book tab is open (browser only: the Dhan feed
@@ -32,6 +33,9 @@ export class Recorder {
   list: WatchItem[] = [];
   info: RecInfo = { status: 'idle', stocks: 0, pending: 0, bytesToday: 0 };
   onChange?: () => void;
+  /** a reversal setup on a recorded stock (live events only, never the morning replayed from S3) */
+  onAlert?: (a: ReversalAlert) => void;
+  private watch = new ReversalWatch((a) => this.onAlert?.(a));
   private bufs = new Map<string, Buf>();
   private queue = new Map<string, Uint8Array>(); // failed saves, by key
   private sockets: WebSocket[] = [];
@@ -175,11 +179,12 @@ export class Recorder {
       const sig = JSON.stringify(e[3]);
       if (buf.lastDepth[e[2]] === sig) {
         // unchanged side: store a tiny "still there" marker at most every 5 s (keeps levels "seen" on replay)
-        if (t - (buf.lastSeen[e[2]] ?? 0) < 5_000) { applyEvent(m, ['S', t, e[2]], securityId); return; }
+        if (t - (buf.lastSeen[e[2]] ?? 0) < 5_000) { applyEvent(m, ['S', t, e[2]], securityId); this.watch.check(securityId, w.symbol, m, t); return; }
         buf.lastSeen[e[2]] = t;
         const s: Event = ['S', t, e[2]];
         applyEvent(m, s, securityId);
         buf.events.push(s); buf.dirty = true;
+        this.watch.check(securityId, w.symbol, m, t);
         return;
       }
       buf.lastDepth[e[2]] = sig; buf.lastSeen[e[2]] = t;
@@ -187,6 +192,7 @@ export class Recorder {
     applyEvent(m, e, securityId);
     buf.events.push(e);
     buf.dirty = true;
+    this.watch.check(securityId, w.symbol, m, t);
   }
 
   /** Stocks not on screen keep only their last 15 minutes in memory (the rest is in S3). */
