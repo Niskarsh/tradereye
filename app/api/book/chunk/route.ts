@@ -3,6 +3,7 @@ import { guard } from '@/lib/live/guard';
 import { KEY_RE } from '@/lib/book/record';
 import { getChunk, putChunk } from '@/lib/book/s3';
 import { DIAG_RE } from '@/lib/book/probe';
+import { ALERT_LOG_RE } from '@/lib/book/outcomes';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,7 @@ export async function GET(req: Request) {
   const g = guard(req);
   if (!g.ok) return g.res;
   const key = new URL(req.url).searchParams.get('key') ?? '';
-  if (!KEY_RE.test(key) && !DIAG_RE.test(key)) return NextResponse.json({ error: 'BAD_KEY' }, { status: 400 });
+  if (!KEY_RE.test(key) && !DIAG_RE.test(key) && !ALERT_LOG_RE.test(key)) return NextResponse.json({ error: 'BAD_KEY' }, { status: 400 });
   try {
     const bytes = await getChunk(key);
     if (!bytes) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 });
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
   const g = guard(req);
   if (!g.ok) return g.res;
   const key = new URL(req.url).searchParams.get('key') ?? '';
-  if (!KEY_RE.test(key) && !DIAG_RE.test(key)) return NextResponse.json({ error: 'BAD_KEY' }, { status: 400 });
+  if (!KEY_RE.test(key) && !DIAG_RE.test(key) && !ALERT_LOG_RE.test(key)) return NextResponse.json({ error: 'BAD_KEY' }, { status: 400 });
   try {
     const body = new Uint8Array(await req.arrayBuffer());
     if (!body.length || body.length > MAX_BYTES) return NextResponse.json({ error: 'BAD_SIZE' }, { status: 413 });

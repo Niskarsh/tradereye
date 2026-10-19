@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /**
- * "Ask" on a wall in the Order Book tab. Body { symbol, question, book }. Claude gets the same market facts the
+ * "Ask" on a wall in the Order Book tab. Body { symbol, question, book, direction?, setup? }. Claude gets the same market facts the
  * co-pilot uses for that stock (10-min candles, Nifty, VWAP, levels; read both ways, he has not picked a side) plus
  * the live order-book summary from his screen. Short answer, logged in the monthly chat tab. Nothing is stored in
  * the checks tab.
@@ -40,9 +40,14 @@ export async function POST(req: Request) {
       await appendChat(sheets, date, { Date: date, Time: istTime(Date.now()), CreatedAt: Date.now(), CheckId: `ORDER-BOOK ${pastDay}`, Symbol: symbol, Mode: 'REVIEW', DataTime: pastDay, Question: question, Answer: r.text.slice(0, 4000), Model: r.model, InTokens: r.inTokens, OutTokens: r.outTokens, CostInr: r.costInr, LatencyMs: r.latencyMs, Error: '' }).catch(() => {});
       return NextResponse.json({ text: r.text, costInr: r.costInr, latencyMs: r.latencyMs });
     }
-    const check = await buildCheck({ dhan: g.dhan, sheets, clientId: g.clientId, lookupSecurityId: (x) => lookupSecurityId(x) }, { direction: 'LONG', setup: 'MOMENTUM', symbol, manage: true });
+    // a reversal alert's "Should I take this?" names the trade; a plain wall question reads the stock both ways
+    const dir = b?.direction === 'LONG' || b?.direction === 'SHORT' ? b.direction as 'LONG' | 'SHORT' : undefined;
+    const setup = dir && (b?.setup === 'REVERSAL' || b?.setup === 'MOMENTUM') ? b.setup as 'REVERSAL' | 'MOMENTUM' : 'MOMENTUM';
+    const check = await buildCheck({ dhan: g.dhan, sheets, clientId: g.clientId, lookupSecurityId: (x) => lookupSecurityId(x) }, { direction: dir ?? 'LONG', setup, symbol, manage: true });
     const context = [
-      `ORDER BOOK QUESTION about ${symbol}. He has NOT picked a direction or setup: the "LONG · MOMENTUM" in the header below is only a placeholder, read the stock both ways. If IN_TRADE is present he holds it, in that direction.`,
+      dir
+        ? `ORDER BOOK ALERT about ${symbol}: he is considering a ${setup} ${dir} right now, from the alert below. Judge THAT trade: take / wait / skip, 2-3 reasons, and the one thing that would prove it wrong. If IN_TRADE is present he already holds it.`
+        : `ORDER BOOK QUESTION about ${symbol}. He has NOT picked a direction or setup: the "LONG · MOMENTUM" in the header below is only a placeholder, read the stock both ways. If IN_TRADE is present he holds it, in that direction.`,
       `DATA fetched at ${check.time} IST`, check.payload,
       book ? `${book}\n(order book live from his screen as of ${istTime(Date.now())} IST)` : 'ORDER_BOOK not available.',
     ].join('\n');
