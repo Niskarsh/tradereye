@@ -102,3 +102,14 @@ test('bias: absorption first, then tape + book near price', () => {
   assert.equal(b.bias(t).side, 'UP');
   assert.match(b.bias(t).why, /book near price/);
 });
+
+test('Dhan disconnect packets (code 50) are read on both feeds, with the reason in plain words', async () => {
+  const { disconnectCode, disconnectReason } = await import('../lib/book/feed');
+  const feed = new ArrayBuffer(10); const f = new DataView(feed); f.setUint8(0, 50); f.setInt16(1, 10, true); f.setInt16(8, 805, true);
+  const depth = new ArrayBuffer(14); const d = new DataView(depth); d.setInt16(0, 14, true); d.setUint8(2, 50); d.setInt16(12, 807, true);
+  assert.equal(disconnectCode(feed, 'feed'), 805);
+  assert.equal(disconnectCode(depth, 'depth'), 807);
+  assert.match(disconnectReason(805), /5 per account/);
+  const q = new ArrayBuffer(50); new DataView(q).setUint8(0, 4);
+  assert.equal(disconnectCode(q, 'feed'), undefined);
+});
