@@ -37,3 +37,15 @@ test('quiet stock: an unchanged book with no trades is not stale; with trades fo
   for (let i = 0; i < 6; i++) { t += 2_000; book(m, 500, t); trade(m, 500, t); }
   assert.equal(m.staleSince(t), T('11:00:00'));
 });
+
+test('stale kinds: OUTSIDE is proof (reconnect), UNCHANGED may just be a sparse depth stream (no reconnect)', () => {
+  const m = new BookModel(); vol = 1000;
+  let t = T('11:00:00');
+  book(m, 500, t); trade(m, 500, t);
+  for (let i = 0; i < 50; i++) { t += 2_000; trade(m, 500, t); } // trades at the book, book unchanged for 100 s
+  assert.equal(m.staleKind(t), 'UNCHANGED');
+  const f = new BookModel(); vol = 1000; t = T('09:25:00');
+  book(f, 281.9, t); trade(f, 281.9, t);
+  for (let p = 281.9; p > 278.3; p = r2(p - 0.05)) { t += 5_000; book(f, 281.9, t); trade(f, p, t); }
+  assert.equal(f.staleKind(t), 'OUTSIDE');
+});

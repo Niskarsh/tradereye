@@ -259,9 +259,14 @@ export class Recorder {
   private watchdog() {
     const now = Date.now();
     for (const [kind, other] of [['feed', 'depth'], ['depth', 'feed']] as const) {
-      if (now - this.lastMsg[kind] < 30_000 || now - this.lastMsg[other] > 10_000 || now - this.lastKick[kind] < 60_000) continue;
+      // the trade feed never goes quiet for 30 s in market hours; the depth stream can (sparse, and ~30 s silent
+      // after every connect, 19 Oct), so it gets 2 minutes and at most one restart every 5, or the restart itself
+      // starts the silence that triggers the next one (a minute on, a minute off)
+      const quiet = kind === 'feed' ? 30_000 : 120_000, gap = kind === 'feed' ? 60_000 : 300_000;
+      if (now - this.lastMsg[kind] < quiet || now - this.lastMsg[other] > 10_000 || now - this.lastKick[kind] < gap) continue;
       this.lastKick[kind] = now;
       const silent = Math.round((now - this.lastMsg[kind]) / 1000);
+      this.probe.event(kind, `watchdog: silent ${silent} s while the other feed flowed -> reconnect`, now);
       this.set({ error: `${kind === 'feed' ? 'Trade / price feed (bubbles, last price)' : 'Order book feed'} silent for ${silent} s while the other kept updating: reconnecting it.` });
       const isDepth = kind === 'depth';
       const ws = this.sockets.find((s) => s.url.includes('twentydepth') === isDepth);
@@ -325,16 +330,19 @@ export class Recorder {
    * giving up (the chart then says the book is not updating). A book that moves again clears the flag.
    */
   private checkStale(securityId: string, m: BookModel, t: number) {
-    const since = m.staleSince(t);
+    const kind = m.staleKind(t);
+    const since = kind ? m.bookChangedAt : undefined;
     const s = this.stale.get(securityId);
     if (since === undefined) { if (s) { this.stale.delete(securityId); this.set({}); } return; }
     if (s && s.since !== since) { s.since = since; s.tries = 0; s.gaveUp = false; }
     const cur = s ?? { since, tries: 0, gaveUp: false };
     if (!s) { this.stale.set(securityId, cur); this.set({}); }
-    if (cur.gaveUp || t - this.lastDepthReconnect < 120_000) return;
+    // reconnect only on proof (price trading outside the book), at most every 5 minutes for all stocks
+    if (kind !== 'OUTSIDE' || cur.gaveUp || t - this.lastDepthReconnect < 300_000) return;
     if (cur.tries >= 3) { cur.gaveUp = true; this.set({}); return; }
     cur.tries++;
     this.lastDepthReconnect = t;
+    this.probe.event('depth', `frozen book on ${securityId} (price outside it) -> reconnect`, t);
     this.reconnectDepth();
   }
 
