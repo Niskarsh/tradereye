@@ -11,6 +11,7 @@ import { BookModel } from '@/lib/book/model';
 import { istDate } from '@/lib/book/record';
 import type { WatchItem } from '@/lib/book/sheet';
 import type { ReversalAlert } from '@/lib/book/reversal';
+import { reportForClaude } from '@/lib/book/feedreport';
 
 /**
  * Order Book tab: curate the list (type / paste symbols, or paste screener screenshots read by Gemini), press
@@ -412,6 +413,19 @@ function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, on
     return () => { cancelled = true; };
   }, [w?.symbol, cfg.date, liveNow]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [feedMsg, setFeedMsg] = useState('');
+  useEffect(() => { if (!feedMsg) return; const id = setTimeout(() => setFeedMsg(''), 6000); return () => clearTimeout(id); }, [feedMsg]);
+  const askFeed = async (report: string) => {
+    if (!w) return;
+    const q = 'Check feed: is any data from Dhan missing in the last 5 minutes?';
+    setAnswer({ q, busy: true });
+    try {
+      const r = await api('/api/book/feedcheck', { method: 'POST', body: JSON.stringify({ symbol: w.symbol, report }), headers: { 'Content-Type': 'application/json' } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setAnswer({ q, text: j.text, busy: false, cost: j.costInr });
+    } catch (e) { setAnswer({ q, busy: false, err: (e as Error).message }); }
+  };
   const ask = async (q: string) => {
     if (!w) return;
     setAnswer({ q, busy: true });
@@ -455,7 +469,21 @@ function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, on
             </button>
           </span>
         )}
-        <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className={`${full && pos.n > 1 ? '' : 'ml-auto '}rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink`}>
+        {liveNow && listed && (
+          <span className={`flex items-center gap-1 ${full && pos.n > 1 ? '' : 'ml-auto'}`}>
+            <button onClick={() => {
+              const r = rec.feedReport(listed.securityId, listed.symbol);
+              void navigator.clipboard.writeText(JSON.stringify(r)).then(() => setFeedMsg(`Copied: ${r.raw.length} raw packets, last 5 min (also saved to S3)`), () => setFeedMsg('Copy failed: the browser blocked the clipboard'));
+            }} title="Copy this stock's last 5 minutes: every packet exactly as Dhan sent it (base64), the same packets decoded, the computed facts and the connection events. Also saved to S3."
+              className="h-8 rounded-lg border border-line-strong px-2.5 text-[11px] font-bold text-ink-2 hover:border-brand-accent">Copy feed data</button>
+            <button disabled={answer?.busy} onClick={() => {
+              const r = rec.feedReport(listed.securityId, listed.symbol);
+              void askFeed(reportForClaude(r));
+            }} title="Claude checks this stock's last 5 minutes of feed against what Dhan's API documents (one paid call)"
+              className="flex h-8 items-center gap-1 rounded-lg border border-brand-accent/60 px-2.5 text-[11px] font-black text-brand-accent hover:bg-brand-accent/10 disabled:opacity-50"><Sparkles className="h-3 w-3" />Check feed</button>
+          </span>
+        )}
+        <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className={`${(full && pos.n > 1) || (liveNow && listed) ? '' : 'ml-auto '}rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink`}>
           {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </button>
         {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
@@ -466,6 +494,7 @@ function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, on
           label={loading.total ? `${loading.label} · ${loading.done}/${loading.total} pieces (10 min each)` : `${loading.label}…`} />
       )}
       {failed && <p className="text-xs text-data-red-text">{failed}</p>}
+      {feedMsg && <p className="text-[11px] text-brand-accent">{feedMsg}</p>}
       {liveNow && listed && (() => {
         const snap = rec.probe.snapshots.get(listed.securityId);
         if (!snap) return null;

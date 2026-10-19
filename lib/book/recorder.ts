@@ -7,6 +7,7 @@ import {
 import type { WatchItem } from './sheet';
 import { ReversalWatch, type ReversalAlert } from './reversal';
 import { FeedProbe, diagKey, type Snapshot } from './probe';
+import { buildFeedReport, type FeedReport } from './feedreport';
 import { detectExtreme } from './extreme';
 import type { DayContext } from './context';
 import { OutcomeLog, alertLogKey } from './outcomes';
@@ -122,6 +123,19 @@ export class Recorder {
     const snap = this.probe.snapshotAll('saved by hand (Feed log button)', this.list, this.lastMsg);
     void this.saveSnapshot(snap);
     return snap;
+  }
+
+  /** One stock's last 5 minutes of raw packets + computed facts (the chart's Copy / Check feed). Saved to S3 too. */
+  feedReport(securityId: string, symbol: string, windowMs = 5 * 60_000): FeedReport {
+    const m = this.models.get(securityId);
+    const r = buildFeedReport(this.probe, symbol, securityId, Date.now(), windowMs, (m?.tick ?? 5) / 100);
+    void (async () => {
+      try {
+        const bytes = await gzip(JSON.stringify(r));
+        await this.api(`/api/book/chunk?key=${encodeURIComponent(diagKey(`${symbol}-FEED`, r.builtAt))}`, { method: 'POST', body: bytes as BodyInit, headers: { 'Content-Type': 'application/gzip' } });
+      } catch { /* the copy in hand still has it */ }
+    })();
+    return r;
   }
 
   /** The probe's snapshot goes to S3 (a few KB, gzip'd JSON), so it can be studied after the session. */

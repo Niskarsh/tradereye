@@ -42,17 +42,35 @@ const b64 = (buf: ArrayBuffer) => {
 };
 
 /** Packet headers in one depth message, walked the same way parseDepth walks them. */
-export function depthHeaders(buf: ArrayBuffer): { code: number; segment: number; securityId: string; len: number }[] {
+export function depthHeaders(buf: ArrayBuffer): { code: number; segment: number; securityId: string; len: number; off: number; size: number }[] {
   const dv = new DataView(buf); const out = [];
   let off = 0;
   while (off + 12 <= buf.byteLength) {
     const len = dv.getInt16(off, true);
-    const size = len >= 12 && off + len <= buf.byteLength ? len : 332;
-    out.push({ code: dv.getUint8(off + 2), segment: dv.getUint8(off + 3), securityId: String(dv.getInt32(off + 4, true)), len });
+    const size = len >= 12 && off + len <= buf.byteLength ? len : Math.min(332, buf.byteLength - off);
+    out.push({ code: dv.getUint8(off + 2), segment: dv.getUint8(off + 3), securityId: String(dv.getInt32(off + 4, true)), len, off, size });
     off += size;
   }
   return out;
 }
+
+/** Packets in one live-market-feed message (8-byte header: code, length, segment, security id). */
+export function feedHeaders(buf: ArrayBuffer): { code: number; securityId: string; len: number; off: number; size: number }[] {
+  const dv = new DataView(buf); const out = [];
+  let off = 0;
+  while (off + 8 <= buf.byteLength) {
+    const code = dv.getUint8(off), len = dv.getInt16(off + 1, true);
+    const fallback = code === 4 ? 50 : code === 8 ? 162 : code === 2 ? 16 : code === 6 ? 16 : code === 5 ? 12 : 8;
+    const size = Math.min(len >= 8 ? len : fallback, buf.byteLength - off);
+    out.push({ code, securityId: String(dv.getInt32(off + 4, true)), len, off, size });
+    off += size;
+  }
+  return out;
+}
+
+/** One packet as Dhan sent it (its bytes cut out of the message, unchanged), with when it arrived. */
+export interface RawPacket { t: number; feed: 'depth' | 'feed'; code: number; bytes: Uint8Array }
+export const KEEP_PACKETS_MS = 10 * 60_000;
 
 export class FeedProbe {
   stats = new Map<string, StockStats>();
@@ -63,6 +81,18 @@ export class FeedProbe {
   rawFeed: Snapshot['rawFeed'] = [];
   oddDepth: Snapshot['oddDepth'] = [];
   snapshots = new Map<string, Snapshot>(); // by securityId, today's
+  /** per stock, the last 10 minutes of its packets exactly as received (for the chart's Copy / Check feed) */
+  packets = new Map<string, RawPacket[]>();
+  private keep(id: string, p: RawPacket) {
+    let a = this.packets.get(id);
+    if (!a) { a = []; this.packets.set(id, a); }
+    a.push(p);
+    if (a.length > 6000 || (a.length % 200 === 0 && p.t - a[0].t > KEEP_PACKETS_MS)) {
+      const cut = p.t - KEEP_PACKETS_MS;
+      let i = 0; while (i < a.length && a[i].t < cut) i++;
+      a.splice(0, Math.max(i, a.length - 6000));
+    }
+  }
   private taken = new Set<string>();
   onSnapshot?: (s: Snapshot) => void;
 
@@ -78,6 +108,7 @@ export class FeedProbe {
       this.headers[k] = (this.headers[k] ?? 0) + 1;
       if (h.code === 41 || h.code === 51) {
         if (!listed.has(h.securityId)) { this.unknownIds[h.securityId] = (this.unknownIds[h.securityId] ?? 0) + 1; odd = true; continue; }
+        this.keep(h.securityId, { t, feed: 'depth', code: h.code, bytes: new Uint8Array(buf.slice(h.off, h.off + h.size)) });
         const s = this.st(h.securityId);
         if (h.code === 41) s.depthBid++; else s.depthAsk++;
         s.firstDepthAt ??= t; s.lastDepthAt = t;
@@ -89,6 +120,7 @@ export class FeedProbe {
   }
 
   feedMessage(buf: ArrayBuffer, t = Date.now()) {
+    for (const h of feedHeaders(buf)) if (h.code !== 50) this.keep(h.securityId, { t, feed: 'feed', code: h.code, bytes: new Uint8Array(buf.slice(h.off, h.off + h.size)) });
     this.rawFeed.push({ t, bytes: buf.byteLength, b64: b64(buf) });
     if (this.rawFeed.length > 5) this.rawFeed.shift();
   }
