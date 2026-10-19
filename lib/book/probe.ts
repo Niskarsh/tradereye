@@ -7,8 +7,10 @@
  *  - every packet header seen on the depth feed, summarised: [code, segment, securityId] -> count. A stock whose
  *    depth arrives under another id or segment shows up here as an unknown id.
  *  - the subscription messages sent, socket opens / closes (with close code and reason), Dhan disconnect codes
- *  - the last 20 raw depth messages and last 5 raw quote messages (base64), plus every raw message that contained
- *    an unknown packet code or an id not on the list (first 20)
+ *  - the last 20 raw depth messages and last 5 raw quote messages, plus the first 20 raw depth messages that
+ *    contained an unknown packet code or an id not on the list. RAW = Dhan's exact bytes, whole and unmodified
+ *    (one depth message carries every listed stock, ~33 KB for 25), base64 only because JSON cannot hold binary.
+ *    `bytes` is the original length, so a decode can be checked against it.
  *
  * When a stock has traded 5+ times over 60 s with not one depth packet, a snapshot for that stock is taken once a
  * day: saved to S3 (order-book/diagnostics/<date>/<SYMBOL>_<HHMMSS>.json.gz) and downloadable from its chart.
@@ -23,13 +25,14 @@ export interface Snapshot {
   headers: Record<string, number>;          // "code:segment:securityId" -> packets, depth feed
   unknownIds: Record<string, number>;       // depth packets for ids not on the list
   events: ProbeEvent[];                     // subscriptions, opens, closes, disconnects
-  rawDepth: { t: number; b64: string; packets: string[] }[];
-  rawFeed: { t: number; b64: string }[];
-  oddDepth: { t: number; b64: string; packets: string[] }[];
+  rawDepth: { t: number; bytes: number; b64: string; packets: string[] }[];
+  rawFeed: { t: number; bytes: number; b64: string }[];
+  oddDepth: { t: number; bytes: number; b64: string; packets: string[] }[];
 }
 
-const b64 = (buf: ArrayBuffer, max = 4096) => {
-  const u = new Uint8Array(buf, 0, Math.min(buf.byteLength, max));
+/** The whole message, byte for byte (no cap: a cut copy could drop exactly the packets being looked for). */
+const b64 = (buf: ArrayBuffer) => {
+  const u = new Uint8Array(buf);
   let s = ''; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
   return typeof btoa === 'function' ? btoa(s) : Buffer.from(s, 'binary').toString('base64');
 };
@@ -76,13 +79,13 @@ export class FeedProbe {
         s.firstDepthAt ??= t; s.lastDepthAt = t;
       } else odd = true;
     }
-    this.rawDepth.push({ t, b64: b64(buf), packets });
+    this.rawDepth.push({ t, bytes: buf.byteLength, b64: b64(buf), packets });
     if (this.rawDepth.length > 20) this.rawDepth.shift();
-    if (odd && this.oddDepth.length < 20) this.oddDepth.push({ t, b64: b64(buf), packets });
+    if (odd && this.oddDepth.length < 20) this.oddDepth.push({ t, bytes: buf.byteLength, b64: b64(buf), packets });
   }
 
   feedMessage(buf: ArrayBuffer, t = Date.now()) {
-    this.rawFeed.push({ t, b64: b64(buf, 1024) });
+    this.rawFeed.push({ t, bytes: buf.byteLength, b64: b64(buf) });
     if (this.rawFeed.length > 5) this.rawFeed.shift();
   }
 

@@ -33,3 +33,16 @@ test('probe: counts depth per stock, flags ids not on the list, snapshots a stoc
   assert.equal(got.length, 1, 'once per stock');
   assert.ok(DIAG_RE.test(diagKey('EMMVEE', t0)), diagKey('EMMVEE', t0));
 });
+
+test('probe: raw messages are kept whole and byte-exact (a 25-stock depth message is ~33 KB)', () => {
+  const p = new FeedProbe();
+  const big = cat(...Array.from({ length: 50 }, (_, i) => depth(i % 2 ? 51 : 41, 1000 + (i >> 1))));
+  new Uint8Array(big)[big.byteLength - 1] = 0xab; // a marker in the very last byte
+  p.depthMessage(big, new Set(['1000']), Date.now());
+  const raw = p.rawDepth[0];
+  const back = Buffer.from(raw.b64, 'base64');
+  assert.equal(raw.bytes, big.byteLength);
+  assert.equal(back.length, big.byteLength);
+  assert.ok(back.equals(Buffer.from(big)), 'decodes to the exact bytes Dhan sent');
+  assert.equal(back[back.length - 1], 0xab);
+});
