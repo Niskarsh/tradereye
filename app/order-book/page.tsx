@@ -111,11 +111,10 @@ export default function OrderBookPage() {
   useEffect(() => { setCharts(loadCharts()); }, []);
   useEffect(() => { try { localStorage.setItem(CHARTS_KEY, JSON.stringify(charts)); } catch { /* ignore */ } }, [charts]);
 
-  // the saved list (same on every device)
+  // the saved list (same on every device; needs only the Google sign-in)
   useEffect(() => {
-    if (!token) return;
     api('/api/book/watchlist').then((r) => r.json()).then((j) => { if (Array.isArray(j.list)) { setList(j.list); rec.current!.list = rec.current!.info.status === 'recording' ? rec.current!.list : j.list; } }).catch(() => {});
-  }, [token, api]);
+  }, [api]);
 
   const saveList = useCallback(async (symbols: string[]) => {
     setListBusy(true);

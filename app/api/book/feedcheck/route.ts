@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
-import { guard } from '@/lib/live/guard';
+import { ownerGuard } from '@/lib/live/guard';
 import { istDateKey, istTime } from '@/lib/live/time';
 import { ClaudeError, plainClaude } from '@/lib/copilot/claude';
 import { appendChat, chatsToday } from '@/lib/copilot/store';
@@ -34,7 +34,7 @@ HOW TO ANSWER (plain text, no tables, under 220 words):
 
 /** POST { symbol, report } (report = reportForClaude text). One Claude call per click, logged in the chat tab. */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return NextResponse.json({ error: 'NO_API_KEY', message: 'ANTHROPIC_API_KEY is not set in Vercel.' }, { status: 503 });

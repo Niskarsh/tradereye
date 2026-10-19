@@ -13,11 +13,11 @@ import type { Candles } from '@/lib/dhan';
  * stop / target / 1R, VWAP, 200 EMA, the day's volume profile, Nifty 500 underneath, and the exit signals that fired.
  * Tap a day on the daily chart to open it on the 10-minute chart.
  *
- * Data: /api/journal/candles reads the saved candles from S3; anything missing comes from Dhan once and is saved, so
- * opening the journal again costs no Dhan requests. Loads when the card scrolls into view, one trade at a time.
+ * Data: /api/journal/candles reads the saved candles from S3 (Google sign-in is enough); anything missing comes from Dhan
+ * once (needs the Dhan token that one time) and is saved, so opening the journal again needs no Dhan login. Loads when the card scrolls into view, one trade at a time.
  */
 
-interface Resp { symbol: string; securityId?: string; date: string; minute: Candles; nifty: Candles; daily?: Candles; live: boolean; counts: { fromS3: number; fromDhan: number; saved: number; dhanCalls: number; s3Errors: number; s3Error?: string } }
+interface Resp { symbol: string; securityId?: string; date: string; minute: Candles; nifty: Candles; daily?: Candles; live: boolean; counts: { fromS3: number; fromDhan: number; saved: number; dhanCalls: number; s3Errors: number; s3Error?: string; notSaved?: number } }
 
 // one request at a time across all trade cards (Dhan allows 5 data requests a second)
 let queue: Promise<unknown> = Promise.resolve();
@@ -50,7 +50,7 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
   const fetchCandles = useCallback((body: Record<string, unknown>) => queued(async () => {
     const r = await fetch('/api/journal/candles', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-dhan-token': tokenRef.current }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+    if (!r.ok) throw Object.assign(new Error(j.message ?? `HTTP ${r.status}`), { code: j.error as string | undefined });
     return j as Resp;
   }), []);
 
@@ -67,14 +67,18 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
 
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState('');
+  const [needsDhan, setNeedsDhan] = useState(false);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     setBusy(true); setErr('');
     try { setData(await fetchCandles({ symbol: sym, date, securityId: /^\d+$/.test(securityId ?? '') ? securityId : undefined })); }
-    catch (e) { setErr((e as Error).message); }
+    catch (e) { setErr((e as Error).message); setNeedsDhan((e as { code?: string }).code === 'NEEDS_DHAN'); }
     finally { setBusy(false); }
   }, [fetchCandles, sym, date, securityId]);
-  useEffect(() => { if (seen && token && ok && !data && !busy && !err) void load(); }, [seen, token, ok, data, busy, err, load]);
+  // saved charts need only the Google sign-in; the Dhan token is used just to fetch days not saved yet
+  useEffect(() => { if (seen && ok && !data && !busy && !err) void load(); }, [seen, ok, data, busy, err, load]);
+  // logged in to Dhan after "not saved yet": try again by itself
+  useEffect(() => { if (token && needsDhan) { setNeedsDhan(false); setErr(''); } }, [token, needsDhan]);
 
   // a day picked on the daily chart: shown on the 10-minute chart (fetched if it is older than what is loaded)
   const [picked, setPicked] = useState<string>(date);
@@ -148,7 +152,6 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
       <TrendingUp size={14} /><span className="text-[10px] font-black uppercase tracking-widest">Charts</span>
     </div>
   );
-  if (!token) return <div ref={box} className="px-6 pb-4">{head}<p className="text-[11px] text-zinc-600">Log in on the Dhan login tab to see this trade&apos;s charts.</p></div>;
 
   const pickedState = extra[picked];
   const c = data?.counts;
@@ -169,7 +172,7 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-black text-white">{sym}</span>
           <span className="text-[11px] text-zinc-500">
-            {data?.live ? 'Today · live, saved after the close' : c ? (c.dhanCalls ? `Fetched from Dhan${c.saved ? ', saved to S3 for next time' : ''}` : 'From S3') : ''}
+            {data?.live ? 'Today · live, saved after the close' : c ? (c.dhanCalls ? `Fetched from Dhan${c.saved ? ', saved to S3 for next time' : ''}` : c.notSaved ? 'From S3 · a few older days are not saved yet (Dhan login fills them in)' : 'From S3') : ''}
           </span>
           {c && c.s3Errors > 0 && c.saved === 0 && c.dhanCalls > 0 && <span title={c.s3Error} className="text-[11px] text-data-caution">Could not save to S3 (shown anyway)</span>}
           <button onClick={toggle} aria-label={full ? 'Exit full screen' : 'Full screen'} className="ml-auto rounded-lg border border-zinc-800 p-1.5 text-zinc-500 hover:text-white">
@@ -179,7 +182,9 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
 
         {err ? (
           <div className="flex items-center gap-3 text-xs text-data-red-text">
-            <span>Could not load the charts: {err}</span>
+            {needsDhan
+              ? <span className="text-zinc-400">{err} <a href="/dhan-login" className="font-bold text-brand-accent underline">Dhan login</a></span>
+              : <span>Could not load the charts: {err}</span>}
             <button onClick={() => void load()} className="flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-zinc-400 hover:text-white"><RefreshCcw className="h-3 w-3" />Retry</button>
           </div>
         ) : !data ? (

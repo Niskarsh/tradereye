@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
-import { dailyKey, loadTradeCandles, minuteKey, weekdaysBack, type Store } from '../lib/candles/store';
+import { NeedsDhanError, dailyKey, loadTradeCandles, minuteKey, weekdaysBack, type Store } from '../lib/candles/store';
 import { buildDaily, buildIntraday, emaSeries, sessionVwap, tradeFacts } from '../lib/candles/chart';
 import { tradeMarks } from '../lib/book/marks';
 
@@ -141,4 +141,28 @@ test('no stop: 1R falls back to 2 x ATR(10m) at entry, like MfeR', () => {
   const f = tradeFacts(intra, { date: day, direction: 'LONG', marks: tradeMarks(day, 'LONG', [{ time: '10:00:00', side: 'BUY', qty: 10, price: 100.4 }, { time: '11:00:00', side: 'SELL', qty: 10, price: 101 }]) })!;
   assert.equal(f.rBasis, '2ATR');
   assert.ok(f.oneR! > 0);
+});
+
+test('no Dhan token: saved charts load from S3; an unsaved trade day asks for Dhan; unsaved older days are skipped', async () => {
+  const { files, store } = fakeStore();
+  const days = weekdaysBack('2026-10-15', 28);
+  const dhan = {
+    intraday: async (p: { securityId: string }) => (p.securityId === '19' ? join(...days.slice(-6).map((d) => session(d, () => 22000))) : join(...days.map((d) => session(d, () => 100)))),
+    daily: async () => ({ t: [sec('2026-10-15', '00:00')], o: [1], h: [1], l: [1], c: [1], v: [1] }),
+  };
+  const base = { store, lookupSecurityId: async () => '7', now: () => Date.parse('2026-10-19T12:00:00Z'), sleep: async () => {} };
+  // nothing saved, no token: the trade day is a must -> asks for Dhan
+  await assert.rejects(loadTradeCandles(base, { symbol: 'ABC', date: '2026-10-15' }), NeedsDhanError);
+  // saved once (with a token) ...
+  await loadTradeCandles({ ...base, dhan }, { symbol: 'ABC', date: '2026-10-15' });
+  // ... then everything loads with no token at all
+  const r = await loadTradeCandles(base, { symbol: 'ABC', date: '2026-10-15' });
+  assert.equal(r.counts.dhanCalls, 0);
+  assert.equal(r.minute.t.length, days.length * 375);
+  assert.ok(r.daily && r.daily.t.length === 1);
+  // an older day's file lost: still shown, the gap is counted, nothing thrown
+  files.delete(minuteKey('ABC', days[0]));
+  const q = await loadTradeCandles(base, { symbol: 'ABC', date: '2026-10-15' });
+  assert.equal(q.counts.notSaved, 1);
+  assert.equal(q.minute.t.length, (days.length - 1) * 375);
 });

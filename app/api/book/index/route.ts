@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { upsertIndex, type IndexRow } from '@/lib/book/sheet';
 
 export const dynamic = 'force-dynamic';
 
 /** Body { rows: IndexRow[] }: one row per stock per day in "<month>-book", pointing to its S3 folder. */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try {
     const b = await req.json().catch(() => ({}));

@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { findCheck, updateCheck } from '@/lib/copilot/store';
 
 export const dynamic = 'force-dynamic';
 
 /** "Took it" / "Skipped" on a check. Body: { checkId, date, decision: 'TOOK'|'SKIPPED' }. */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try {
     const b = await req.json().catch(() => ({}));

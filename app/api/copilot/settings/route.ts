@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { getRiskInr, setRiskInr } from '@/lib/copilot/userSettings';
 
 export const dynamic = 'force-dynamic';
 
 /** Read or change your max risk per trade. Body: {} to read, { riskInr: 400 } to change. */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try {
     const b = await req.json().catch(() => ({}));

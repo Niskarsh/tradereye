@@ -1,21 +1,21 @@
 import { NextResponse } from 'next/server';
 import { getSheetsClient } from '@/lib/sheetsApi';
 import { lookupSecurityId } from '@/lib/dhan';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { getWatchlist, setWatchlist, type WatchItem } from '@/lib/book/sheet';
 
 export const dynamic = 'force-dynamic';
 
 /** The order-book recording list (kept in the copilot-settings tab, so every device sees the same list). */
 export async function GET(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try { return NextResponse.json({ list: await getWatchlist(getSheetsClient()) }); } catch (e) { return errorResponse(e); }
 }
 
 /** Body { symbols: string[] }: resolves each to its Dhan security id, saves the list, returns it and any unknown symbols. */
 export async function POST(req: Request) {
-  const g = guard(req);
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try {
     const b = await req.json().catch(() => ({}));

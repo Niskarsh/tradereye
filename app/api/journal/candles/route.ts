@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { lookupSecurityId } from '@/lib/dhan';
-import { errorResponse, guard } from '@/lib/live/guard';
+import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { getChunk, putChunk } from '@/lib/book/s3';
-import { loadTradeCandles } from '@/lib/candles/store';
+import { NeedsDhanError, loadTradeCandles } from '@/lib/candles/store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -12,10 +12,12 @@ const PARTS = ['minute', 'nifty', 'daily'] as const;
 /**
  * POST { symbol, date, securityId?, parts? } -> the candles behind one journal trade: about 4 weeks of 1-minute
  * candles, the week's Nifty 500, about 2 years of daily candles. Read from S3 when saved; anything missing comes from
- * Dhan once (Data API plan) and is saved for next time.
+ * Dhan once (Data API plan, when a Dhan token is sent) and is saved for next time. Without a token only saved candles
+ * are used; if the trade's own day is not saved yet the answer is NEEDS_DHAN.
  */
 export async function POST(req: Request) {
-  const g = guard(req);
+  // saved candles need only the Google sign-in; Dhan is used only for days not saved yet
+  const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try {
     const b = await req.json().catch(() => ({}));
@@ -33,6 +35,7 @@ export async function POST(req: Request) {
     }, { symbol, date, securityId, parts: parts?.length ? parts : undefined });
     return NextResponse.json(out);
   } catch (e) {
+    if (e instanceof NeedsDhanError) return NextResponse.json({ error: 'NEEDS_DHAN', message: e.message }, { status: 409 });
     if (e instanceof Error && /not in Dhan/.test(e.message)) return NextResponse.json({ error: 'NOT_FOUND', message: e.message }, { status: 404 });
     return errorResponse(e);
   }

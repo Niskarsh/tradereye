@@ -33,7 +33,7 @@ export interface Store {
   put(key: string, body: Uint8Array): Promise<void>;
 }
 type Dhan = Pick<DhanClient, 'intraday' | 'daily'>;
-export interface LoadDeps { store: Store; dhan: Dhan; lookupSecurityId: (symbol: string) => Promise<string | undefined>; now?: () => number; sleep?: (ms: number) => Promise<void> }
+export interface LoadDeps { store: Store; /** absent when no Dhan token was sent: then only saved candles are used */ dhan?: Dhan; lookupSecurityId: (symbol: string) => Promise<string | undefined>; now?: () => number; sleep?: (ms: number) => Promise<void> }
 
 const folder = (kind: '1m' | 'daily', date: string) => {
   const [y, m] = date.split('-');
@@ -104,7 +104,12 @@ async function writeFile(store: Store, key: string, f: CandleFile, n: Counts) {
   catch (e) { n.s3Errors++; n.s3Error ??= (e as Error).message; }
 }
 
-export interface Counts { fromS3: number; fromDhan: number; saved: number; dhanCalls: number; s3Errors: number; s3Error?: string }
+export interface Counts { fromS3: number; fromDhan: number; saved: number; dhanCalls: number; s3Errors: number; s3Error?: string; /** days not saved yet that could not be fetched (no Dhan token) */ notSaved: number }
+
+/** The trade's own day is not saved yet and there is no Dhan token to fetch it. */
+export class NeedsDhanError extends Error {
+  constructor(public symbol: string, public date: string) { super(`The ${symbol} candles for ${date} are not saved yet. Log in on the Dhan login tab once to fetch them; after that they load without Dhan.`); }
+}
 interface Instrument { symbol: string; securityId?: string; segment: string; instrument: string }
 
 /**
@@ -119,7 +124,11 @@ async function minuteDays(deps: LoadDeps, ins: Instrument, days: string[], mustT
   let securityId = ins.securityId;
   files.forEach((f, i) => { if (f) { have.set(days[i], f.c); securityId ??= f.securityId || undefined; n.fromS3++; } });
   const missing = days.filter((d) => !have.has(d));
-  if (missing.length) {
+  if (missing.length && !deps.dhan) {
+    // no Dhan token: show what is saved; only the trade's own day is a must
+    if (mustTrade && missing.includes(mustTrade)) throw new NeedsDhanError(ins.symbol, mustTrade);
+    n.notSaved += missing.length;
+  } else if (missing.length && deps.dhan) {
     const id = ins.securityId ?? await resolveId();
     securityId = id;
     if (n.dhanCalls) await (deps.sleep ?? sleep)(220); // Dhan allows 5 data requests a second
@@ -164,7 +173,7 @@ export async function loadTradeCandles(deps: LoadDeps, req: { symbol: string; da
   const { date } = req;
   const parts = new Set(req.parts ?? ['minute', 'nifty', 'daily']);
   const now = (deps.now ?? Date.now)();
-  const n: Counts = { fromS3: 0, fromDhan: 0, saved: 0, dhanCalls: 0, s3Errors: 0 };
+  const n: Counts = { fromS3: 0, fromDhan: 0, saved: 0, dhanCalls: 0, s3Errors: 0, notSaved: 0 };
   let securityId = req.securityId;
   const resolveId = async () => {
     securityId ??= await deps.lookupSecurityId(symbol);
@@ -180,13 +189,14 @@ export async function loadTradeCandles(deps: LoadDeps, req: { symbol: string; da
   }
   let nifty = emptyCandles();
   if (parts.has('nifty')) {
-    nifty = (await minuteDays(deps, { symbol: NIFTY_SYMBOL, ...NIFTY500 }, weekdaysBack(date, NIFTY_LOOKBACK_DAYS), date, n, async () => NIFTY500.securityId)).c;
+    nifty = (await minuteDays(deps, { symbol: NIFTY_SYMBOL, ...NIFTY500 }, weekdaysBack(date, NIFTY_LOOKBACK_DAYS), deps.dhan ? date : undefined, n, async () => NIFTY500.securityId)).c;
   }
   let daily: Candles | undefined;
   if (parts.has('daily')) {
     const key = dailyKey(symbol, date);
     const f = await readFile(deps.store, key, n);
     if (f) { daily = f.c; securityId ??= f.securityId || undefined; n.fromS3++; }
+    else if (!deps.dhan) n.notSaved++;
     else {
       const id = await resolveId();
       if (n.dhanCalls) await (deps.sleep ?? sleep)(220);

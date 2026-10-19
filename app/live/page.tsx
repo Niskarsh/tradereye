@@ -75,10 +75,10 @@ export default function LivePage() {
         {renewMsg && <p className="text-[11px] text-zinc-400">{renewMsg}</p>}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" onClick={repair} disabled={!token || running || maint !== ''} title="Fill empty stop / risk / exit-type cells of logged trades from the saved order log">
+          <Button size="sm" variant="outline" onClick={repair} disabled={running || maint !== ''} title="Fill empty stop / risk / exit-type cells of logged trades from the saved order log">
             {maint === 'repair' ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Wrench className="w-4 h-4 mr-1" />}Fill missing fields from logs
           </Button>
-          <Button size="sm" variant="outline" onClick={clearLogs} disabled={!token || running || maint !== ''} title="Empty order-state, order-events and live-trades">
+          <Button size="sm" variant="outline" onClick={clearLogs} disabled={running || maint !== ''} title="Empty order-state, order-events and live-trades">
             {maint === 'clear' ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Trash2 className="w-4 h-4 mr-1" />}Clear logs
           </Button>
           {running && <span className="text-[10px] text-zinc-600">End the session to use these.</span>}
