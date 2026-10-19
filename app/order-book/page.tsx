@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellRing, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
+import { Bell, BellRing, ChevronLeft, ChevronRight, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { BookChart, type AlertMark } from '@/components/book/BookChart';
@@ -182,6 +182,15 @@ export default function OrderBookPage() {
   }, [scrollTo]);
   const recording = info.status === 'recording';
 
+  // full screen: jump straight to another open chart (no reloading: the chart is already there, only the
+  // full-screen element changes). Exit first, then enter on the other card, so Esc / the exit button fully leave.
+  const switchFull = (id: string) => {
+    const el = document.getElementById(`chart-${id}`);
+    if (!el?.requestFullscreen) return;
+    const enter = () => { void el.requestFullscreen().catch(() => el.scrollIntoView({ block: 'start' })); };
+    if (document.fullscreenElement) void document.exitFullscreen().then(enter, enter); else enter();
+  };
+
   return (
     <div className="min-h-screen bg-brand-bg text-ink font-sans pb-24">
       <div className="page-shell pt-6 space-y-4">
@@ -253,8 +262,10 @@ export default function OrderBookPage() {
         <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} />
 
         {/* charts */}
-        {charts.map((c) => (
+        {charts.map((c, i) => (
           <ChartCard key={c.id} cfg={c} list={list} rec={rec.current!} recording={recording} api={api}
+            pos={{ i, n: charts.length, prev: charts[(i - 1 + charts.length) % charts.length].symbol, next: charts[(i + 1) % charts.length].symbol }}
+            onSwitch={(dir) => switchFull(charts[(i + dir + charts.length) % charts.length].id)}
             onChange={(n) => setCharts((all) => all.map((x) => (x.id === c.id ? n : x)))}
             onClose={() => setCharts((all) => all.filter((x) => x.id !== c.id))}
             onAddToList={recordLive} />
@@ -304,8 +315,11 @@ function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissA
   );
 }
 
-function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToList }: {
+function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, onClose, onAddToList }: {
   cfg: ChartCfg; list: WatchItem[]; rec: Recorder; recording: boolean;
+  /** this chart's place among the open charts, and its neighbours' symbols (for the full-screen switcher) */
+  pos: { i: number; n: number; prev: string; next: string };
+  onSwitch: (dir: -1 | 1) => void;
   api: (path: string, init?: RequestInit) => Promise<Response>;
   onChange: (c: ChartCfg) => void; onClose: () => void; onAddToList: (symbol: string) => Promise<void>;
 }) {
@@ -325,6 +339,16 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
   }, [cfg.symbol, api]);
   // full screen: the whole card (controls, status line, chart, answer) fills the screen; the chart takes the height
   const { ref: card, full, height: fullH, toggle: toggleFull } = useFullscreen<HTMLElement>();
+  // in full screen, the arrow keys switch charts too (not while typing in a field)
+  useEffect(() => {
+    if (!full || pos.n < 2) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest('input, textarea, select')) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); onSwitch(-1); } else if (e.key === 'ArrowRight') { e.preventDefault(); onSwitch(1); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full, pos.n, onSwitch]);
   const [loading, setLoading] = useState<{ label: string; done: number; total: number } | null>(null);
   const [failed, setFailed] = useState('');
   const [adding, setAdding] = useState(false);
@@ -374,7 +398,18 @@ function ChartCard({ cfg, list, rec, recording, api, onChange, onClose, onAddToL
             {adding ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Adding…</> : '● Record live'}
           </button>
         )}
-        <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className="ml-auto rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink">
+        {full && pos.n > 1 && (
+          <span className="ml-auto flex items-center gap-1">
+            <button onClick={() => onSwitch(-1)} aria-label={`Previous chart: ${pos.prev}`} title={`${pos.prev} (←)`} className="flex h-8 items-center gap-1 rounded-lg border border-line-strong pl-1.5 pr-2.5 text-xs font-black text-ink-2 hover:border-brand-accent hover:text-ink">
+              <ChevronLeft className="h-4 w-4" />{pos.prev}
+            </button>
+            <span className="px-1 font-mono text-[11px] text-ink-3">{pos.i + 1}/{pos.n}</span>
+            <button onClick={() => onSwitch(1)} aria-label={`Next chart: ${pos.next}`} title={`${pos.next} (→)`} className="flex h-8 items-center gap-1 rounded-lg border border-line-strong pl-2.5 pr-1.5 text-xs font-black text-ink-2 hover:border-brand-accent hover:text-ink">
+              {pos.next}<ChevronRight className="h-4 w-4" />
+            </button>
+          </span>
+        )}
+        <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className={`${full && pos.n > 1 ? '' : 'ml-auto '}rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink`}>
           {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </button>
         {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
