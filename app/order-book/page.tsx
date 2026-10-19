@@ -82,6 +82,28 @@ export default function OrderBookPage() {
     };
     return () => { if (rec.current) rec.current.onAlert = undefined; };
   }, []);
+  // "Should I take this?": one Claude call per click (never automatic), with the alert and the live book
+  const [asks, setAsks] = useState<Record<string, AskState>>({});
+  const askAlert = async (a: ReversalAlert) => {
+    setAsks((x) => ({ ...x, [a.id]: { busy: true } }));
+    const m = rec.current!.models.get(a.securityId);
+    const p = a.plan;
+    const alertText = [
+      `ALERT ${clock(a.at)} IST: ${a.kind === 'EXTREME' ? `reversal at the day's ${a.side === 'SHORT' ? 'high' : 'low'}` : 'wall reversal'}, ${a.side}. ${a.why}`,
+      a.zone ? `Zone ${a.zone[0]}–${a.zone[1]}.` : '',
+      p ? `App's plan: ${a.side === 'SHORT' ? 'sell' : 'buy'} ${p.qty} @ ${p.entry}, stop ${p.stop}${p.capped ? ' (capped at 2x ATR)' : ''}, target today's POC ${p.target} (${p.rr}R).` : '',
+    ].filter(Boolean).join('\n');
+    try {
+      const r = await api('/api/book/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        symbol: a.symbol, direction: a.side, setup: 'REVERSAL',
+        question: 'Should I take this reversal now? Take / wait / skip, 2-3 short reasons, and the one thing that would prove it wrong.',
+        book: `${alertText}\n${m?.summary(m.lastEventAt || Date.now()) ?? ''}`,
+      }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setAsks((x) => ({ ...x, [a.id]: { busy: false, text: j.text, cost: j.costInr } }));
+    } catch (e) { setAsks((x) => ({ ...x, [a.id]: { busy: false, err: (e as Error).message } })); }
+  };
   const dismiss = (id: string) => { notes.current.get(id)?.close(); notes.current.delete(id); setAlerts((all) => all.filter((a) => a.id !== id)); };
   const dismissAll = () => { for (const n of notes.current.values()) n.close(); notes.current.clear(); setAlerts([]); };
   const askNotify = async () => { if (typeof Notification === 'undefined') return; setNotifyPerm(await Notification.requestPermission()); };
@@ -259,7 +281,7 @@ export default function OrderBookPage() {
         </section>
 
         {/* reversal alerts: bottom right, on top of everything, until closed */}
-        <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} />
+        <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} asks={asks} onAsk={askAlert} />
 
         {/* charts */}
         {charts.map((c, i) => (
@@ -278,9 +300,11 @@ export default function OrderBookPage() {
   );
 }
 
-function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissAll, onAskPerm }: {
+type AskState = { busy: boolean; text?: string; err?: string; cost?: number };
+function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissAll, onAskPerm, asks, onAsk }: {
   alerts: Alert[]; recording: boolean; perm: NotificationPermission | 'unsupported';
   onOpen: (a: ReversalAlert) => void; onDismiss: (id: string) => void; onDismissAll: () => void; onAskPerm: () => void;
+  asks: Record<string, AskState>; onAsk: (a: ReversalAlert) => void;
 }) {
   if (!alerts.length && !(recording && perm === 'default')) return null;
   return (
@@ -295,18 +319,31 @@ function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissA
       )}
       {alerts.map((a) => {
         const long = a.side === 'LONG';
+        const extreme = a.kind === 'EXTREME';
+        const ask = asks[a.id];
         return (
           <div key={a.id} className={`relative rounded-xl border bg-brand-card shadow-lg ${long ? 'border-data-green/70' : 'border-data-red/70'} ${a.opened ? 'opacity-75' : ''}`}>
             <button onClick={() => onOpen(a)} className="block w-full px-3 py-2 pr-9 text-left" title="Open the chart at this moment">
               <span className="flex items-center gap-1.5 text-sm font-black">
                 <BellRing className={`h-4 w-4 ${long ? 'text-data-green' : 'text-data-red-text'}`} />
                 {a.symbol}
-                <span className={long ? 'text-data-green' : 'text-data-red-text'}>{long ? '▲ Reversal long' : '▼ Reversal short'}</span>
+                <span className={long ? 'text-data-green' : 'text-data-red-text'}>{extreme ? (long ? '▲ Day-low reversal' : '▼ Day-high reversal') : (long ? '▲ Reversal long' : '▼ Reversal short')}</span>
                 <span className="ml-auto font-mono text-[11px] font-normal text-ink-3">{clock(a.at)}</span>
               </span>
-              <span className="mt-0.5 block font-mono text-[11px] text-brand-accent">{long ? 'Buy' : 'Sell'} wall {a.wallPrice.toFixed(2)} · last {a.ltp.toFixed(2)}</span>
+              <span className="mt-0.5 block font-mono text-[11px] text-brand-accent">{long ? 'Buy' : 'Sell'} wall {a.wallPrice.toFixed(2)}{a.zone ? ` · zone ${a.zone[0].toFixed(2)}–${a.zone[1].toFixed(2)}` : ''} · last {a.ltp.toFixed(2)}</span>
+              {a.plan && (
+                <span className="mt-1 block rounded-md border border-line bg-brand-bg px-2 py-1 font-mono text-[11px] text-ink">
+                  {long ? 'Buy' : 'Sell'} {a.plan.qty} @ {a.plan.entry.toFixed(2)} · stop {a.plan.stop.toFixed(2)}{a.plan.capped ? ' (2x ATR cap)' : ''} · target POC {a.plan.target.toFixed(2)} · {a.plan.rr}R
+                </span>
+              )}
               <span className="mt-1 block text-[11px] leading-snug text-ink-2">{a.why}</span>
             </button>
+            <div className="px-3 pb-2">
+              {!ask && <button onClick={() => onAsk(a)} className="flex h-7 items-center gap-1 rounded-lg border border-brand-accent/60 px-2 text-[11px] font-black text-brand-accent hover:bg-brand-accent/10"><Sparkles className="h-3 w-3" />Should I take this?</button>}
+              {ask?.busy && <p className="flex items-center gap-1.5 text-[11px] text-ink-3"><Loader2 className="h-3 w-3 animate-spin" />Claude is reading the stock…</p>}
+              {ask?.err && <p className="text-[11px] text-data-red-text">{ask.err}</p>}
+              {ask?.text && <p className="whitespace-pre-line text-[11px] leading-snug text-ink">{ask.text} <span className="text-[10px] text-ink-3">₹{ask.cost?.toFixed(2)}</span></p>}
+            </div>
             <button onClick={() => onDismiss(a.id)} aria-label="Close alert" className="absolute right-1.5 top-1.5 rounded p-1 text-ink-3 hover:text-ink"><X className="h-3.5 w-3.5" /></button>
           </div>
         );

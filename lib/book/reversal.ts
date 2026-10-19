@@ -22,7 +22,14 @@ export interface Reversal {
   ltp: number; at: number;
   why: string; // one plain line with the numbers
 }
-export interface ReversalAlert extends Reversal { id: string; securityId: string; symbol: string }
+export interface ReversalAlert extends Reversal {
+  id: string; securityId: string; symbol: string;
+  /** WALL = price on a holding wall, absorbed (the first alert type); EXTREME = reversal at the day's high / low */
+  kind?: 'WALL' | 'EXTREME';
+  /** EXTREME only: the trade the app worked out (entry, stop beyond the zone, target today's POC, size for his risk) */
+  plan?: { entry: number; stop: number; target: number; risk: number; reward: number; rr: number; qty: number; capped: boolean };
+  zone?: [number, number];
+}
 
 export const NEAR_TICKS = 2;
 export const ABSORB_SEC = 120;
@@ -82,6 +89,6 @@ export class ReversalWatch {
     const key = `${securityId}:${r.side}:${r.wallPrice.toFixed(2)}`;
     if (t - (this.fired.get(key) ?? -Infinity) < this.cooldownMs) return;
     this.fired.set(key, t);
-    this.onAlert({ ...r, id: `${key}:${t}`, securityId, symbol });
+    this.onAlert({ ...r, id: `${key}:${t}`, securityId, symbol, kind: 'WALL' });
   }
 }

@@ -7,6 +7,9 @@ import {
 import type { WatchItem } from './sheet';
 import { ReversalWatch, type ReversalAlert } from './reversal';
 import { FeedProbe, diagKey, type Snapshot } from './probe';
+import { detectExtreme } from './extreme';
+import type { DayContext } from './context';
+import { OutcomeLog, alertLogKey } from './outcomes';
 
 /**
  * Records the order book of every stock on the list while the Order Book tab is open (browser only: the Dhan feed
@@ -36,7 +39,14 @@ export class Recorder {
   onChange?: () => void;
   /** a reversal setup on a recorded stock (live events only, never the morning replayed from S3) */
   onAlert?: (a: ReversalAlert) => void;
-  private watch = new ReversalWatch((a) => this.onAlert?.(a));
+  private watch = new ReversalWatch((a) => this.alert(a));
+  /** per stock: the day's context from 1-minute candles (refreshed every 5 min), and the live day high / low */
+  ctx = new Map<string, DayContext>();
+  private hl = new Map<string, { high: number; low: number }>();
+  private lastExtremeCheck = new Map<string, number>();
+  private firedExtreme = new Map<string, { at: number; push: number }>();
+  private ctxBusy = false;
+  outcomes = new OutcomeLog();
   /** what Dhan actually sends; a stock with trades but no book gets a saved diagnostic snapshot */
   probe = new FeedProbe();
   /** frozen books (Dhan resending one stock's same snapshot): per stock, since when, and how often we reconnected */
@@ -54,6 +64,56 @@ export class Recorder {
 
   constructor(private api: (path: string, init?: RequestInit) => Promise<Response>) {
     this.probe.onSnapshot = (snap) => { this.set({}); void this.saveSnapshot(snap); };
+    this.outcomes.onFinish = () => { void this.saveOutcomes(); };
+  }
+
+  /** Every alert: shown, and followed for 30 minutes to log what happened next. */
+  private alert(a: ReversalAlert) {
+    const c = this.ctx.get(a.securityId);
+    this.outcomes.start({ id: a.id, kind: a.kind ?? 'WALL', symbol: a.symbol, securityId: a.securityId, side: a.side, at: a.at, entry: a.plan?.entry ?? a.ltp, stop: a.plan?.stop, target: a.plan?.target, atr: c?.atr10m });
+    this.onAlert?.(a);
+  }
+
+  private async saveOutcomes() {
+    const date = istDate(Date.now());
+    try {
+      const bytes = await gzip(JSON.stringify({ v: 1, date, alerts: this.outcomes.rows().filter((x) => istDate(x.at) === date) }));
+      await this.api(`/api/book/chunk?key=${encodeURIComponent(alertLogKey(date))}`, { method: 'POST', body: bytes as BodyInit, headers: { 'Content-Type': 'application/gzip' } });
+    } catch { /* next finished alert saves again */ }
+  }
+
+  /** One stock's context at a time, the stalest first, each at most every 5 minutes (3 Dhan requests per refresh). */
+  private async refreshContext() {
+    if (this.ctxBusy || !this.running) return;
+    const now = Date.now();
+    const due = this.list.filter((w) => now - (this.ctx.get(w.securityId)?.at ?? 0) >= 5 * 60_000)
+      .sort((a, b) => (this.ctx.get(a.securityId)?.at ?? 0) - (this.ctx.get(b.securityId)?.at ?? 0))[0];
+    if (!due) return;
+    this.ctxBusy = true;
+    try {
+      const r = await this.api('/api/book/context', { method: 'POST', body: JSON.stringify({ symbol: due.symbol, securityId: due.securityId }), headers: { 'Content-Type': 'application/json' } });
+      if (r.ok) this.ctx.set(due.securityId, await r.json());
+      else this.ctx.set(due.securityId, { ...(this.ctx.get(due.securityId) ?? { symbol: due.symbol, securityId: due.securityId, date: '', live: false, riskInr: 300 }), at: now - 4 * 60_000 }); // retry in ~1 min
+    } catch { /* retried on the next round */ } finally { this.ctxBusy = false; }
+  }
+
+  /** Day-extreme reversal: checked every 3 s per stock; once per side per push sequence, and 20 min apart. */
+  private checkExtreme(w: WatchItem, m: BookModel, t: number) {
+    const c = this.ctx.get(w.securityId);
+    if (!c?.atr10m || t - (this.lastExtremeCheck.get(w.securityId) ?? 0) < 3_000) return;
+    this.lastExtremeCheck.set(w.securityId, t);
+    const r = detectExtreme(m, c, this.hl.get(w.securityId) ?? {}, t);
+    if (!r) return;
+    const key = `${w.securityId}:EXTREME:${r.side}`;
+    const last = r.pushes[r.pushes.length - 1].t;
+    const prev = this.firedExtreme.get(key);
+    if (prev && (prev.push === last || t - prev.at < 20 * 60_000)) return;
+    this.firedExtreme.set(key, { at: t, push: last });
+    this.alert({
+      id: `${key}:${t}`, securityId: w.securityId, symbol: w.symbol, kind: 'EXTREME', side: r.side,
+      wallPrice: r.wall.price, wallSide: r.wall.side, wallQty: r.wall.qty, times: r.wall.times, traded: r.wall.traded, refills: r.wall.refills,
+      ltp: r.ltp, at: t, why: r.why, plan: r.plan, zone: r.zone,
+    });
   }
 
   /** The probe's snapshot goes to S3 (a few KB, gzip'd JSON), so it can be studied after the session. */
@@ -95,6 +155,8 @@ export class Recorder {
     this.connect();
     this.timers.push(setInterval(() => { void this.saveAll(false); }, SAVE_EVERY_MS));
     this.timers.push(setInterval(() => this.watchdog(), 10_000));
+    this.timers.push(setInterval(() => { void this.refreshContext(); }, 8_000));
+    void this.refreshContext();
     window.addEventListener('pagehide', this.onHide);
     this.set({ status: 'recording', progress: undefined });
   }
@@ -179,7 +241,14 @@ export class Recorder {
     };
     this.lastMsg = { depth: Date.now(), feed: Date.now() };
     open(`${DEPTH_URL}?${qs}`, 23, (b) => { const t = Date.now(); for (const d of parseDepth(b)) this.onEvent(d.securityId, depthEvent(d, t)); });
-    open(`${FEED_URL}?version=2&${qs}`, 17, (b) => { const t = Date.now(); for (const q of parseFeed(b)) this.onEvent(q.securityId, quoteEvent(q, t)); });
+    open(`${FEED_URL}?version=2&${qs}`, 17, (b) => {
+      const t = Date.now();
+      for (const q of parseFeed(b)) {
+        // the exchange's own day high / low ride on every quote: the zone moves with them between context refreshes
+        if (q.dayHigh > 0 && q.dayLow > 0) this.hl.set(q.securityId, { high: q.dayHigh, low: q.dayLow });
+        this.onEvent(q.securityId, quoteEvent(q, t));
+      }
+    });
   }
 
   /**
@@ -246,7 +315,8 @@ export class Recorder {
     buf.dirty = true;
     this.watch.check(securityId, w.symbol, m, t);
     this.checkStale(securityId, m, t);
-    if (e[0] === 'Q') { this.probe.quote(securityId, t); this.probe.check(securityId, w.symbol, this.list, t); }
+    if (e[0] === 'Q') { this.probe.quote(securityId, t); this.probe.check(securityId, w.symbol, this.list, t); this.outcomes.price(securityId, e[2], t); }
+    this.checkExtreme(w, m, t);
   }
 
   /**
