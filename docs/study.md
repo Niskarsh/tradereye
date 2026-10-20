@@ -28,3 +28,27 @@ builds the message from the saved study (lib/study/explain.ts): a key to the ter
 numbers as plain lines. Claude answers like he is five, in four steps: what it is, what the numbers say, what it means,
 what to look at next. Answers are kept in the browser per run and part, so reopening costs nothing.
 A "What the numbers mean" panel and a "How to read it" line under each table explain every column without Claude.
+
+## Fills and checks (Oct 21)
+- Live-like fills: entry 1 tick (₹0.05) worse than the 10-min close; the stop exits 1 tick beyond the stop; a 15:00
+  exit 1 tick worse; the target fills only when traded through by a tick; stop and target in one minute = the stop;
+  stops and targets on the ₹0.05 tick grid. A target less than 2 ticks beyond the entry fill is not a trade.
+- Charges include NSE's IPFT (₹10 per crore).
+- Year 1, year 2 and both years are each computed on their own; clean + messy + fail = 100% in every row.
+- t = R after costs ÷ its standard error, on every row; "Held up" needs t ≥ 2 on year 2.
+- tests/study.test.ts: an independent replay of every trade from the raw candles (label, R, R after charges),
+  a no-look-ahead test (changing everything after an entry never changes what was recorded at it), and the
+  adds-up / independent-years checks.
+
+## Find insights
+One button, all four tabs, every rule / fall range / fact for both years (about 25k tokens, ₹10–20), with its own
+instructions: judge on year 2 and R after costs, check t, look for facts that agree across years and tabs, call out
+what looks like luck, and say what to test next.
+
+## Rules from Claude
+**Ask Claude for rules** (Reversal Study page): Claude gets YEAR 1 only (every fact in five groups, the fall ranges,
+the baseline and the study's own rules, for all four tabs) and writes 6–15 rules as exact conditions on the fact
+keys (JSON schema). Each rule is tested on the saved entries (`moments-long|short.bin.gz`, saved by every run) on
+year 1, year 2 and both years, exactly like the study's rules (first matching entry of each stock-day), and the batch
+is saved (`claude-rules.json.gz`). **Refine** shows Claude its last rules with their year-1 results only. Year 2 is
+never sent to Claude (tests/study.test.ts plants markers in every year-2 field and checks none reaches the message).

@@ -4,11 +4,11 @@ import { getChunk, putChunk } from '@/lib/book/s3';
 import { RUN_ID, getJson, studyKey } from '@/lib/setups/store';
 import { ClaudeError, plainClaude } from '@/lib/copilot/claude';
 import { settings } from '@/lib/copilot/settings';
-import { EXPLAIN_PARTS, EXPLAIN_SYSTEM, buildExplainMessage, type ExplainPart } from '@/lib/study/explain';
+import { EXPLAIN_PARTS, EXPLAIN_SYSTEM, INSIGHTS_SYSTEM, buildExplainMessage, type ExplainPart } from '@/lib/study/explain';
 import type { Study } from '@/lib/study/analyze';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300; // "Find insights" reads the whole study and can take a few minutes
 
 const store = { get: getChunk, put: putChunk };
 
@@ -35,7 +35,10 @@ export async function POST(req: Request) {
     catch (e) { return NextResponse.json({ error: 'BAD_REQUEST', message: (e as Error).message }, { status: 400 }); }
     const s = settings();
     try {
-      const r = await plainClaude(EXPLAIN_SYSTEM, message, { apiKey, model: s.model, usdInr: s.usdInr }, 1400);
+      // Sonnet thinks by default and that thinking counts against max_tokens: generous limits so answers are never cut off
+      const insights = part === 'insights';
+      const r = await plainClaude(insights ? INSIGHTS_SYSTEM : EXPLAIN_SYSTEM, message,
+        { apiKey, model: s.model, usdInr: s.usdInr, timeoutMs: insights ? 280_000 : 120_000 }, insights ? 16_000 : 6_000);
       return NextResponse.json({ text: r.text, costInr: r.costInr, model: r.model });
     } catch (e) {
       if (e instanceof ClaudeError) return NextResponse.json({ error: 'CLAUDE_ERROR', message: e.message }, { status: e.status >= 400 && e.status < 600 ? e.status : 502 });

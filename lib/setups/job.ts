@@ -7,8 +7,9 @@ import { buildSummary, pack, type Summary } from './stats';
 import { monthsNeeded, screenerDays, SCREENER, type ScreenerFilter } from './universe';
 import { monthEndsOf, prepare, runMonthly, runSingle, runSwing, type DailyStock } from './swing';
 import { mineDay, type Moment } from '../study/mine';
+import { encodeMoments, gzipBytes } from '../study/moments';
 import { analyze } from '../study/analyze';
-import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, monthKey, putJson, signalsKey, studyKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
+import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, momentsKey, monthKey, putJson, signalsKey, studyKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
 
 /**
  * The backtest, start to finish (run by the GitHub Action; see scripts/setups-backtest.ts):
@@ -204,6 +205,8 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   log(`study: ${moments.length} moments`);
   const study = analyze(moments, { runId, createdAt: now(), period: { from, to, mid } });
   await putJson(deps.store, studyKey(runId), study);
+  // every possible entry, so rules written later (by Claude) are tested on exactly this data
+  for (const dir of [1, -1] as const) await deps.store.put(momentsKey(runId, dir), await gzipBytes(encodeMoments(moments, dir)));
   const index = (await getJson<RunIndexItem[]>(deps.store, INDEX_KEY)) ?? [];
   const item: RunIndexItem = { runId, createdAt: summary.createdAt, period: summary.period, signals: signals.length, symbols: plan.length };
   await putJson(deps.store, INDEX_KEY, [item, ...index.filter((x) => x.runId !== runId)].slice(0, 36));
