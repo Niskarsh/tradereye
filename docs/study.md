@@ -20,3 +20,11 @@
      the same with a 2 ATR stop; all rules together; which facts the rules share.
 
 It is produced by the same backtest run (Re-run on My Setups) and saved as `setups/runs/<runId>/study.json.gz`.
+
+## Explain (Claude)
+Every section has an **Explain** button (and every fact a small one): one Claude call per press, never automatic.
+The page sends only which part (`/api/study/explain`: run, part, tab, item, optional follow-up question); the server
+builds the message from the saved study (lib/study/explain.ts): a key to the terms, the tab's baseline and that part's
+numbers as plain lines. Claude answers like he is five, in four steps: what it is, what the numbers say, what it means,
+what to look at next. Answers are kept in the browser per run and part, so reopening costs nothing.
+A "What the numbers mean" panel and a "How to read it" line under each table explain every column without Claude.
