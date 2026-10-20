@@ -10,6 +10,7 @@ import type { CaseId } from './cases';
  *   setups/runs/index.json                  every run, newest first
  *   setups/runs/<runId>/summary.json.gz     the numbers per case, the rule checks, the alert lookup
  *   setups/runs/<runId>/signals-<case>.json.gz   every past trade of that case (for the page's filters)
+ *   setups/runs/<runId>/study.json.gz       the reversal study: labelled moments -> facts -> rules (year 1) -> year 2
  *   setups/candles/1m/<SYMBOL>/<YYYY-MM>.json.gz  one month of 1-minute candles (a finished month is never fetched again)
  *   setups/candles/daily/<SYMBOL>.json.gz   daily candles (fetched again on each run: one request per stock)
  */
@@ -38,13 +39,15 @@ export const INDEX_KEY = 'setups/runs/index.json';
 export const pendingKey = (runId: string) => `setups/pending/${runId}.json`;
 export const summaryKey = (runId: string) => `setups/runs/${runId}/summary.json.gz`;
 export const signalsKey = (runId: string, c: CaseId) => `setups/runs/${runId}/signals-${c}.json.gz`;
+/** the reversal study of a run (lib/study) */
+export const studyKey = (runId: string) => `setups/runs/${runId}/study.json.gz`;
 export const monthKey = (symbol: string, month: string) => `setups/candles/1m/${symbol.toUpperCase()}/${month}.json.gz`;
 export const dailyKey = (symbol: string) => `setups/candles/daily/${symbol.toUpperCase()}.json.gz`;
 
 export const RUN_ID = /^[0-9A-Za-z-]{6,40}$/;
 
 /** A run whose status has not moved for this long is treated as dead (the job was cancelled or timed out). */
-export const STALE_MS = 20 * 60_000;
+export const STALE_MS = 45 * 60_000;
 export function isActive(s: RunStatus | undefined, now = Date.now()): boolean {
   return !!s && (s.state === 'queued' || s.state === 'running') && now - s.updatedAt < STALE_MS;
 }
