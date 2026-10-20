@@ -1,0 +1,28 @@
+# Type check, lint, tests and a production build on every pull request (free on a public repo).
+name: Checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      - name: Tests
+        run: npx --yes tsx@4 --test tests/*.test.ts
+      - name: Build
+        run: npm run build

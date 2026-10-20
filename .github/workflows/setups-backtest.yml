@@ -1,0 +1,46 @@
+# The setup backtest. Started only by the Re-run button on My Setups (tradereye calls GitHub's workflow_dispatch
+# with a run id). It never runs on a schedule and never on pushes.
+#
+# The repo is public, so this log is public: the job prints progress only. The Dhan token is not an input (inputs are
+# visible); tradereye leaves it in S3 under the run id and the job overwrites it the moment it has read it.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   DHAN_CLIENT_ID, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET
+name: Setup backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id (set by tradereye's Re-run button)
+        required: true
+        type: string
+
+concurrency:
+  group: setups-backtest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Run the backtest
+        run: npx --yes tsx@4 scripts/setups-backtest.ts
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
+          NODE_OPTIONS: --max-old-space-size=6144
