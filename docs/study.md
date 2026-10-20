@@ -44,3 +44,11 @@ A "What the numbers mean" panel and a "How to read it" line under each table exp
 One button, all four tabs, every rule / fall range / fact for both years (about 25k tokens, ₹10–20), with its own
 instructions: judge on year 2 and R after costs, check t, look for facts that agree across years and tabs, call out
 what looks like luck, and say what to test next.
+
+## Rules from Claude
+**Ask Claude for rules** (Reversal Study page): Claude gets YEAR 1 only (every fact in five groups, the fall ranges,
+the baseline and the study's own rules, for all four tabs) and writes 6–15 rules as exact conditions on the fact
+keys (JSON schema). Each rule is tested on the saved entries (`moments-long|short.bin.gz`, saved by every run) on
+year 1, year 2 and both years, exactly like the study's rules (first matching entry of each stock-day), and the batch
+is saved (`claude-rules.json.gz`). **Refine** shows Claude its last rules with their year-1 results only. Year 2 is
+never sent to Claude (tests/study.test.ts plants markers in every year-2 field and checks none reaches the message).

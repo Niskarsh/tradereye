@@ -199,3 +199,89 @@ test('audit: every row adds up, and year 2 is counted on its own (not what year 
     for (const f of c.features) for (const b of f.bins) { sums(b.y1); sums(b.y2); }
   }
 });
+
+/* ---- saved entries: testing a rule later gives exactly the study's numbers ------------------------------- */
+import { decodeMoments, encodeMoments, evaluate, gunzipBytes, gzipBytes } from '../lib/study/moments';
+
+test('saved entries: encode / decode, and a rule tested on them matches the study to the trade', async () => {
+  let seed = 4; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const H = hist('2024-12');
+  const ms: Moment[] = [];
+  const dates: string[] = [];
+  for (let t = Date.parse('2025-01-01T00:00:00Z'); dates.length < 80; t += 86400_000) { const d = new Date(t); if (d.getUTCDay() % 6) dates.push(d.toISOString().slice(0, 10)); }
+  for (const sym of ['A', 'B', 'C']) for (const d of dates) {
+    let p = 300; const px: number[] = []; for (let k = 0; k < 375; k++) { p += (rnd() - 0.5) * 0.8; px.push(p); }
+    ms.push(...mineDay({ symbol: sym, date: d, history: H, day: session(d, (k) => px[k]), nifty: session(d, () => 20000), daily: daily() }));
+  }
+  const mid = dates[40];
+  const st = analyze(ms, { runId: 'r', createdAt: 0, period: { from: dates[0], to: dates[79], mid } }, { minTrades: 20, maxRules: 4 });
+  for (const dir of [1, -1] as const) {
+    const f = decodeMoments(await gunzipBytes(await gzipBytes(encodeMoments(ms, dir))));
+    assert.equal(f.header.count, ms.filter((m) => m.dir === dir).length);
+    for (const c of st.combos.filter((x) => (x.dir === 'LONG' ? 1 : -1) === dir)) {
+      const t = c.target === 'VWAP' ? 'v' : 'o';
+      // no conditions = the baseline
+      const base = evaluate(f, [], t, mid);
+      assert.equal(base.y1.n, c.base.y1First.n); assert.equal(base.y2.n, c.base.y2First.n);
+      assert.ok(Math.abs(base.y2.netR - c.base.y2First.netR) <= 0.011, `${base.y2.netR} vs ${c.base.y2First.netR}`);
+      for (const r of c.rules) {
+        const e = evaluate(f, r.conds, t, mid);
+        assert.equal(e.y1.n, r.y1.n, `${c.dir} ${c.target} ${r.text}`);
+        assert.equal(e.y2.n, r.y2.n);
+        assert.equal(e.all.n, r.all.n);
+        for (const k of ['clean', 'messy', 'fail'] as const) assert.ok(Math.abs(e.y2[k] - r.y2[k]) < 0.002);
+        assert.ok(Math.abs(e.y2.netR - r.y2.netR) <= 0.011, `${e.y2.netR} vs ${r.y2.netR}`);
+      }
+    }
+  }
+});
+
+/* ---- Claude's rules: only year 1 goes to Claude; its rules are tested like the study's ---------------------- */
+import { buildRulesMessage, cleanRules, testRules } from '../lib/study/claudeRules';
+
+test('Claude rule maker: never sees year 2; bad rules are dropped; good ones are tested on both years', async () => {
+  let seed = 6; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const H = hist('2024-12');
+  const ms: Moment[] = [];
+  const dates: string[] = [];
+  for (let t = Date.parse('2025-01-01T00:00:00Z'); dates.length < 60; t += 86400_000) { const d = new Date(t); if (d.getUTCDay() % 6) dates.push(d.toISOString().slice(0, 10)); }
+  for (const sym of ['A', 'B']) for (const d of dates) {
+    let p = 300; const px: number[] = []; for (let k = 0; k < 375; k++) { p += (rnd() - 0.5) * 0.8; px.push(p); }
+    ms.push(...mineDay({ symbol: sym, date: d, history: H, day: session(d, (k) => px[k]), nifty: session(d, () => 20000), daily: daily() }));
+  }
+  const mid = dates[30];
+  const st = JSON.parse(JSON.stringify(analyze(ms, { runId: 'r', createdAt: 0, period: { from: dates[0], to: dates[59], mid } }, { minTrades: 20, maxRules: 3 })));
+  // plant markers in everything that holds year 2 (or both years): none may reach Claude
+  const MARK = 987654;
+  const plant = (o: unknown): void => {
+    if (!o || typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+      if (['y2', 'y2First', 'all', 'allFirst', 'together'].includes(k) && v && typeof v === 'object') (o as Record<string, unknown>)[k] = { n: MARK, clean: MARK, messy: MARK, fail: MARK, netR: MARK, grossR: MARK, t: MARK };
+      else plant(v);
+    }
+  };
+  plant(st);
+  st.combos.forEach((c: { moves: unknown; examples?: unknown }) => { c.moves = { stockDays: MARK, withClean: MARK, dropBeforeClean: {}, dropPctBeforeClean: {} }; });
+  const msg = buildRulesMessage(st, { focus: 'late morning longs' });
+  assert.ok(!msg.includes(String(MARK)) && !msg.includes('987,654') && !msg.includes('98765400'), 'no year-2 number in the message');
+  assert.ok(msg.includes('YEAR 1') || msg.includes('year 1'));
+  assert.ok(msg.includes('focus on: late morning longs'));
+  for (const c of st.combos) assert.ok(msg.includes(`=== ${c.dir}_${c.target}`));
+
+  const { rules, dropped } = cleanRules({ rules: [
+    { tab: 'LONG_VWAP', name: 'ok', why: 'x', conds: [{ f: 'tWick', op: '>=', v: 0.3 }, { f: 'minute', op: '<', v: 120 }] },
+    { tab: 'LONG_VWAP', name: 'dup', why: 'x', conds: [{ f: 'minute', op: '<', v: 120 }, { f: 'tWick', op: '>=', v: 0.3 }] },
+    { tab: 'NOPE', name: 'badtab', why: '', conds: [{ f: 'tWick', op: '>=', v: 1 }] },
+    { tab: 'SHORT_OPEN', name: 'badfact', why: '', conds: [{ f: 'madeUp', op: '>=', v: 1 }] },
+  ] });
+  assert.deepEqual(rules.map((r) => r.name), ['ok']);
+  assert.equal(dropped.length, 3);
+
+  const files = { 1: decodeMoments(encodeMoments(ms, 1)), [-1]: decodeMoments(encodeMoments(ms, -1)) } as Record<1 | -1, ReturnType<typeof decodeMoments>>;
+  const [t] = testRules(rules, files, mid);
+  const side = ms.filter((m) => m.dir === 1 && m.v);
+  const want = firstOfDay(side.filter((m) => m.x[FEATURE_KEYS.indexOf('tWick')] >= 0.3 && m.x[FEATURE_KEYS.indexOf('minute')] < 120));
+  assert.equal(t.all.n, want.length, 'the rule takes the first matching entry of every stock-day');
+  assert.equal(t.y1.n + t.y2.n, t.all.n);
+  assert.ok(t.text.includes('wick'));
+});

@@ -315,3 +315,27 @@ export async function plainClaude(system: string, message: string, o: ClaudeOpti
     outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
   };
 }
+
+/**
+ * A call with its own system prompt and a JSON schema for the answer (none of the co-pilot's prompt): the Reversal
+ * Study's rule maker. Thinking is left at the model's default (it helps here), so maxTokens must be generous.
+ */
+export async function jsonClaude(system: string, message: string, schema: object, o: ClaudeOptions, maxTokens = 16_000): Promise<StructuredReply> {
+  const f = o.fetchImpl ?? fetch;
+  const sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const now = o.now ?? Date.now;
+  const model = o.model || DEFAULT_MODEL;
+  const body = { model, max_tokens: maxTokens, system, output_config: { format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content: message }] };
+  const t0 = now();
+  const json = await postMessages(body, { ...o, timeoutMs: o.timeoutMs ?? 240_000 }, f, sleep);
+  const content: { type: string; text?: string }[] = json?.content ?? [];
+  const text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n').trim();
+  let parsed: Record<string, unknown> = {};
+  try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) { try { parsed = JSON.parse(m[0]); } catch { /* leave empty */ } } }
+  const u = json?.usage ?? {};
+  return {
+    json: parsed, text, cutOff: json?.stop_reason === 'max_tokens', model,
+    inTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+    outTokens: u.output_tokens ?? 0, costInr: costInr(model, u, o.usdInr ?? 88), latencyMs: now() - t0,
+  };
+}

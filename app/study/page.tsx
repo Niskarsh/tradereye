@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, HelpCircle, Loader2, Sparkles } from 'lucide
 import { Card, pct, rr } from '@/components/setups/parts';
 import type { ComboStudy, Outcomes, Study } from '@/lib/study/analyze';
 import type { RunIndexItem } from '@/lib/setups/store';
+import { tabLabel, type ClaudeBatch, type ClaudeRule } from '@/lib/study/claudeRules';
 
 /**
  * Reversal Study: no rules decided in advance. Every moment that could have been a reversal entry in two years is
@@ -175,6 +176,7 @@ export default function StudyPage() {
                 <Explain part="tab" label={`Explain this tab (${c.dir === 'LONG' ? 'long' : 'short'} → ${c.target === 'VWAP' ? 'VWAP' : 'open'})`} />
               </div>
             </section>
+            <ClaudeRules run={s.runId} months2={months2} />
             <Moves c={c} />
             <Rules c={c} months2={months2} />
             <Drop c={c} />
@@ -221,6 +223,135 @@ const OutHead = ({ first, extra }: { first: string; extra?: React.ReactNode }) =
     </tr>
   </thead>
 );
+
+/* ---- rules written by Claude from year 1, tested here on year 1 / year 2 / both ------------------------- */
+
+function ClaudeRules({ run, months2 }: { run: string; months2: number }) {
+  const [batches, setBatches] = useState<ClaudeBatch[] | null>(null);
+  const [busy, setBusy] = useState<'' | 'new' | 'refine'>('');
+  const [err, setErr] = useState('');
+  const [focus, setFocus] = useState('');
+  const [pick, setPick] = useState(0);
+  const [open, setOpen] = useState<number | null>(null);
+  useEffect(() => {
+    fetch(`/api/study/claude-rules?run=${encodeURIComponent(run)}`).then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`); setBatches(j.batches); }).catch((e) => setErr((e as Error).message));
+  }, [run]);
+  const ask = async (refine: boolean) => {
+    setBusy(refine ? 'refine' : 'new'); setErr('');
+    try {
+      const r = await fetch('/api/study/claude-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run, refine, focus: focus.trim() || undefined }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setBatches((b) => [j.batch, ...(b ?? [])]); setPick(0); setOpen(null);
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(''); }
+  };
+  const b = batches?.[pick];
+  const status = (x: ClaudeRule) => (x.y2.n < 50 ? { t: 'Too few', cls: 'border-line-strong text-ink-3' }
+    : x.y2.netR <= 0 ? { t: 'Did not hold', cls: 'border-data-red/60 text-data-red-text' }
+    : (x.y2.t ?? 0) >= 2 ? { t: 'Held up', cls: 'border-data-green/60 text-data-green' }
+    : { t: 'Green, could be luck', cls: 'border-brand-accent/60 text-brand-accent' });
+  const rows = b ? [...b.rules].sort((x, y) => y.y2.netR - x.y2.netR) : [];
+  return (
+    <Card title="Rules from Claude" sub="Claude reads YEAR 1 only (every fact, fall range and the study's own rules) and writes rules as exact conditions. Each rule is then tested here on year 1, year 2 and both years, exactly like the study's rules. Claude never sees year 2, so year 2 stays an honest test.">
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="Optional: what to focus on (e.g. longs before 11:00, wide stops)"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-line bg-brand-bg px-2 text-xs outline-none focus:border-brand-accent" />
+        <button onClick={() => void ask(false)} disabled={!!busy} className="flex h-9 items-center gap-1.5 rounded-lg bg-brand-accent px-3 text-xs font-black text-brand-bg disabled:opacity-50">
+          {busy === 'new' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{busy === 'new' ? 'Claude is working…' : 'Ask Claude for rules'}
+        </button>
+        {!!batches?.length && (
+          <button onClick={() => void ask(true)} disabled={!!busy} title="Shows Claude its last rules with their YEAR 1 results only, and asks it to improve them"
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-brand-accent/60 px-3 text-xs font-black text-brand-accent disabled:opacity-50">
+            {busy === 'refine' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}{busy === 'refine' ? 'Refining…' : 'Refine the last rules'}
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-ink-3">One Claude call per press (it thinks it through: 1–4 minutes, about ₹15–30). Every batch is saved with this run.</p>
+      {err && <p className="text-xs text-data-red-text">{err}</p>}
+      {!!batches && batches.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          {batches.map((x, i) => (
+            <button key={x.id} onClick={() => { setPick(i); setOpen(null); }} className={`h-7 rounded-md border px-2 text-[11px] font-bold ${i === pick ? 'border-brand-accent text-brand-accent' : 'border-line-strong text-ink-2'}`}>
+              {new Date(x.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })}{x.refine ? ' · refined' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+      {b && (
+        <>
+          {b.note && <p className="rounded-lg border border-line bg-brand-bg p-2 text-xs leading-relaxed text-ink-2"><b className="text-ink">Claude:</b> {b.note}</p>}
+          <div className="-mx-2 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead>
+                <tr className="text-[10px] font-black uppercase tracking-widest text-ink-3">
+                  <th /><th /><th colSpan={2} className="border-b border-line px-2 py-1 text-center">Year 1 (Claude saw this)</th>
+                  <th colSpan={7} className="border-b border-data-green/40 px-2 py-1 text-center text-ink-2">Year 2 (hidden from Claude)</th>
+                  <th colSpan={2} className="border-b border-line px-2 py-1 text-center">Both years</th><th />
+                </tr>
+                <tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
+                  <th className="px-2 py-1.5 text-left">Tab</th><th className="px-2 py-1.5 text-left">Rule</th>
+                  <th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">R</th>
+                  <th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">Clean</th><th className="px-2 py-1.5 text-right">Messy</th><th className="px-2 py-1.5 text-right">Fail</th>
+                  <th className="px-2 py-1.5 text-right">R after costs</th><th className="px-2 py-1.5 text-right">t</th><th className="px-2 py-1.5 text-right">₹/month</th>
+                  <th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">R</th><th />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((x, i) => {
+                  const st = status(x);
+                  return (
+                    <React.Fragment key={i}>
+                      <tr onClick={() => setOpen(open === i ? null : i)} className="cursor-pointer border-b border-line/60 font-mono tabular-nums hover:bg-white/5">
+                        <td className="whitespace-nowrap px-2 py-1.5 font-sans text-[11px] font-bold">{tabLabel(x.tab)}</td>
+                        <td className="px-2 py-1.5 font-sans">
+                          <span className="flex items-start gap-1">
+                            {open === i ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-accent" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-3" />}
+                            <span><b>{x.name}</b><span className="mt-0.5 flex flex-wrap gap-1">{x.text.split(' AND ').map((t) => <span key={t} className="rounded-md border border-line-strong px-1.5 py-0.5 text-[10px]">{t}</span>)}</span></span>
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-ink-3">{x.y1.n}</td><td className="px-2 py-1.5 text-right text-ink-3">{rr(x.y1.netR)}</td>
+                        <td className="px-2 py-1.5 text-right">{x.y2.n}</td>
+                        <td className="px-2 py-1.5 text-right font-bold text-data-green">{pct(x.y2.clean)}</td>
+                        <td className="px-2 py-1.5 text-right text-ink-2">{pct(x.y2.messy)}</td>
+                        <td className="px-2 py-1.5 text-right text-data-red-text">{pct(x.y2.fail)}</td>
+                        <td className={`px-2 py-1.5 text-right font-bold ${x.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(x.y2.netR)}</td>
+                        <td className="px-2 py-1.5 text-right"><Sure o={x.y2} /></td>
+                        <td className={`px-2 py-1.5 text-right ${x.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{inr((x.y2.netR * 300 * x.y2.n) / months2)}</td>
+                        <td className="px-2 py-1.5 text-right text-ink-3">{x.all.n}</td>
+                        <td className={`px-2 py-1.5 text-right ${x.all.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(x.all.netR)}</td>
+                        <td className="px-2 py-1.5 text-right"><span className={`whitespace-nowrap rounded-md border px-1.5 py-0.5 font-sans text-[10px] font-black uppercase ${st.cls}`}>{st.t}</span></td>
+                      </tr>
+                      {open === i && (
+                        <tr className="border-b border-line/60">
+                          <td colSpan={14} className="px-2 pb-3 pt-1 text-[11px]">
+                            {x.why && <p className="mb-1 text-ink-2"><b className="text-ink">Why Claude picked it:</b> {x.why}</p>}
+                            <p className="mb-1 text-ink-3">Year 2 with a 2 ATR stop instead of the low: {rr(x.y2.netWide)} per trade · median position ₹{(x.y2.posMed ?? 0).toLocaleString('en-IN')} · avg {x.y2.min} min in the trade.</p>
+                            <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">Latest year-2 trades (check them on your chart)</p>
+                            <table className="w-full"><tbody>
+                              {x.examples.map((e) => (
+                                <tr key={`${e.symbol}${e.date}${e.time}`} className="font-mono">
+                                  <td className="px-1 py-0.5 text-ink-3">{e.date} {e.time}</td><td className="px-1 py-0.5 font-bold">{e.symbol}</td>
+                                  <td className="px-1 py-0.5">@ {e.entry} · stop {e.stop} · target {e.target}</td>
+                                  <td className={`px-1 py-0.5 text-right ${e.net > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{e.label === 'C' ? 'clean' : e.label === 'M' ? 'messy' : 'fail'} {rr(e.net)}</td>
+                                </tr>
+                              ))}
+                            </tbody></table>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {!!b.dropped.length && <p className="text-[11px] text-ink-3">Not tested (malformed): {b.dropped.join('; ')}</p>}
+          <p className="text-[11px] text-ink-3">Sorted by year 2 R after costs. Judge on year 2 and t: green with t ≥ 2 on 100+ trades is the bar. Every press tests more rules, so more greens will appear by luck; a rule that stays green after several refines and on the next re-run is the one to paper-trade. {b.costInr ? `This batch cost ₹${b.costInr.toFixed(2)}.` : ''}</p>
+        </>
+      )}
+    </Card>
+  );
+}
 
 function Moves({ c }: { c: ComboStudy }) {
   const m = c.moves;
