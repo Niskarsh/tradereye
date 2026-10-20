@@ -4,6 +4,16 @@
 shown each morning, with Dhan's charges taken off every trade. **Re-run** tests everything again; the page shows
 what changed against the previous run. The **Order Book** page alerts on a setup only when its past numbers clear the bar.
 
+## Research cases
+- **L1 Last half hour follows the first** (Gao, Han, Li, Zhou, market intraday momentum): Nifty 500 0.1%+ in its
+  first 30 minutes; at 15:00 trade the stocks that moved the same way; out at the 15:29 close.
+- **L2 End-of-day reversal** (Baltussen, Da, Soebhag): at 15:00 buy a stock 1.5%+ worse than Nifty since the open
+  (sell 1.5%+ better); out at the 15:29 close.
+- **FB Breakout fade**: every breakout setup (A, G, I, M1, M2, M6, M7) taken the other way.
+- **S1 5-day reversal** (short-term reversal, Jegadeesh / Lehmann): down 7%+ in 5 sessions and 4%+ worse than Nifty;
+  bought at the close, sold 5 sessions later; stop 2x daily ATR; delivery charges; long only.
+The opening range breakout is not tested on purpose: nothing is entered before the 09:25 close.
+
 ## The setups (lib/setups/cases.ts)
 Everything is decided on the **10-minute chart**: a setup appears only when a 10-minute candle closes, and the entry
 is that close. 1-minute candles are used only to follow a trade (did the stop or the target come first inside a
@@ -51,7 +61,9 @@ Re-run → `POST /api/setups/run` leaves today's Dhan token in S3 under the run 
 `Setup backtest` workflow (`.github/workflows/setups-backtest.yml`, `scripts/setups-backtest.ts`). The job overwrites
 the token as soon as it has read it; the public log shows progress only.
 
-1. Today's Nifty 500 list (NSE) mapped to Dhan ids; if the list cannot be downloaded, every NSE equity is used.
+1. Every NSE equity in Dhan's instrument list. Each day only the ones with a previous close of ₹250-340 and a 10-day
+   average volume of 500,000+ shares are tested; the 20 busiest in their first 10 minutes (1.5x usual or more) are
+   marked "in play" (a slice). The 5-day reversal (S1) runs on the daily candles.
 2. Daily candles per stock → the days it passed the screener (previous close ₹250–340, 10-day average volume > 3M).
 3. 1-minute candles for those months only (plus 5 weeks before). Saved per stock-month under `setups/candles/1m/`;
    a finished month is never fetched again, so a re-run a month later fetches just the new month.

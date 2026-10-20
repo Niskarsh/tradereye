@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { ProgressBar } from '@/components/ui/progress';
 import { Card, Delta, StatCells, StatHead, Verdict, pct, rr } from '@/components/setups/parts';
-import { CASE_BY_ID, EXIT_KEYS, EXIT_LABEL, PRIMARY_TARGET, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, TARGET_LABEL, hhmm, type CaseId, type OutKey, type Signal } from '@/lib/setups/cases';
+import { CASE_BY_ID, EXIT_KEYS, EXIT_LABEL, primaryOf, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, TARGET_LABEL, hhmm, type CaseId, type OutKey, type Signal } from '@/lib/setups/cases';
 import { DIMS, applyFilter, statsOf, unpack, type DimKey, type Filter, type Packed, type Stats, type Summary } from '@/lib/setups/stats';
 import type { RunIndexItem, RunStatus } from '@/lib/setups/store';
 
@@ -140,12 +140,13 @@ function RunLine({ status }: { status: Status }) {
 
 function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summary: Summary; minHit: number; prevCase: (id: CaseId) => Summary['cases'][number] | undefined; hasPrev: boolean; open: CaseId | null; onOpen: (id: CaseId) => void }) {
   const groups = [
+    { title: 'Research: published and institutional strategies', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'RESEARCH' },
     { title: 'Combined: several conditions together', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'COMBINED' },
     { title: 'Momentum building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'MOMENTUM' },
     { title: 'Reversal building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'REVERSAL' },
   ];
   return (
-    <Card title="Every setup" sub={`Hit rate = target before stop (momentum: 1R, reversal: its level). Alert-worthy = 50+ trades, ${Math.round(minHit * 100)}%+ hit, makes money after charges, steady in both halves. Tap a setup for its stops, exits, stretch steps and times.`}>
+    <Card title="Every setup" sub={`Hit rate = target before stop (momentum: 1R, reversal: its level; research cases held to their exit time: made money after charges). Alert-worthy = 50+ trades, ${Math.round(minHit * 100)}%+ hit, makes money after charges, steady in both halves. Tap a setup for its stops, exits, stretch steps and times.`}>
       <div className="-mx-2 overflow-x-auto">
         <table className="w-full min-w-[560px] text-xs">
           <thead>
@@ -212,7 +213,7 @@ function CaseDetail({ summary, minHit, id, prev, onClose }: { summary: Summary; 
   const { sigs, err } = useSignals(summary.runId, id);
   const [f, setF] = useState<Filter>({});
   const filtered = useMemo(() => (sigs ? applyFilter(sigs, f) : []), [sigs, f]);
-  const [exitKey, setExitKey] = useState<OutKey>(PRIMARY_TARGET[info.family]);
+  const [exitKey, setExitKey] = useState<OutKey>(primaryOf(id));
   const fs = useMemo(() => (sigs ? statsOf(filtered, exitKey, summary.period.mid) : undefined), [sigs, filtered, exitKey, summary.period.mid]);
   const anyFilter = Object.values(f).some((v) => (Array.isArray(v) ? v.length : v !== undefined));
   const toggle = (k: DimKey, v: string) => setF((x) => { const cur = x[k] ?? []; const nxt = cur.includes(v) ? cur.filter((y) => y !== v) : [...cur, v]; return { ...x, [k]: nxt }; });
@@ -222,7 +223,7 @@ function CaseDetail({ summary, minHit, id, prev, onClose }: { summary: Summary; 
   const outLabel = (k: OutKey) => (k.startsWith('T') ? (k === 'TS' ? `${TARGET_LABEL.TS} (${info.target})` : TARGET_LABEL[k as 'T1' | 'T15']) : EXIT_LABEL[k as keyof typeof EXIT_LABEL]);
 
   return (
-    <Card title={`${id} · ${info.name}`} sub={info.rule} right={<button onClick={onClose} aria-label="Close" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}>
+    <Card title={`${id} · ${info.name}`} sub={info.source ? `${info.rule} Evidence: ${info.source}.` : info.rule} right={<button onClick={onClose} aria-label="Close" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}>
       <p className="text-[11px] text-ink-3">
         Stops: {pct(c.slices.stopType?.SWING ? c.slices.stopType.SWING.n / Math.max(1, c.all.n) : 0)} at a solid swing, the rest at 2x ATR (no solid swing).
         {c.skippedFar > 0 && <> {c.skippedFar.toLocaleString('en-IN')} more times the setup appeared but the solid swing was beyond 2x ATR, so it was not taken.</>}
@@ -407,7 +408,8 @@ function HowItWorks({ open, onToggle }: { open: boolean; onToggle: () => void })
       </button>
       {open && (
         <div className="mt-3 space-y-3 text-xs leading-relaxed text-ink-2">
-          <p><b>Which stocks:</b> each day, the Nifty 500 stocks your screener would have shown that morning (previous close ₹250–340, 10-day average volume above 3M). Today&apos;s Nifty 500 members are used, so stocks that left the index are missed; that flatters the numbers slightly.</p>
+          <p><b>Which stocks:</b> each day, every NSE stock with a previous close of ₹250–340 and a 10-day average volume of 5 lakh shares or more (so the trades could actually be filled). Stocks that were delisted in the last two years are not in Dhan&apos;s list and are missed. &quot;In play&quot; = the 20 busiest of them in the first 10 minutes vs their usual (1.5x or more); it is a slice you can pick, not a filter.</p>
+          <p><b>Research cases:</b> last-half-hour momentum and the end-of-day reversal are decided at 15:00 and held to the 15:29 close; the breakout fade takes every breakout the other way; the 5-day reversal is a delivery trade (bought at the close, sold 5 sessions later, delivery charges). No opening range breakout: nothing is entered before the 09:25 close.</p>
           <p><b>How a trade is scored:</b> everything is decided on the 10-minute chart: a setup appears only when a 10-minute candle closes, and the entry is that close. The stop goes 0.1 ATR beyond the nearest solid swing (a 10-min swing low/high that price moved away from by 0.75 ATR+, came back to and was rejected, and has not been broken since). If that swing is beyond 2x ATR the trade is not taken; with no solid swing the stop is 2x ATR. 1-minute candles are used only to see whether the stop or the target came first inside a 10-minute candle; when both are touched in the same minute it counts as the stop. Anything open is closed at 15:00. Size = your ₹300 risk / stop distance, and Dhan&apos;s charges at that size are taken off every result. Order-book rejection cannot be tested (no past order books), so confirm it on the Order Book page.</p>
           <p><b>Exits:</b> systematic = 1R, 1.5R, the structural target. Discretionary = the first time one marker shows up (checked at each 10-minute close): structure breaks, a heavy candle against you, Nifty turns against you, the day range reaches 95% of usual, the next obstacle, no progress after 30 minutes, give-back from +1R. Their &quot;hit&quot; = the trade made money after charges.</p>
           <p><b>Halves:</b> the two years are split in the middle. A setup that only works in one half was probably luck or one market mood.</p>

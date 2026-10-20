@@ -9,13 +9,17 @@
  */
 
 export type CaseId =
+  | 'L1' | 'L2' | 'FB' | 'S1'
   | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'I' | 'J' | 'K'
   | 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7' | 'M8' | 'M9'
   | 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8';
 
 export type Family = 'MOMENTUM' | 'REVERSAL';
-/** COMBINED = several conditions together (his way of trading); BLOCK = one condition on its own (building block) */
-export type Group = 'COMBINED' | 'BLOCK';
+/**
+ * RESEARCH = strategies from published research / institutional practice; COMBINED = several conditions together
+ * (his way of trading); BLOCK = one condition on its own (building block)
+ */
+export type Group = 'RESEARCH' | 'COMBINED' | 'BLOCK';
 
 export interface CaseInfo {
   id: CaseId;
@@ -26,12 +30,30 @@ export interface CaseInfo {
   rule: string;
   /** what the structural target is (momentum cases use 2R) */
   target: string;
+  /** the exit the headline hit rate is quoted for, when not the family's default */
+  primary?: OutKey;
+  /** where the evidence comes from (research cases) */
+  source?: string;
 }
 
 const MOM_CONTEXT = 'Nifty 500 directional his way in the first 5 minutes and still his way open → now, the stock busier than usual, no 200 EMA (5m/10m/1D) within 2 ATR in the way, the stock 10%+ of its daily range his way and under 80%.';
 const REV_CONTEXT = 'A quiet stock (not busier than usual), 50%+ of its daily range moved, the 10-min candle in the day high (low) zone, Nifty 500 flat or turning against the stock over the last 30 minutes, no 200 EMA between price and the target.';
 
 export const CASES: CaseInfo[] = [
+  // ---- research: published / institutional strategies (no opening range breakout: nothing before 09:25)
+  { id: 'L1', family: 'MOMENTUM', group: 'RESEARCH', name: 'Last half hour follows the first', target: 'Held to 15:29', primary: 'TC',
+    source: 'Gao, Han, Li, Zhou: Market intraday momentum (the first half hour predicts the last half hour)',
+    rule: 'Nifty 500 moved 0.1%+ in its first 30 minutes (09:15-09:44). At 15:00, trade the stocks that moved the same way both in their own first 30 minutes and from the open to 15:00. Entry at 15:00, out at the 15:29 close. Safety stop 1 ATR.' },
+  { id: 'L2', family: 'REVERSAL', group: 'RESEARCH', name: 'End-of-day reversal', target: 'Held to 15:29', primary: 'TC',
+    source: 'Baltussen, Da, Soebhag (Quantpedia Awards 2025): stocks that did badly during the day rebound into the close, strong ones fall',
+    rule: 'At 15:00, a stock 1.5%+ worse than Nifty 500 since the open is bought (1.5%+ better is sold). Out at the 15:29 close. Safety stop 1 ATR.' },
+  { id: 'FB', family: 'REVERSAL', group: 'RESEARCH', name: 'Breakout fade', target: '2R', primary: 'T1',
+    source: 'His own backtest: breakouts in this price range reach 1R less often than random entries',
+    rule: 'Whenever a breakout setup appears (A, G, I, M1, M2, M6, M7), the opposite trade at the same 10-min close, stop beyond the nearest solid swing on the other side.' },
+  { id: 'S1', family: 'REVERSAL', group: 'RESEARCH', name: '5-day reversal (delivery, 5 days)', target: 'Held 5 sessions', primary: 'TC',
+    source: 'Short-term reversal (Jegadeesh 1990, Lehmann 1990): last week\'s biggest losers tend to bounce',
+    rule: 'At the close, a stock down 7%+ over the last 5 sessions and 4%+ worse than Nifty 500 is bought (delivery; long only). Out at the close 5 sessions later. Stop 2x the daily ATR. Delivery charges (STT 0.1% both sides, DP charge).' },
+
   // ---- combined: his playbook
   { id: 'A', family: 'MOMENTUM', group: 'COMBINED', name: 'Momentum, Nifty-led', target: '2R',
     rule: `${MOM_CONTEXT} Trigger: a 10-min close beyond the day's high (low) or the first 10-min candle.` },
@@ -96,14 +118,16 @@ export const CASE_BY_ID = new Map(CASES.map((c) => [c.id, c]));
 /* ---- exits ----------------------------------------------------------------------------------------------- */
 
 /** Systematic exits: fixed targets. */
-export type TargetKey = 'T1' | 'T15' | 'TS';
+export type TargetKey = 'T1' | 'T15' | 'TS' | 'TC';
 /** Discretionary exits: the markers a discretionary trader exits on before a target. XA = whichever comes first. */
 export type ExitKey = 'X1' | 'X2' | 'X3' | 'X4' | 'X5' | 'X6' | 'X7' | 'XA';
 export type OutKey = TargetKey | ExitKey;
-export const TARGET_KEYS: TargetKey[] = ['T1', 'T15', 'TS'];
+export const TARGET_KEYS: TargetKey[] = ['T1', 'T15', 'TS', 'TC'];
 export const EXIT_KEYS: ExitKey[] = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'XA'];
 export const PRIMARY_TARGET: Record<Family, TargetKey> = { MOMENTUM: 'T1', REVERSAL: 'TS' };
-export const TARGET_LABEL: Record<TargetKey, string> = { T1: '1R', T15: '1.5R', TS: 'Structure' };
+export const TARGET_LABEL: Record<TargetKey, string> = { T1: '1R', T15: '1.5R', TS: 'Structure', TC: 'Held to the exit time' };
+/** the exit a case's headline hit rate is quoted for */
+export function primaryOf(c: CaseId): OutKey { const i = CASE_BY_ID.get(c)!; return i.primary ?? PRIMARY_TARGET[i.family]; }
 export const EXIT_LABEL: Record<ExitKey, string> = {
   X1: 'Structure breaks (10-min close beyond the previous candle against you)',
   X2: 'Heavy candle against you (2x normal volume)',
@@ -167,6 +191,8 @@ export interface Signal {
   level: '' | 'DAY' | 'PD' | 'VA';
   /** momentum: how many pullbacks the move has had */
   pullbackNo: number;
+  /** a stock in play: among the 20 busiest stocks of the day's universe at 09:25 (first 10 minutes vs usual), set by the backtest job */
+  inPlay?: boolean;
   /** other cases that fired the same way on the same stock in the 30 minutes before (or at) this one */
   with: CaseId[];
   /* outcome (backtest only; none for stopType FAR) */
@@ -174,7 +200,7 @@ export interface Signal {
 }
 
 export interface TargetResult {
-  /** target reached before the stop (systematic) / exited with money after charges (discretionary) */
+  /** target reached before the stop (1R / 1.5R / structure) / made money after charges (held to the exit time, discretionary) */
   hit: boolean;
   /** result in R before charges */
   r: number;

@@ -13,7 +13,7 @@ import type { WatchItem } from '@/lib/book/sheet';
 import type { ReversalAlert } from '@/lib/book/reversal';
 import { reportForClaude } from '@/lib/book/feedreport';
 import { useSetupAlerts, type SetupAlert, type ScanInfo } from '@/components/setups/useSetupAlerts';
-import { TARGET_LABEL, PRIMARY_TARGET } from '@/lib/setups/cases';
+import { TARGET_LABEL, primaryOf, type TargetKey } from '@/lib/setups/cases';
 
 /**
  * Order Book tab: curate the list (type / paste symbols, or paste screener screenshots read by Gemini), press
@@ -359,7 +359,8 @@ function ScanLine({ info, hasToken }: { info: ScanInfo; hasToken: boolean }) {
 function SetupCard({ a, onOpen, onDismiss }: { a: SetupAlert; onOpen: (a: SetupAlert) => void; onDismiss: (id: string) => void }) {
   const long = a.signal.dir === 1;
   const st = a.stats;
-  const tgt = TARGET_LABEL[PRIMARY_TARGET[a.family]];
+  const pk = primaryOf(a.signal.case);
+  const tgt = pk.startsWith('T') ? TARGET_LABEL[pk as TargetKey] : 'its exit';
   return (
     <div className={`relative rounded-xl border bg-brand-card shadow-lg ${long ? 'border-data-green/70' : 'border-data-red/70'} ${a.opened ? 'opacity-75' : ''}`}>
       <button onClick={() => onOpen(a)} className="block w-full px-3 py-2 pr-9 text-left" title="Open the chart at this moment">
@@ -376,7 +377,7 @@ function SetupCard({ a, onOpen, onDismiss }: { a: SetupAlert; onOpen: (a: SetupA
         </span>
         {st && (
           <span className="mt-1 block text-[11px] leading-snug text-ink-2">
-            Past: <b className="text-ink">{Math.round(st.hit * 100)}%</b> reached {tgt} first in <b className="text-ink">{st.n}</b> cases · <span className={st.netR > 0 ? 'text-data-green' : 'text-data-red-text'}>{st.netR > 0 ? '+' : ''}{st.netR.toFixed(2)}R</span> after costs · halves {Math.round(st.h1.hit * 100)}%/{Math.round(st.h2.hit * 100)}%
+            Past: <b className="text-ink">{Math.round(st.hit * 100)}%</b> {pk === 'TC' ? 'made money' : `reached ${tgt} first`} in <b className="text-ink">{st.n}</b> cases · <span className={st.netR > 0 ? 'text-data-green' : 'text-data-red-text'}>{st.netR > 0 ? '+' : ''}{st.netR.toFixed(2)}R</span> after costs · halves {Math.round(st.h1.hit * 100)}%/{Math.round(st.h2.hit * 100)}%
           </span>
         )}
         <span className="mt-0.5 block text-[10px] text-ink-3">{a.signal.stretch}% of daily range · Nifty open→now {a.signal.nDay.toLowerCase()} · {a.signal.emaInWay ? '200 EMA in the way' : 'EMA clear'}{a.family === 'REVERSAL' ? ' · check the book for a real rejection' : ''}</span>

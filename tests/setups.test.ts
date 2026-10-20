@@ -258,7 +258,8 @@ test('the backtest job: screener, history cache, results, run index and status',
   const idx = (await getJson<{ runId: string }[]>(w.store, INDEX_KEY))!;
   assert.equal(idx[0].runId, '2026-10-20-11-30-ab12');
   const saved = (await getJson<Summary>(w.store, summaryKey('2026-10-20-11-30-ab12')))!;
-  assert.equal(saved.cases.length, 27);
+  assert.equal(saved.cases.length, 31);
+  assert.ok(signals.filter((s) => s.case !== 'S1').every((s) => s.inPlay !== undefined), 'every intraday signal knows whether its stock was in play');
   assert.ok(signals.every((s) => s.slot % 10 === 0), 'every decision at a 10-minute close');
   const r1 = unpack2((await getJson<Packed>(w.store, signalsKey('2026-10-20-11-30-ab12', 'R1')))!);
   assert.equal(r1.length, signals.filter((s) => s.case === 'R1').length);
@@ -318,4 +319,62 @@ test('discretionary exits: no progress after 30 minutes, the next obstacle, the 
   assert.ok(o.X5.r > 0.55 && o.X5.r < 0.65, `obstacle exit ${o.X5.r}R`);
   assert.equal(o.XA.min, o.X6.min, 'XA = the first marker');
   assert.equal(o.X6.hit, o.X6.net > 0);
+});
+
+/* ---- research cases ----------------------------------------------------------------------------------- */
+import { runSwing } from '../lib/setups/swing';
+import { deliveryCharges } from '../lib/setups/costs';
+
+test('last half hour: Nifty up in its first 30 minutes, a stock up with it -> long at 15:00, out at the 15:29 close', () => {
+  const day = session(DATE, (k) => 300 + Math.min(k, 30) * 0.03 + (k >= 345 ? (k - 344) * 0.02 : 0));
+  const nifty = session(DATE, (k) => 20000 * (1 + Math.min(k, 30) * 0.0001));
+  const sigs = runDay({ symbol: 'TEST', date: DATE, history: history(), day, nifty, daily: dailyBefore(), simulate: true });
+  const l1 = sigs.find((s) => s.case === 'L1');
+  assert.ok(l1, `L1 expected, got ${sigs.map((s) => s.case).join(',')}`);
+  assert.equal(l1!.dir, 1);
+  assert.equal(l1!.slot, 345, 'decided at 15:00');
+  assert.equal(l1!.out!.TC.min, 30, 'held to the 15:29 close');
+  assert.ok(l1!.out!.TC.r > 0);
+  assert.equal(l1!.out!.TC.hit, l1!.out!.TC.net > 0);
+});
+
+test('end-of-day reversal: 1.5% worse than Nifty at 15:00 -> long', () => {
+  const day = session(DATE, (k) => 300 - Math.min(k, 300) * 0.02);
+  const nifty = session(DATE, () => 20000);
+  const sigs = runDay({ symbol: 'TEST', date: DATE, history: history(), day, nifty, daily: dailyBefore(), simulate: true });
+  const l2 = sigs.find((s) => s.case === 'L2');
+  assert.ok(l2);
+  assert.equal(l2!.dir, 1);
+  assert.equal(l2!.slot, 345);
+});
+
+test('breakout fade: every breakout comes with the opposite trade at the same close', () => {
+  const day = session(DATE, (k) => (k < 10 ? 300 : 300 + (k - 9) * 0.05));
+  const nifty = session(DATE, (k) => 20000 * (1 + Math.min(k, 30) * 0.0006));
+  const sigs = runDay({ symbol: 'TEST', date: DATE, history: history(), day, nifty, daily: dailyBefore(), simulate: true });
+  const m1 = sigs.find((s) => s.case === 'M1')!;
+  const fb = sigs.find((s) => s.case === 'FB')!;
+  assert.ok(fb, 'FB expected');
+  assert.equal(fb.dir, -m1.dir);
+  assert.ok(fb.slot <= m1.slot, 'the first breakout of the day is faded');
+  assert.ok(fb.stop > fb.entry);
+});
+
+test('5-day reversal: a 7%+ drop vs Nifty is bought at the close and held 5 sessions with delivery charges', () => {
+  const d: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] };
+  const nc = new Map<string, number>();
+  const px = (i: number) => (i < 30 ? 300 : i < 35 ? 300 - (i - 29) * 5 : 275 + (i - 34) * 3);
+  for (let i = 0; i < 50; i++) {
+    const day = new Date(Date.UTC(2026, 0, 1) + i * 86400_000).toISOString().slice(0, 10);
+    d.t.push(sec(day, '09:15')); d.o.push(px(i)); d.h.push(px(i) + 1); d.l.push(px(i) - 1); d.c.push(px(i)); d.v.push(1e6);
+    nc.set(day, 20000);
+  }
+  const sigs = runSwing('TEST', d, nc, '2026-01-01', '2026-12-31', { priceMin: 250, priceMax: 340, avgVolMin: 500_000 }, { riskInr: 300 });
+  assert.equal(sigs.length, 1);
+  const s = sigs[0];
+  assert.equal(s.case, 'S1');
+  assert.equal(s.date, '2026-02-04'); // the 5th day down: 300 -> 275 (-8.3%)
+  assert.ok(s.out!.TC.r > 0, 'the bounce');
+  assert.ok(s.out!.TC.net < s.out!.TC.r, 'delivery charges taken off');
+  assert.ok(deliveryCharges(100, 300, 310) > 60 && deliveryCharges(100, 300, 310) < 90);
 });

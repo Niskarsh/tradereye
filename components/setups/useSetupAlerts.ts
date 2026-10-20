@@ -41,7 +41,8 @@ export function useSetupAlerts(opts: {
     const tick = async () => {
       const { token, list } = ref.current;
       const m = istMin();
-      if (token && list.length && m >= 9 * 60 + 20 && m < 15 * 60) {
+      // 09:20-15:05: the last-half-hour setups are decided at 15:00
+      if (token && list.length && m >= 9 * 60 + 20 && m <= 15 * 60 + 5) {
         try {
           const r = await fetch('/api/setups/scan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-dhan-token': token }, body: JSON.stringify({ symbols: list }) });
           const j = await r.json().catch(() => ({}));

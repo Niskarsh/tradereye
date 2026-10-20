@@ -1,4 +1,4 @@
-import { CASE_BY_ID, CASES, EXIT_KEYS, PRIMARY_TARGET, SLOT30_VALUES, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, slot30, stretchBucket, type CaseId, type OutKey, type Signal, type TargetKey } from './cases';
+import { CASE_BY_ID, CASES, EXIT_KEYS, SLOT30_VALUES, primaryOf, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, slot30, stretchBucket, type CaseId, type OutKey, type Signal } from './cases';
 
 /**
  * Numbers for a set of signals. The same code runs in the backtest job (summary + alert lookup) and on the My Setups
@@ -24,7 +24,7 @@ export interface Stats {
 
 const round = (x: number, p = 3) => Math.round(x * 10 ** p) / 10 ** p;
 
-export function primaryTarget(c: CaseId): TargetKey { return PRIMARY_TARGET[CASE_BY_ID.get(c)!.family]; }
+export function primaryTarget(c: CaseId): OutKey { return primaryOf(c); }
 
 /** `mid` = the first day of the second half (YYYY-MM-DD). */
 export function statsOf(signals: Signal[], target: OutKey | 'PRIMARY', mid: string): Stats {
@@ -51,9 +51,10 @@ export function statsOf(signals: Signal[], target: OutKey | 'PRIMARY', mid: stri
 
 /* ---- slices ---------------------------------------------------------------------------------------------- */
 
-export type DimKey = 'dir' | 'time' | 'slot30' | 'nFirst5' | 'nDay' | 'nRecent' | 'rvol' | 'openBusy' | 'stretch' | 'emaInWay' | 'stopType' | 'testNo' | 'level' | 'pullbackNo';
+export type DimKey = 'dir' | 'inPlay' | 'time' | 'slot30' | 'nFirst5' | 'nDay' | 'nRecent' | 'rvol' | 'openBusy' | 'stretch' | 'emaInWay' | 'stopType' | 'testNo' | 'level' | 'pullbackNo';
 export const DIMS: { key: DimKey; label: string; values: string[] }[] = [
   { key: 'dir', label: 'Side', values: ['LONG', 'SHORT'] },
+  { key: 'inPlay', label: 'Stock in play (20 busiest at 09:25)', values: ['YES', 'NO'] },
   { key: 'time', label: 'Time', values: ['09:20-09:45', '09:45-11:00', '11:00-13:00', '13:00-15:00'] },
   { key: 'slot30', label: 'Set up at (30 min)', values: SLOT30_VALUES },
   { key: 'nFirst5', label: 'Nifty first 5 min', values: ['WITH', 'FLAT', 'AGAINST'] },
@@ -75,6 +76,7 @@ export function dimValue(s: Signal, k: DimKey): string {
     case 'stretch': return stretchBucket(s.stretch);
     case 'slot30': return slot30(s.slot);
     case 'openBusy': return s.openBusy ? 'YES' : 'NO';
+    case 'inPlay': return s.inPlay === undefined ? '' : s.inPlay ? 'YES' : 'NO';
     case 'emaInWay': return s.emaInWay ? 'YES' : 'NO';
     case 'stopType': return s.stopType;
     case 'testNo': return !s.testNo ? '' : s.testNo >= 3 ? '3+' : String(s.testNo);
@@ -191,7 +193,8 @@ export function buildSummary(signals: Signal[], meta: Omit<Summary, 'v' | 'cases
 
 /** His own rules, checked against every signal (primary target of each case). */
 export function ruleChecks(signals: Signal[], mid: string): RuleCheck[] {
-  const fam = (f: 'MOMENTUM' | 'REVERSAL') => signals.filter((s) => CASE_BY_ID.get(s.case)!.family === f && s.case !== 'M9');
+  // his rules are about his own setups: the research cases are left out
+  const fam = (f: 'MOMENTUM' | 'REVERSAL') => signals.filter((s) => CASE_BY_ID.get(s.case)!.family === f && CASE_BY_ID.get(s.case)!.group !== 'RESEARCH' && s.case !== 'M9');
   const mom = fam('MOMENTUM'), rev = fam('REVERSAL');
   const row = (label: string, g: Signal[]) => ({ label, stats: statsOf(g, 'PRIMARY', mid) });
   return [
@@ -236,14 +239,14 @@ export function lookupFor(summary: Pick<Summary, 'lookup'>, s: Pick<Signal, 'cas
 
 /* ---- compact storage: signals as columns (about 5x smaller than objects) ---------------------------------- */
 
-const COLS = ['case', 'symbol', 'date', 'slot', 'dir', 'entry', 'stop', 'target', 'stopAtr', 'atr', 'stopType', 'time', 'nFirst5', 'nDay', 'nRecent', 'rvol', 'openBusy', 'stretch', 'emaInWay', 'gapPct', 'testNo', 'tests', 'level', 'pullbackNo', 'with'] as const;
+const COLS = ['case', 'symbol', 'date', 'slot', 'dir', 'entry', 'stop', 'target', 'stopAtr', 'atr', 'stopType', 'time', 'nFirst5', 'nDay', 'nRecent', 'rvol', 'openBusy', 'inPlay', 'stretch', 'emaInWay', 'gapPct', 'testNo', 'tests', 'level', 'pullbackNo', 'with'] as const;
 const OUT: OutKey[] = [...TARGET_KEYS, ...EXIT_KEYS];
 export interface Packed { v: 2; cols: string[]; outs: string[]; rows: unknown[][] }
 
 export function pack(signals: Signal[]): Packed {
   const cols = [...COLS, 'out'];
   const rows = signals.map((s) => [
-    ...COLS.map((c) => (c === 'openBusy' || c === 'emaInWay' ? (s[c] ? 1 : 0) : c === 'with' ? s.with.join(',') : c === 'tests' ? s.tests.join(',') : s[c])),
+    ...COLS.map((c) => (c === 'inPlay' ? (s.inPlay === undefined ? -1 : s.inPlay ? 1 : 0) : c === 'openBusy' || c === 'emaInWay' ? (s[c] ? 1 : 0) : c === 'with' ? s.with.join(',') : c === 'tests' ? s.tests.join(',') : s[c])),
     s.out ? [...OUT.flatMap((k) => [s.out![k].hit ? 1 : 0, s.out![k].r, s.out![k].net, s.out![k].min]), s.out.mfe, s.out.mae, s.out.costR, s.out.filled === undefined ? -1 : s.out.filled ? 1 : 0] : null,
   ]);
   return { v: 2, cols, outs: OUT, rows };
@@ -260,7 +263,7 @@ export function unpack(p: Packed): Signal[] {
     const s = {
       case: r[I.case], symbol: r[I.symbol], date: r[I.date], slot: r[I.slot], dir: r[I.dir], entry: r[I.entry], stop: r[I.stop], target: r[I.target],
       stopAtr: r[I.stopAtr], atr: r[I.atr], capped: stopType === 'ATR2', stopType, time: r[I.time], nFirst5: r[I.nFirst5], nDay: r[I.nDay], nRecent: r[I.nRecent],
-      rvol: r[I.rvol], openBusy: r[I.openBusy] === 1, stretch: r[I.stretch], emaInWay: r[I.emaInWay] === 1, gapPct: r[I.gapPct],
+      rvol: r[I.rvol], openBusy: r[I.openBusy] === 1, ...(I.inPlay >= 0 && r[I.inPlay] !== -1 && r[I.inPlay] !== undefined ? { inPlay: r[I.inPlay] === 1 } : {}), stretch: r[I.stretch], emaInWay: r[I.emaInWay] === 1, gapPct: r[I.gapPct],
       testNo: (r[I.testNo] as number) ?? 0, tests: list(r[I.tests]).map(Number), level: (r[I.level] ?? '') as Signal['level'], pullbackNo: (r[I.pullbackNo] as number) ?? 0,
       with: list(r[I.with]),
     } as Signal;
