@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
-import { runDay, toSlots, valueArea, simulate, DEFAULT_PARAMS } from '../lib/setups/engine';
+import { runDay, toSlots, valueArea, simulate, swingStop, Zone, DEFAULT_PARAMS } from '../lib/setups/engine';
 import { roundTripCharges, sizeFor } from '../lib/setups/costs';
 import { buildSummary, lookupFor, pack, passes, statsOf, unpack, applyFilter } from '../lib/setups/stats';
-import { stretchBucket, timeBucket, type Signal } from '../lib/setups/cases';
+import { stretchBucket, timeBucket, slot30, EXIT_KEYS, TARGET_KEYS, type Signal, type Outcome } from '../lib/setups/cases';
 import { screenerDays, monthsNeeded } from '../lib/setups/universe';
 
 const IST = 19800;
@@ -62,7 +62,8 @@ test('M1 fires when the first 10-min candle breaks with Nifty up, and the trade 
   const m1 = sigs.find((s) => s.case === 'M1' && s.dir === 1);
   assert.ok(m1, `M1 long expected, got ${sigs.map((s) => s.case + s.dir).join(',')}`);
   assert.equal(m1!.nFirst5, 'WITH');
-  assert.ok(m1!.slot >= 10);
+  assert.equal(m1!.slot % 10, 0, 'decided at a 10-minute close');
+  assert.equal(m1!.slot, 20, 'the first 10-min close beyond the opening candle (09:35)');
   assert.equal(m1!.out!.T1.hit, true);
   assert.ok(m1!.out!.T1.net < m1!.out!.T1.r, 'charges are taken off');
   // no short opening-range break on a straight climb
@@ -77,22 +78,24 @@ test('no momentum trade when Nifty is against him', () => {
 });
 
 test('R1: a run of 50%+ of the daily range that turns at the high is a reversal short to the POC', () => {
-  // most volume around 300 (the POC), then a run to 304 (67% of a 6 rupee ADR) by 11:00, then a turn
-  const day = session(DATE, (k) => (k < 60 ? 300 + Math.sin(k) * 0.1 : k < 105 ? 300 + (k - 60) * (4 / 45) : 304 - (k - 105) * 0.08),
+  // most volume around 300 (the POC), a run to 305 by 11:05, then a 10-min candle that drops back a rupee
+  const day = session(DATE, (k) => (k < 60 ? 300 + Math.sin(k) * 0.1 : k < 110 ? 300 + (k - 60) * (5 / 49) : k < 120 ? 305 - (k - 109) * 0.15 : 303.5 - (k - 119) * 0.03),
     (k) => (k < 60 ? 5000 : 800));
   const nifty = session(DATE, () => 20000);
   const sigs = runDay({ symbol: 'TEST', date: DATE, history: history(), day, nifty, daily: dailyBefore(), simulate: true });
   const r1 = sigs.find((s) => s.case === 'R1');
   assert.ok(r1, `R1 expected, got ${sigs.map((s) => s.case + s.dir).join(',')}`);
   assert.equal(r1!.dir, -1);
+  assert.equal(r1!.slot, 120, 'the 11:05 candle closes below the previous one: decided at 11:15');
   assert.ok(r1!.stretch >= 50 && r1!.stretch < 80, `stretch ${r1!.stretch}`);
+  assert.equal(r1!.testNo, 1);
   assert.ok(Math.abs(r1!.target - 300) < 0.5, `target near the POC, got ${r1!.target}`);
   assert.ok(r1!.stop > r1!.entry);
   assert.equal(r1!.out!.TS.hit, true);
 });
 
 test('no hindsight: the live run on the day so far gives exactly the backtest signals up to that minute', () => {
-  const day = session(DATE, (k) => 300 + Math.sin(k / 9) * 2 + k * 0.004, (k) => 1000 + (k % 13) * 120);
+  const day = session(DATE, (k) => 300 + Math.sin(k / 23) * 4 + k * 0.004, (k) => 1000 + (k % 13) * 120);
   const nifty = session(DATE, (k) => 20000 + Math.sin(k / 15) * 30 + k * 0.2);
   const base = { symbol: 'TEST', date: DATE, history: history(), nifty, daily: dailyBefore() };
   const full = runDay({ ...base, day });
@@ -112,6 +115,7 @@ test('outcome: a stop and a target in the same minute counts as the stop', () =>
   const o = simulate(sig, day, DEFAULT_PARAMS);
   assert.equal(o.T1.hit, false);
   assert.equal(o.T1.r, -1);
+  assert.equal(o.XA.r, -1, 'discretionary exits are stopped too');
 });
 
 test('outcome: nothing reached -> closed at 15:00', () => {
@@ -152,11 +156,15 @@ test('buckets and stats', () => {
   assert.equal(stretchBucket(97), '95+');
   assert.equal(timeBucket(10), '09:20-09:45');
   assert.equal(timeBucket(120), '11:00-13:00');
-  const mk = (i: number, hit: boolean): Signal => ({
-    case: 'R1', symbol: 'X', date: i < 60 ? '2025-01-02' : '2026-01-02', slot: 100, dir: -1, entry: 300, stop: 301, target: 298, stopAtr: 1, atr: 1, capped: false,
-    time: '09:45-11:00', nFirst5: 'FLAT', nDay: 'FLAT', nRecent: 'FLAT', rvol: 'LOW', openBusy: false, stretch: 85, emaInWay: false, gapPct: 0, with: [],
-    out: { T1: { hit, r: hit ? 1 : -1, net: hit ? 0.9 : -1.1, min: 10 }, T15: { hit, r: hit ? 1.5 : -1, net: hit ? 1.4 : -1.1, min: 12 }, TS: { hit, r: hit ? 2 : -1, net: hit ? 1.9 : -1.1, min: 15 }, mfe: 1, mae: 0.5, costR: 0.1 },
-  });
+  const mk = (i: number, hit: boolean): Signal => {
+    const out = { mfe: 1, mae: 0.5, costR: 0.1 } as Outcome;
+    for (const k of [...TARGET_KEYS, ...EXIT_KEYS]) out[k] = { hit, r: hit ? 1 : -1, net: hit ? 0.9 : -1.1, min: 10 };
+    return {
+      case: 'R1', symbol: 'X', date: i < 60 ? '2025-01-02' : '2026-01-02', slot: 100, dir: -1, entry: 300, stop: 301, target: 298, stopAtr: 1, atr: 1, capped: false, stopType: 'SWING',
+      time: '09:45-11:00', nFirst5: 'FLAT', nDay: 'FLAT', nRecent: 'FLAT', rvol: 'LOW', openBusy: false, stretch: 85, emaInWay: false, gapPct: 0,
+      testNo: i % 3 + 1, tests: i % 3 ? [40, 90] : [40], level: '', pullbackNo: 0, with: [], out,
+    };
+  };
   const sigs = Array.from({ length: 120 }, (_, i) => mk(i, i % 10 < 7));
   const st = statsOf(sigs, 'PRIMARY', '2025-07-01');
   assert.equal(st.n, 120);
@@ -169,6 +177,16 @@ test('buckets and stats', () => {
   const r1 = sum.cases.find((c) => c.id === 'R1')!;
   assert.equal(r1.stretchAtLeast!['80%+'].n, 120);
   assert.equal(r1.stretchAtLeast!['90%+'].n, 0);
+  assert.deepEqual(r1.tests!.map((t) => [t.test, t.stats.n]), [['1', 40], ['2', 40], ['3+', 40]]);
+  assert.equal(r1.tests![0].bySlot['10:45'].n, 40);
+  assert.equal(r1.byOut.X6.n, 120);
+  assert.equal(sum.cases.find((c) => c.id === 'A')!.stretchUnder!['under 50%'].n, 0);
+  // a FAR signal (solid swing beyond 2x ATR) is counted as skipped, never as a trade
+  const far = { ...mk(0, true), stopType: 'FAR' as const, out: undefined };
+  const sum2 = buildSummary([...sigs, far], { runId: 't', createdAt: 0, period: { from: '2025-01-01', to: '2026-06-30', mid: '2025-07-01' }, universe: { source: 'test', symbols: 1, stockDays: 1 }, params: {} });
+  assert.equal(sum2.cases.find((c) => c.id === 'R1')!.skippedFar, 1);
+  assert.equal(sum2.cases.find((c) => c.id === 'R1')!.all.n, 120);
+  assert.equal(slot30(100), '10:45');
   const hit = lookupFor(sum, { case: 'R1', stretch: 85, time: '09:45-11:00', nDay: 'FLAT' });
   assert.equal(hit?.key, 'R1|80-90|09:45-11:00|FLAT');
   assert.equal(lookupFor(sum, { case: 'M1', stretch: 10, time: '09:45-11:00', nDay: 'WITH' }), undefined);
@@ -234,13 +252,14 @@ test('the backtest job: screener, history cache, results, run index and status',
   const { summary, signals } = await runBacktest('2026-10-20-11-30-ab12', { store: w.store, dhan: w.dhan, fetchText: w.fetchText, now, minGapMs: 0, years: 0.25 });
   assert.equal(summary.universe.symbols, 2);
   assert.ok(signals.length > 0, 'some signals');
-  assert.ok(signals.every((s) => s.out), 'every signal has an outcome');
+  assert.ok(signals.every((s) => (s.stopType === 'FAR') === !s.out), 'every taken signal has an outcome, skipped ones none');
   const st = (await getJson<RunStatus>(w.store, STATUS_KEY))!;
   assert.equal(st.state, 'done');
   const idx = (await getJson<{ runId: string }[]>(w.store, INDEX_KEY))!;
   assert.equal(idx[0].runId, '2026-10-20-11-30-ab12');
   const saved = (await getJson<Summary>(w.store, summaryKey('2026-10-20-11-30-ab12')))!;
-  assert.equal(saved.cases.length, 17);
+  assert.equal(saved.cases.length, 27);
+  assert.ok(signals.every((s) => s.slot % 10 === 0), 'every decision at a 10-minute close');
   const r1 = unpack2((await getJson<Packed>(w.store, signalsKey('2026-10-20-11-30-ab12', 'R1')))!);
   assert.equal(r1.length, signals.filter((s) => s.case === 'R1').length);
   // a second run fetches only the month that was not finished; daily candles are fetched again (1 per stock + Nifty)
@@ -249,4 +268,54 @@ test('the backtest job: screener, history cache, results, run index and status',
   assert.equal(w.calls.intraday - before, 3, 'only October again, for Nifty and the two stocks');
   const idx2 = (await getJson<{ runId: string }[]>(w.store, INDEX_KEY))!;
   assert.deepEqual(idx2.map((x) => x.runId), ['2026-10-20-12-00-cd34', '2026-10-20-11-30-ab12']);
+});
+
+
+/* ---- stops, tests of the high, discretionary exits ------------------------------------------------------- */
+
+const b10 = (o: number, h: number, l: number, c: number) => ({ o, h, l, c, v: 1000 });
+
+test('swing stop: beyond a tested, unbroken swing; 2x ATR when there is none; no trade when it is too far', () => {
+  // a low at 99, a rally to 100.5 (width), a test back to 99.1 that closes above, then up to 101
+  const bars = [b10(100, 100.2, 99.6, 99.8), b10(99.8, 99.9, 99.4, 99.5), b10(99.5, 99.6, 99.0, 99.4), b10(99.4, 100.0, 99.3, 99.9),
+    b10(99.9, 100.5, 99.8, 100.4), b10(100.4, 100.4, 99.1, 99.6), b10(99.6, 100.6, 99.5, 100.5), b10(100.5, 101.1, 100.4, 101)];
+  const s = swingStop(1, 100.8, 1, bars);
+  assert.equal(s.type, 'SWING');
+  assert.ok(Math.abs(s.stop - 98.9) < 1e-9, `stop ${s.stop}`);
+  // not tested: no swing, 2x ATR
+  const untested = bars.filter((_, i) => i !== 5);
+  assert.deepEqual(swingStop(1, 100.8, 1, untested), { stop: 98.8, type: 'ATR2' });
+  // broken: a later close below the low
+  const broken = [...bars.slice(0, 7), b10(100.5, 100.5, 98.8, 98.9), b10(98.9, 101.1, 98.9, 101)];
+  assert.equal(swingStop(1, 100.8, 1, broken).type, 'ATR2');
+  // the same swing with a small ATR: 1.9 rupees away is more than 2x ATR (1.0) -> FAR, no trade
+  assert.equal(swingStop(1, 100.8, 0.5, bars).type, 'FAR');
+});
+
+test('tests of the day high are counted, with their times', () => {
+  const z = new Zone(1);
+  z.push(b10(303, 304, 302.9, 303.9), 0, 1);    // makes the high: test 1 at 09:15
+  z.push(b10(303.9, 303.95, 303.2, 303.3), 10, 1); // pulls back 0.8 ATR
+  z.push(b10(303.3, 303.9, 303.2, 303.8), 20, 1);  // back within 0.25 ATR: test 2 at 09:35
+  assert.deepEqual(z.tests, [0, 20]);
+  z.push(b10(303.8, 303.85, 303.7, 303.8), 30, 1); // no pullback yet: not a new test
+  assert.deepEqual(z.tests, [0, 20]);
+  z.push(b10(303.8, 303.8, 303.1, 303.2), 40, 1);
+  z.push(b10(303.2, 304.1, 303.2, 303.6), 50, 1);  // pokes 0.1 above and closes back: test 3
+  assert.deepEqual(z.tests, [0, 20, 50]);
+  assert.equal(z.testOf(b10(303.2, 304.1, 303.2, 303.6), 1), 3);
+  z.push(b10(303.6, 305, 303.6, 304.9), 60, 1);    // a new high 0.9 above: a new zone, test 1
+  assert.deepEqual(z.tests, [60]);
+});
+
+test('discretionary exits: no progress after 30 minutes, the next obstacle, the first of them', () => {
+  // long at 300 (stop 299), drifts to 300.1 for an hour, then reaches 300.8 (an obstacle at 300.6)
+  const day = toSlots(session(DATE, (k) => (k < 100 ? 300 + Math.min(k - 30, 60) * 0.0015 : 300 + (k - 100) * 0.02)))!;
+  const sig = { case: 'A', dir: 1, entry: 300, stop: 299, target: 302, slot: 30, atr: 1 } as Signal;
+  const ex = { obstacle: 300.6, medV: 1000, adr: 6, dayHi: 300, dayLo: 299.5, entryBar: { o: 300, h: 300.05, l: 299.95, c: 300, v: 1000 } };
+  const o = simulate(sig, day, DEFAULT_PARAMS, ex);
+  assert.ok(o.X6.min <= 31 && o.X6.r < 0.3, `no progress exit at ${o.X6.min} min, ${o.X6.r}R`);
+  assert.ok(o.X5.r > 0.55 && o.X5.r < 0.65, `obstacle exit ${o.X5.r}R`);
+  assert.equal(o.XA.min, o.X6.min, 'XA = the first marker');
+  assert.equal(o.X6.hit, o.X6.net > 0);
 });
