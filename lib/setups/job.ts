@@ -5,7 +5,7 @@ import { runDay, DEFAULT_PARAMS, type Params } from './engine';
 import { CASES, type Signal } from './cases';
 import { buildSummary, pack, type Summary } from './stats';
 import { monthsNeeded, screenerDays, SCREENER, type ScreenerFilter } from './universe';
-import { runSwing } from './swing';
+import { monthEndsOf, prepare, runMonthly, runSingle, runSwing, type DailyStock } from './swing';
 import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, monthKey, putJson, signalsKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
 
 /**
@@ -111,6 +111,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const plan: { symbol: string; securityId: string; days: string[]; daily: Candles }[] = [];
   const niftyClose = new Map(niftyDaily.t.map((t, i) => [dateOf(t), niftyDaily.c[i]]));
   const signals: Signal[] = [];
+  const dailyStocks: DailyStock[] = [];
   await pool(universe, deps.concurrency ?? 3, async (u, i) => {
     try {
       const daily = await dhanCall(() => deps.dhan.daily({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: addDays(from, -1150), to: today }));
@@ -118,12 +119,20 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
       const days = screenerDays(daily, screener, from, to);
       if (days.length) plan.push({ ...u, days, daily });
       signals.push(...runSwing(u.symbol, daily, niftyClose, from, to, screener, params));
+      // kept for the delivery strategies only if it was ever in the price range during the period
+      if (daily.c.some((c, k) => c >= screener.priceMin && c <= screener.priceMax && dateOf(daily.t[k]) >= from)) dailyStocks.push(prepare(u.symbol, daily));
     } catch (e) { if (e instanceof DhanError && (e.isAuth || e.isNoDataPlan)) throw e; }
     await status({ phase: 'Daily candles: which stocks passed your screener', done: i + 1, total: universe.length });
   });
   plan.sort((a, b) => a.symbol.localeCompare(b.symbol));
   const stockDays = plan.reduce((a, p) => a + p.days.length, 0);
   log(`screener: ${plan.length} stocks passed on ${stockDays} stock-days`);
+
+  // ---- delivery strategies on the daily candles (D1 / D2 ranked across stocks at each month-end; D3 / D4 per stock)
+  await status({ phase: 'Delivery strategies (daily candles)' }, true);
+  for (const st of dailyStocks) signals.push(...runSingle(st, from, to, screener, params));
+  signals.push(...runMonthly(dailyStocks, monthEndsOf(sessions), from, to, screener, params));
+  log(`delivery: ${signals.length} trades on ${dailyStocks.length} stocks`);
 
   // ---- 3. one month of 1-minute candles, from S3 or Dhan
   const loadMonth = async (ins: { symbol: string; securityId: string; segment: string; instrument: string }, month: string): Promise<Candles> => {
@@ -173,7 +182,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   // stocks in play: the 20 busiest of the day at 09:25 (and at least 1.5x their usual first 10 minutes)
   const inPlay = new Set<string>();
   for (const [d, list] of busyByDate) for (const it of list.sort((a, b) => b.x - a.x).slice(0, 20)) if (it.x >= 1.5) inPlay.add(`${d}|${it.symbol}`);
-  for (const sg of signals) if (sg.case !== 'S1') sg.inPlay = inPlay.has(`${sg.date}|${sg.symbol}`);
+  for (const sg of signals) if (sg.slot !== 370) sg.inPlay = inPlay.has(`${sg.date}|${sg.symbol}`);
 
   // ---- 5. results
   await status({ phase: 'Writing the results' }, true);

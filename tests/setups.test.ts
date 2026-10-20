@@ -258,8 +258,8 @@ test('the backtest job: screener, history cache, results, run index and status',
   const idx = (await getJson<{ runId: string }[]>(w.store, INDEX_KEY))!;
   assert.equal(idx[0].runId, '2026-10-20-11-30-ab12');
   const saved = (await getJson<Summary>(w.store, summaryKey('2026-10-20-11-30-ab12')))!;
-  assert.equal(saved.cases.length, 31);
-  assert.ok(signals.filter((s) => s.case !== 'S1').every((s) => s.inPlay !== undefined), 'every intraday signal knows whether its stock was in play');
+  assert.equal(saved.cases.length, 35);
+  assert.ok(signals.filter((s) => s.slot !== 370).every((s) => s.inPlay !== undefined), 'every intraday signal knows whether its stock was in play');
   assert.ok(signals.every((s) => s.slot % 10 === 0), 'every decision at a 10-minute close');
   const r1 = unpack2((await getJson<Packed>(w.store, signalsKey('2026-10-20-11-30-ab12', 'R1')))!);
   assert.equal(r1.length, signals.filter((s) => s.case === 'R1').length);
@@ -377,4 +377,79 @@ test('5-day reversal: a 7%+ drop vs Nifty is bought at the close and held 5 sess
   assert.ok(s.out!.TC.r > 0, 'the bounce');
   assert.ok(s.out!.TC.net < s.out!.TC.r, 'delivery charges taken off');
   assert.ok(deliveryCharges(100, 300, 310) > 60 && deliveryCharges(100, 300, 310) < 90);
+});
+
+/* ---- delivery strategies --------------------------------------------------------------------------------- */
+import { prepare, holdOutcome, runSingle, runMonthly, monthEndsOf } from '../lib/setups/swing';
+
+function dailySeries(px: (i: number) => number, n: number, start = Date.UTC(2024, 0, 1)) {
+  const d: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] };
+  const dates: string[] = [];
+  for (let i = 0, t = start; d.t.length < n; t += 86400_000) {
+    const day = new Date(t); if (day.getUTCDay() === 0 || day.getUTCDay() === 6) continue;
+    const date = day.toISOString().slice(0, 10); dates.push(date);
+    const c = px(i), o = i ? px(i - 1) : c;
+    d.t.push(sec(date, '09:15')); d.o.push(o); d.h.push(Math.max(o, c) + 1); d.l.push(Math.min(o, c) - 1); d.c.push(c); d.v.push(1e6);
+    i++;
+  }
+  return { d, dates };
+}
+
+test('delivery hold: a gap through the stop exits at the open; the hold exit happens at its close', () => {
+  const { d } = dailySeries((i) => (i < 20 ? 300 : i === 21 ? 280 : 302), 30);
+  d.o[21] = 281; d.h[21] = 282; // opens below the stop
+  const st = prepare('X', d);
+  const h = holdOutcome(st, 20, 295, 5, 300)!;
+  assert.equal(h.exitIdx, 21);
+  assert.ok(h.out.TC.r < -1, 'the gap to 281 costs more than 1R');
+  const up = prepare('Y', dailySeries((i) => 300 + Math.max(0, i - 20), 30).d);
+  const h2 = holdOutcome(up, 20, 290, 5, 300, (j) => j === 23)!;
+  assert.equal(h2.exitIdx, 23);
+  assert.equal(h2.out.TC.min, 3 * 375);
+});
+
+test('RSI(2) pullback in an uptrend and a 55-day breakout are found', () => {
+  // a slow uptrend from 250 to 320, a 3-day dip at day 260, a breakout to a new 55-day high at day 280
+  const px = (i: number) => (i >= 258 && i <= 260 ? 250 + 258 * 0.25 - (i - 257) * 4 : 250 + i * 0.25 + (i >= 280 ? 6 : 0));
+  const st = prepare('UP', dailySeries((i) => Math.min(px(i), 330), 400).d);
+  const sigs = runSingle(st, '2024-01-01', '2026-12-31', { priceMin: 250, priceMax: 340, avgVolMin: 500_000 }, { riskInr: 300 });
+  assert.ok(sigs.some((s) => s.case === 'D3'), `D3 expected: ${sigs.map((s) => s.case).join(',')}`);
+  assert.ok(sigs.some((s) => s.case === 'D4'), 'D4 breakout expected');
+});
+
+test('monthly momentum buys the strongest steady riser and holds it to the next month-end', () => {
+  const n = 330;
+  const strong = dailySeries((i) => 200 + i * 0.4, n);           // steady +0.4 a day
+  const weak = dailySeries((i) => 300 - i * 0.05, n);           // slowly falling
+  const wavy = dailySeries((i) => 300 + Math.sin(i / 3) * 15, n); // flat, volatile
+  const stocks = [prepare('STRONG', strong.d), prepare('WEAK', weak.d), prepare('WAVY', wavy.d)];
+  const ends = monthEndsOf(strong.dates);
+  const sigs = runMonthly(stocks, ends, '2024-12-01', '2025-12-31', { priceMin: 250, priceMax: 340, avgVolMin: 500_000 }, { riskInr: 300 }, 1);
+  const d1 = sigs.filter((s) => s.case === 'D1');
+  assert.ok(d1.length > 0);
+  assert.ok(d1.every((s) => s.symbol === 'STRONG'), d1.map((s) => s.symbol).join(','));
+  assert.ok(d1.every((s) => s.out!.TC.r > 0));
+});
+
+/* ---- his journal -------------------------------------------------------------------------------------- */
+import { scoreTrades, myReport } from '../lib/setups/journal';
+
+test('his trades: counted once per trade group, R from the risk he logged', () => {
+  const headers = ['TradeGroupId', 'Date (IST)', 'Symbol', 'Direction', 'Price', 'Qty', 'GrossPnL', 'NetPnL', 'TotalCharges', 'Time (IST)', 'EntryTime', 'RiskInr', 'ExitType', 'Setup'];
+  const rows = [
+    ['g1', '2026-10-01', 'ABC', 'LONG', '300', '100', '400', '340', '60', '09:31:00', '09:31:00', '300', 'TARGET', 'momentum'],
+    ['g1', '2026-10-01', 'ABC', 'LONG', '304', '100', '400', '340', '60', '09:50:00', '09:31:00', '300', 'TARGET', 'momentum'],
+    ['g2', '2026-10-02', 'XYZ', 'SHORT', '280', '50', '-250', '-300', '50', '10:05:00', '10:05:00', '', 'STOP', 'reversal'],
+  ].map((cells) => ({ cells }));
+  const t = scoreTrades(headers, rows);
+  assert.equal(t.length, 2);
+  assert.equal(t[0].netR, 1.13);
+  assert.equal(t[0].grossR, 1.33);
+  assert.equal(t[1].riskLogged, false);
+  assert.equal(t[1].netR, -1);
+  const rep = myReport(t);
+  assert.equal(rep.all.n, 2);
+  assert.equal(rep.all.hit, 0.5);
+  assert.equal(rep.all.totalNet, 40);
+  assert.deepEqual(rep.byTime.map((x) => x.key), ['09:15', '09:45']);
 });
