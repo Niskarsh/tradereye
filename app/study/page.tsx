@@ -12,9 +12,12 @@ import type { RunIndexItem } from '@/lib/setups/store';
  */
 
 const fmtDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-const inr = (x: number) => `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`;
-const band = (lo: number, hi: number) => (hi === Infinity ? `${lo}+` : `${lo}–${hi}`);
-const num = (x: number) => (Math.abs(x) >= 100 ? x.toFixed(0) : Math.abs(x) >= 10 ? x.toFixed(1) : x.toFixed(2));
+// saved through JSON: Infinity / -Infinity / NaN arrive as null
+const ok = (x: number | null | undefined): x is number => x != null && Number.isFinite(x);
+const inr = (x: number | null) => (ok(x) ? `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}` : '–');
+const band = (lo: number | null, hi: number | null) => (!ok(hi) ? `${lo ?? 0}+` : `${lo ?? 0}–${hi}`);
+const num = (x: number | null) => (!ok(x) ? '–' : Math.abs(x) >= 100 ? x.toFixed(0) : Math.abs(x) >= 10 ? x.toFixed(1) : x.toFixed(2));
+const show = (x: number | null | undefined) => (ok(x) ? String(x) : '–');
 
 export default function StudyPage() {
   const [data, setData] = useState<{ runs: RunIndexItem[]; study: Study | null } | null>(null);
@@ -100,8 +103,8 @@ function Moves({ c }: { c: ComboStudy }) {
         {[
           ['Stock-days with a possible entry', m.stockDays.toLocaleString('en-IN')],
           ['…with a clean reversal at some point', `${m.withClean.toLocaleString('en-IN')} (${pct(m.withClean / Math.max(1, m.stockDays))})`],
-          ['Typical fall before a clean turn', `${m.dropBeforeClean.p25}–${m.dropBeforeClean.p75}× daily range`],
-          ['…in %', `${m.dropPctBeforeClean.p25}–${m.dropPctBeforeClean.p75}% (middle ${m.dropPctBeforeClean.p50}%)`],
+          ['Typical fall before a clean turn', `${show(m.dropBeforeClean.p25)}–${show(m.dropBeforeClean.p75)}× daily range`],
+          ['…in %', `${show(m.dropPctBeforeClean.p25)}–${show(m.dropPctBeforeClean.p75)}% (middle ${show(m.dropPctBeforeClean.p50)}%)`],
         ].map(([k, v]) => (
           <div key={k} className="rounded-xl border border-line bg-brand-bg px-3 py-2">
             <p className="text-[10px] font-black uppercase tracking-widest text-ink-3">{k}</p>
@@ -214,7 +217,7 @@ function Drop({ c }: { c: ComboStudy }) {
           <OutHead first="Fall (× daily range) · year 1" extra={<th className="px-2 py-1.5 text-right">Y2 R after costs</th>} />
           <tbody>
             {c.drop.map((d) => (
-              <OutRow key={d.lo} label={<span className={c.bestDrop && d.lo >= c.bestDrop.lo && d.hi <= c.bestDrop.hi ? 'font-bold text-brand-accent' : ''}>{band(d.lo, d.hi)}</span>} o={d.y1}
+              <OutRow key={`${d.lo}-${d.hi}`} label={<span className={c.bestDrop && d.lo >= c.bestDrop.lo && (!ok(c.bestDrop.hi) || (ok(d.hi) && d.hi <= c.bestDrop.hi)) ? 'font-bold text-brand-accent' : ''}>{band(d.lo, d.hi)}</span>} o={d.y1}
                 extra={<td className={`px-2 py-1.5 text-right ${d.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{d.y2.n ? rr(d.y2.netR) : '–'}</td>} />
             ))}
           </tbody>
@@ -241,8 +244,8 @@ function Facts({ c }: { c: ComboStudy }) {
                 <OutHead first="Value" extra={<th className="px-2 py-1.5 text-right">Y2 R</th>} />
                 <tbody>
                   {f.bins.map((b) => (
-                    <OutRow key={`${b.lo}`} o={b.y1}
-                      label={b.lo === -Infinity ? `< ${num(b.hi)}` : b.hi === Infinity ? `≥ ${num(b.lo)}` : `${num(b.lo)} – ${num(b.hi)}`}
+                    <OutRow key={`${b.lo}-${b.hi}`} o={b.y1}
+                      label={!ok(b.lo) ? `< ${num(b.hi)}` : !ok(b.hi) ? `≥ ${num(b.lo)}` : `${num(b.lo)} – ${num(b.hi)}`}
                       extra={<td className={`px-2 py-1.5 text-right ${b.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{b.y2.n ? rr(b.y2.netR) : '–'}</td>} />
                   ))}
                 </tbody>
