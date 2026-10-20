@@ -370,7 +370,9 @@ function SetupCard({ a, onOpen, onDismiss }: { a: SetupAlert; onOpen: (a: SetupA
           <span className="ml-auto font-mono text-[11px] font-normal text-ink-3">{clock(a.at)}</span>
         </span>
         <span className="mt-1 block rounded-md border border-line bg-brand-bg px-2 py-1 font-mono text-[11px] text-ink">
-          {long ? 'Buy' : 'Sell'} @ {a.signal.entry.toFixed(2)} · stop {a.signal.stop.toFixed(2)}{a.signal.capped ? ' (2x ATR cap)' : ''} · target {a.signal.target.toFixed(2)}
+          {a.signal.case === 'M9'
+            ? <>Limit {long ? 'buy' : 'sell'} @ {(a.signal.entry - a.signal.dir * 0.5 * a.signal.atr).toFixed(2)} (valid 30 min) · stop {a.signal.stop.toFixed(2)} · target 2R</>
+            : <>{long ? 'Buy' : 'Sell'} @ {a.signal.entry.toFixed(2)} · stop {a.signal.stop.toFixed(2)}{a.signal.capped ? ' (2x ATR cap)' : ''} · target {a.signal.target.toFixed(2)}</>}
         </span>
         {st && (
           <span className="mt-1 block text-[11px] leading-snug text-ink-2">
