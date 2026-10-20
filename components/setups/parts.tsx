@@ -1,8 +1,13 @@
 "use client";
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import type { Stats } from '@/lib/setups/stats';
 
 /** Small pieces of the My Setups page. */
+
+/** the run's length and his risk per trade: turns R per trade into rupees per month */
+export const PeriodCtx = createContext<{ months: number; riskInr: number }>({ months: 24, riskInr: 300 });
+export const inrPerMonth = (s: Stats | undefined, months: number, riskInr: number) => (s && months > 0 ? (s.netR * riskInr * s.n) / months : undefined);
+const inr = (x: number | undefined) => (x === undefined || !Number.isFinite(x) ? '–' : `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`);
 
 export const pct = (x: number | undefined) => (x === undefined ? '–' : `${Math.round(x * 100)}%`);
 export const rr = (x: number | undefined) => (x === undefined ? '–' : `${x > 0 ? '+' : ''}${x.toFixed(2)}R`);
@@ -37,13 +42,17 @@ export function Delta({ now, before }: { now?: Stats; before?: Stats }) {
 
 /** One row of numbers: trades, hit rate, R after charges, both halves. */
 export function StatCells({ s, dim = false }: { s?: Stats; dim?: boolean }) {
+  const { months, riskInr } = useContext(PeriodCtx);
   const thin = !s || s.n < 50;
   const cls = `px-2 py-1.5 text-right font-mono tabular-nums ${thin || dim ? 'text-ink-3' : ''}`;
+  const pm = inrPerMonth(s, months, riskInr);
   return (
     <>
       <td className={cls}>{s?.n ?? 0}</td>
       <td className={`${cls} font-bold`}>{pct(s?.hit)}</td>
+      <td className={`${cls} hidden md:table-cell ${!thin && s?.grossR !== undefined ? (s.grossR > 0 ? 'text-data-green' : 'text-ink-2') : ''}`}>{rr(s?.grossR)}</td>
       <td className={`${cls} ${!thin && s ? (s.netR > 0 ? 'text-data-green' : 'text-data-red-text') : ''}`}>{rr(s?.netR)}</td>
+      <td className={`${cls} hidden md:table-cell ${!thin && pm !== undefined ? (pm > 0 ? 'text-data-green' : 'text-data-red-text') : ''}`}>{inr(pm)}</td>
       <td className={`${cls} hidden sm:table-cell`}>{s ? `${pct(s.h1.hit)} / ${pct(s.h2.hit)}` : '–'}</td>
     </>
   );
@@ -56,7 +65,9 @@ export function StatHead({ first }: { first: string }) {
         <th className="px-2 py-1.5 text-left">{first}</th>
         <th className="px-2 py-1.5 text-right">Trades</th>
         <th className="px-2 py-1.5 text-right">Hit</th>
+        <th className="hidden px-2 py-1.5 text-right md:table-cell">R before costs</th>
         <th className="px-2 py-1.5 text-right">R after costs</th>
+        <th className="hidden px-2 py-1.5 text-right md:table-cell">₹ / month</th>
         <th className="hidden px-2 py-1.5 text-right sm:table-cell">1st / 2nd half</th>
       </tr>
     </thead>

@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, Loader2, RefreshCw, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { ProgressBar } from '@/components/ui/progress';
-import { Card, Delta, StatCells, StatHead, Verdict, pct, rr } from '@/components/setups/parts';
+import { Card, Delta, PeriodCtx, StatCells, StatHead, Verdict, pct, rr } from '@/components/setups/parts';
 import { CASE_BY_ID, EXIT_KEYS, EXIT_LABEL, primaryOf, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, TARGET_LABEL, hhmm, type CaseId, type OutKey, type Signal } from '@/lib/setups/cases';
 import { DIMS, applyFilter, statsOf, unpack, type DimKey, type Filter, type Packed, type Stats, type Summary } from '@/lib/setups/stats';
 import type { RunIndexItem, RunStatus } from '@/lib/setups/store';
@@ -106,8 +106,9 @@ export default function SetupsPage() {
         )}
 
         {s && (
-          <>
+          <PeriodCtx.Provider value={{ months: Math.max(1, (Date.parse(s.period.to) - Date.parse(s.period.from)) / (30.44 * 86400_000)), riskInr: Number(s.params.riskInr) || 300 }}>
             <p className="text-[11px] text-ink-3">
+              R before costs = is there an edge at all; ₹ / month = R after costs × ₹{Number(s.params.riskInr) || 300} risk × trades per month, if you took every one.{' '}
               {fmtDate(s.period.from)} – {fmtDate(s.period.to)} · {s.universe.symbols} stocks on {s.universe.stockDays.toLocaleString('en-IN')} stock-days · {s.universe.signals.toLocaleString('en-IN')} past trades · {s.universe.source}
               {prev && <> · ▲▼ = hit rate change in points vs the run of {fmtTime(prev.createdAt)}</>}
             </p>
@@ -117,8 +118,10 @@ export default function SetupsPage() {
             <CaseTable summary={s} minHit={minHit} prevCase={prevCase} hasPrev={!!prev} open={open} onOpen={(id) => setOpen(open === id ? null : id)} />
             {open && s.v === 2 && <CaseDetail key={`${s.runId}-${open}`} summary={s} minHit={minHit} id={open} prev={prev?.v === 2 ? prevCase(open) : undefined} onClose={() => setOpen(null)} />}
             <Rules summary={s} previous={prev} />
-          </>
+          </PeriodCtx.Provider>
         )}
+
+        <MyTrades />
 
         <HowItWorks open={help} onToggle={() => setHelp((h) => !h)} />
       </div>
@@ -140,6 +143,7 @@ function RunLine({ status }: { status: Status }) {
 
 function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summary: Summary; minHit: number; prevCase: (id: CaseId) => Summary['cases'][number] | undefined; hasPrev: boolean; open: CaseId | null; onOpen: (id: CaseId) => void }) {
   const groups = [
+    { title: 'Delivery: held for days or weeks (daily candles, delivery charges)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'DELIVERY' },
     { title: 'Research: published and institutional strategies', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'RESEARCH' },
     { title: 'Combined: several conditions together', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'COMBINED' },
     { title: 'Momentum building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'MOMENTUM' },
@@ -154,7 +158,9 @@ function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summa
               <th className="px-2 py-1.5 text-left">Setup</th>
               <th className="px-2 py-1.5 text-right">Trades</th>
               <th className="px-2 py-1.5 text-right">Hit</th>
+              <th className="hidden px-2 py-1.5 text-right md:table-cell">R before costs</th>
               <th className="px-2 py-1.5 text-right">R after costs</th>
+              <th className="hidden px-2 py-1.5 text-right md:table-cell">₹ / month</th>
               <th className="hidden px-2 py-1.5 text-right sm:table-cell">1st / 2nd half</th>
               {hasPrev && <th className="px-2 py-1.5 text-right">vs last</th>}
               <th className="px-2 py-1.5 text-right">Verdict</th>
@@ -162,7 +168,7 @@ function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summa
           </thead>
           {groups.map((g) => (
             <tbody key={g.title}>
-              <tr><td colSpan={7} className="px-2 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.2em] text-brand-accent">{g.title}</td></tr>
+              <tr><td colSpan={9} className="px-2 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.2em] text-brand-accent">{g.title}</td></tr>
               {summary.cases.filter((c) => g.pick(c.id)).map((c) => {
                 const info = CASE_BY_ID.get(c.id)!;
                 return (
@@ -313,7 +319,7 @@ function TestsTable({ rows }: { rows: { test: string; stats: Stats; bySlot: Reco
                   <StatCells s={r.stats} />
                 </tr>
                 <tr className="border-b border-line/60">
-                  <td colSpan={5} className="px-2 pb-2 pt-0.5">
+                  <td colSpan={7} className="px-2 pb-2 pt-0.5">
                     <span className="flex flex-wrap gap-1">
                       {Object.entries(r.bySlot).map(([slot, s]) => (
                         <span key={slot} title={`${s.n} trades, ${pct(s.hit)} hit, ${rr(s.netR)} after costs`}
@@ -395,6 +401,72 @@ function Rules({ summary, previous }: { summary: Summary; previous: Summary | nu
           return <MiniTable key={r.id} title={r.title} first="" rows={r.rows.map((x) => ({ label: x.label, s: x.stats, before: before?.rows.find((y) => y.label === x.label)?.stats }))} />;
         })}
       </div>
+    </Card>
+  );
+}
+
+/* ---- his own trades, same yardstick ------------------------------------------------------------------- */
+
+interface MyS { n: number; hit: number; netR: number; grossR: number; costR: number; totalNet: number; totalCharges: number }
+interface MyRep { tabs: string[]; all: MyS; riskLogged: MyS; riskAssumed: MyS; byMonth: { key: string; stats: MyS }[]; bySetup: { key: string; stats: MyS }[]; byTime: { key: string; stats: MyS }[]; byExit: { key: string; stats: MyS }[]; byDir: { key: string; stats: MyS }[] }
+const inrAbs = (x: number) => `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`;
+
+function MyTrades() {
+  const [rep, setRep] = useState<MyRep | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    fetch('/api/setups/journal').then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`); setRep(j); }).catch((e) => setErr((e as Error).message));
+  }, []);
+  const a = rep?.all;
+  return (
+    <Card title="Your own trades, same yardstick" sub="Every trade in your journal: R = net P&L ÷ the rupees you risked (your first stop × quantity). Hit = made money after charges. This is the number the backtest has to beat.">
+      {err && <p className="text-xs text-data-red-text">{err}</p>}
+      {!rep && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-3.5 w-3.5 animate-spin" />Reading your journal…</p>}
+      {a && (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            {[
+              ['Trades', String(a.n)], ['Hit (after costs)', pct(a.hit)], ['R before costs', rr(a.grossR)], ['Charges', `${a.costR.toFixed(2)}R`],
+              ['R after costs', rr(a.netR)], ['Net P&L', inrAbs(a.totalNet)], ['Charges paid', `₹${a.totalCharges.toLocaleString('en-IN')}`],
+            ].map(([k, v]) => (
+              <div key={k} className="rounded-xl border border-line bg-brand-bg px-3 py-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-ink-3">{k}</p>
+                <p className={`font-mono text-sm font-bold ${k === 'R after costs' || k === 'Net P&L' ? (a.netR > 0 ? 'text-data-green' : 'text-data-red-text') : ''}`}>{v}</p>
+              </div>
+            ))}
+          </div>
+          {rep.riskAssumed.n > 0 && (
+            <p className="text-[11px] text-ink-3">{rep.riskLogged.n} trades have your logged stop ({rr(rep.riskLogged.netR)} after costs); {rep.riskAssumed.n} have none logged and are counted at ₹300 risk ({rr(rep.riskAssumed.netR)}).</p>
+          )}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {([['By month', rep.byMonth], ['By setup (your Setup column)', rep.bySetup], ['By entry time (30 min)', rep.byTime], ['By exit', rep.byExit], ['By side', rep.byDir]] as const).map(([title, rows]) => (
+              <div key={title}>
+                <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">{title}</p>
+                <div className="-mx-2 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
+                      <th className="px-2 py-1.5 text-left"></th><th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">Hit</th>
+                      <th className="hidden px-2 py-1.5 text-right sm:table-cell">R before</th><th className="px-2 py-1.5 text-right">R after</th><th className="px-2 py-1.5 text-right">Net ₹</th>
+                    </tr></thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr key={r.key} className="border-b border-line/60 font-mono tabular-nums">
+                          <td className="px-2 py-1.5 font-sans">{r.key}</td>
+                          <td className="px-2 py-1.5 text-right">{r.stats.n}</td>
+                          <td className="px-2 py-1.5 text-right font-bold">{pct(r.stats.hit)}</td>
+                          <td className="hidden px-2 py-1.5 text-right sm:table-cell">{rr(r.stats.grossR)}</td>
+                          <td className={`px-2 py-1.5 text-right ${r.stats.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(r.stats.netR)}</td>
+                          <td className={`px-2 py-1.5 text-right ${r.stats.totalNet > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{inrAbs(r.stats.totalNet)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </Card>
   );
 }

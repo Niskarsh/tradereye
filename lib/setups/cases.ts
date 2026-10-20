@@ -9,17 +9,18 @@
  */
 
 export type CaseId =
-  | 'L1' | 'L2' | 'FB' | 'S1'
+  | 'L1' | 'L2' | 'FB' | 'S1' | 'D1' | 'D2' | 'D3' | 'D4'
   | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'I' | 'J' | 'K'
   | 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7' | 'M8' | 'M9'
   | 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8';
 
 export type Family = 'MOMENTUM' | 'REVERSAL';
 /**
- * RESEARCH = strategies from published research / institutional practice; COMBINED = several conditions together
+ * DELIVERY = multi-day delivery trades (daily candles, held for days or weeks);
+ * RESEARCH = intraday strategies from published research / institutional practice; COMBINED = several conditions together
  * (his way of trading); BLOCK = one condition on its own (building block)
  */
-export type Group = 'RESEARCH' | 'COMBINED' | 'BLOCK';
+export type Group = 'DELIVERY' | 'RESEARCH' | 'COMBINED' | 'BLOCK';
 
 export interface CaseInfo {
   id: CaseId;
@@ -40,6 +41,20 @@ const MOM_CONTEXT = 'Nifty 500 directional his way in the first 5 minutes and st
 const REV_CONTEXT = 'A quiet stock (not busier than usual), 50%+ of its daily range moved, the 10-min candle in the day high (low) zone, Nifty 500 flat or turning against the stock over the last 30 minutes, no 200 EMA between price and the target.';
 
 export const CASES: CaseInfo[] = [
+  // ---- delivery: daily candles, held for days or weeks, long only, delivery charges
+  { id: 'D1', family: 'MOMENTUM', group: 'DELIVERY', name: 'Momentum, 6 and 12 months (monthly)', target: 'Held to the next month-end', primary: 'TC',
+    source: 'Jegadeesh & Titman momentum; the scoring NSE\'s Nifty200 Momentum 30 index uses (6- and 12-month returns per unit of volatility)',
+    rule: 'At each month-end, the 10 stocks in the price range with the best average of their 6- and 12-month returns per unit of volatility (12-month return above 0) are bought at the close and sold at the next month-end close. Stop 3x the daily ATR.' },
+  { id: 'D2', family: 'MOMENTUM', group: 'DELIVERY', name: 'Near the 52-week high (monthly)', target: 'Held to the next month-end', primary: 'TC',
+    source: 'George & Hwang (2004): stocks near their 52-week high keep outperforming',
+    rule: 'At each month-end, the 10 stocks in the price range closest to their 52-week high (within 10%) are bought at the close and sold at the next month-end close. Stop 3x the daily ATR.' },
+  { id: 'D3', family: 'REVERSAL', group: 'DELIVERY', name: 'RSI(2) pullback in an uptrend', target: 'First close above the 5-day average', primary: 'TC',
+    source: 'Connors & Alvarez: short pullbacks inside long uptrends tend to bounce',
+    rule: 'Close above the 200-day average and the 2-day RSI under 10: bought at the close, sold at the first close above the 5-day average (at most 10 sessions). Stop 3x the daily ATR.' },
+  { id: 'D4', family: 'MOMENTUM', group: 'DELIVERY', name: 'Trend breakout (55-day high)', target: 'Close below the 20-day low', primary: 'TC',
+    source: 'Donchian / turtle trend following',
+    rule: 'Close above the 55-day high and above the 200-day average: bought at the close, sold on a close below the 20-day low (at most 60 sessions). Stop 2x the daily ATR.' },
+
   // ---- research: published / institutional strategies (no opening range breakout: nothing before 09:25)
   { id: 'L1', family: 'MOMENTUM', group: 'RESEARCH', name: 'Last half hour follows the first', target: 'Held to 15:29', primary: 'TC',
     source: 'Gao, Han, Li, Zhou: Market intraday momentum (the first half hour predicts the last half hour)',
@@ -50,7 +65,7 @@ export const CASES: CaseInfo[] = [
   { id: 'FB', family: 'REVERSAL', group: 'RESEARCH', name: 'Breakout fade', target: '2R', primary: 'T1',
     source: 'His own backtest: breakouts in this price range reach 1R less often than random entries',
     rule: 'Whenever a breakout setup appears (A, G, I, M1, M2, M6, M7), the opposite trade at the same 10-min close, stop beyond the nearest solid swing on the other side.' },
-  { id: 'S1', family: 'REVERSAL', group: 'RESEARCH', name: '5-day reversal (delivery, 5 days)', target: 'Held 5 sessions', primary: 'TC',
+  { id: 'S1', family: 'REVERSAL', group: 'DELIVERY', name: '5-day reversal (delivery, 5 days)', target: 'Held 5 sessions', primary: 'TC',
     source: 'Short-term reversal (Jegadeesh 1990, Lehmann 1990): last week\'s biggest losers tend to bounce',
     rule: 'At the close, a stock down 7%+ over the last 5 sessions and 4%+ worse than Nifty 500 is bought (delivery; long only). Out at the close 5 sessions later. Stop 2x the daily ATR. Delivery charges (STT 0.1% both sides, DP charge).' },
 

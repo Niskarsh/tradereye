@@ -4,6 +4,25 @@
 shown each morning, with Dhan's charges taken off every trade. **Re-run** tests everything again; the page shows
 what changed against the previous run. The **Order Book** page alerts on a setup only when its past numbers clear the bar.
 
+## Delivery cases (lib/setups/swing.ts)
+Daily candles, bought at a close and sold at a later close, long only, sized at his risk from the stop:
+- **S1 5-day reversal**: down 7%+ in 5 sessions and 4%+ worse than Nifty; held 5 sessions; stop 2x daily ATR.
+- **D1 Momentum 6 and 12 months** (the Nifty200 Momentum 30 scoring): each month-end the 10 best by 6- and 12-month
+  return per unit of volatility; held to the next month-end; stop 3x daily ATR.
+- **D2 Near the 52-week high** (George & Hwang): each month-end the 10 closest to their 52-week high; held a month.
+- **D3 RSI(2) pullback in an uptrend** (Connors): above the 200-day average, 2-day RSI under 10; out on the first
+  close above the 5-day average (10 sessions at most).
+- **D4 Trend breakout**: close above the 55-day high and the 200-day average; out on a close below the 20-day low
+  (60 sessions at most).
+
+Dhan delivery charges used: brokerage ₹0; STT 0.1% on buy and sell; NSE transaction 0.00297%; SEBI ₹10/crore;
+stamp duty 0.015% on the buy; DP charge ₹12.50 + GST per stock per day it is sold; GST 18% on transaction + SEBI + DP.
+
+## His own trades
+**Your own trades, same yardstick** (bottom of My Setups, `/api/setups/journal`) scores every journal trade: R = net
+P&L ÷ his logged risk (RiskInr), R before costs, charges in R, hit = made money after charges, by month / setup /
+entry time / exit / side. Trades without a logged stop are counted at ₹300 and shown separately.
+
 ## Research cases
 - **L1 Last half hour follows the first** (Gao, Han, Li, Zhou, market intraday momentum): Nifty 500 0.1%+ in its
   first 30 minutes; at 15:00 trade the stocks that moved the same way; out at the 15:29 close.

@@ -12,6 +12,8 @@ export interface Stats {
   hit: number;
   /** average result in R after Dhan's charges */
   netR: number;
+  /** average result in R before charges: is there an edge at all, before costs eat it? */
+  grossR: number;
   /** share of trades that made money after charges */
   netWin: number;
   /** average minutes in the trade */
@@ -30,20 +32,20 @@ export function primaryTarget(c: CaseId): OutKey { return primaryOf(c); }
 export function statsOf(signals: Signal[], target: OutKey | 'PRIMARY', mid: string): Stats {
   const all = signals.filter((s) => s.out);
   const trades = all.filter((s) => s.case !== 'M9' || s.out!.filled);
-  let hit = 0, net = 0, win = 0, min = 0;
+  let hit = 0, net = 0, gross = 0, win = 0, min = 0;
   const h = [{ n: 0, hit: 0 }, { n: 0, hit: 0 }];
   for (const s of trades) {
     const r = s.out![target === 'PRIMARY' ? primaryTarget(s.case) : target];
     if (!r) continue;
     if (r.hit) hit++;
-    net += r.net; if (r.net > 0) win++; min += r.min;
+    net += r.net; gross += r.r; if (r.net > 0) win++; min += r.min;
     const half = h[s.date < mid ? 0 : 1];
     half.n++; if (r.hit) half.hit++;
   }
   const n = trades.length;
   const m9 = all.filter((s) => s.case === 'M9');
   return {
-    n, hit: n ? round(hit / n) : 0, netR: n ? round(net / n) : 0, netWin: n ? round(win / n) : 0, min: n ? Math.round(min / n) : 0,
+    n, hit: n ? round(hit / n) : 0, netR: n ? round(net / n) : 0, grossR: n ? round(gross / n) : 0, netWin: n ? round(win / n) : 0, min: n ? Math.round(min / n) : 0,
     h1: { n: h[0].n, hit: h[0].n ? round(h[0].hit / h[0].n) : 0 }, h2: { n: h[1].n, hit: h[1].n ? round(h[1].hit / h[1].n) : 0 },
     ...(m9.length && m9.length === all.length ? { fill: round(trades.length / m9.length) } : {}),
   };
