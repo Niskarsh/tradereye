@@ -12,6 +12,8 @@ import { istDate } from '@/lib/book/record';
 import type { WatchItem } from '@/lib/book/sheet';
 import type { ReversalAlert } from '@/lib/book/reversal';
 import { reportForClaude } from '@/lib/book/feedreport';
+import { useSetupAlerts, type SetupAlert, type ScanInfo } from '@/components/setups/useSetupAlerts';
+import { TARGET_LABEL, PRIMARY_TARGET } from '@/lib/setups/cases';
 
 /**
  * Order Book tab: curate the list (type / paste symbols, or paste screener screenshots read by Gemini), press
@@ -21,6 +23,9 @@ import { reportForClaude } from '@/lib/book/feedreport';
  * Reversal alerts: every recorded stock is checked as its data arrives (lib/book/reversal.ts, plain code, free).
  * An alert stays on screen (and as a desktop notification) until he closes it; clicking it opens that stock's chart
  * below the others (or reuses its open chart), zoomed to the moment the alert fired, with the wall marked.
+ *
+ * Setup alerts (My Setups): once a minute the list is also run through the backtested setups; only the ones whose
+ * past numbers clear the bar show up, with that track record. They stack with the reversal alerts and work the same.
  */
 
 interface ChartCfg { id: string; symbol: string; date: string; focus?: { from: number; to: number; n?: number }; alert?: AlertMark } // date '' = today
@@ -63,6 +68,21 @@ export default function OrderBookPage() {
   const [notifyPerm, setNotifyPerm] = useState<NotificationPermission | 'unsupported'>('default');
   const notes = useRef(new Map<string, Notification>());
   const openRef = useRef<(a: ReversalAlert) => void>(() => {});
+  const openSetupRef = useRef<(a: SetupAlert) => void>(() => {});
+  const setup = useSetupAlerts({
+    token, list,
+    onNew: (a) => {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      try {
+        const st = a.stats;
+        const n = new Notification(`${a.symbol}: ${a.name} ${a.signal.dir === 1 ? 'long' : 'short'} at ${a.signal.entry.toFixed(2)}`, {
+          body: st ? `${Math.round(st.hit * 100)}% of ${st.n} past cases, ${st.netR > 0 ? '+' : ''}${st.netR.toFixed(2)}R after costs` : a.name, tag: a.id, requireInteraction: true,
+        });
+        n.onclick = () => { window.focus(); openSetupRef.current(a); n.close(); };
+        notes.current.set(a.id, n);
+      } catch { /* some browsers only allow notifications from a service worker */ }
+    },
+  });
 
   useEffect(() => { rec.current!.onChange = () => setInfo({ ...rec.current!.info }); }, []);
 
@@ -106,7 +126,8 @@ export default function OrderBookPage() {
     } catch (e) { setAsks((x) => ({ ...x, [a.id]: { busy: false, err: (e as Error).message } })); }
   };
   const dismiss = (id: string) => { notes.current.get(id)?.close(); notes.current.delete(id); setAlerts((all) => all.filter((a) => a.id !== id)); };
-  const dismissAll = () => { for (const n of notes.current.values()) n.close(); notes.current.clear(); setAlerts([]); };
+  const dismissAll = () => { for (const n of notes.current.values()) n.close(); notes.current.clear(); setAlerts([]); setup.clear(); };
+  const dismissSetup = (id: string) => { notes.current.get(id)?.close(); notes.current.delete(id); setup.dismiss(id); };
   const askNotify = async () => { if (typeof Notification === 'undefined') return; setNotifyPerm(await Notification.requestPermission()); };
   useEffect(() => { setCharts(loadCharts()); }, []);
   useEffect(() => { try { localStorage.setItem(CHARTS_KEY, JSON.stringify(charts)); } catch { /* ignore */ } }, [charts]);
@@ -197,6 +218,17 @@ export default function OrderBookPage() {
     setScrollTo({ id, n: focus.n });
   };
   openRef.current = openAlert;
+  // a setup alert: the stock's live chart at that minute, with the entry marked
+  const openSetup = (a: SetupAlert) => {
+    const focus = { from: a.at - 6 * 60_000, to: a.at + 60_000, n: Date.now() };
+    const alert: AlertMark = { t: a.at, price: a.signal.entry, side: a.signal.dir === 1 ? 'LONG' : 'SHORT' };
+    const open = charts.find((c) => c.symbol === a.symbol && !c.date);
+    const id = open?.id ?? Math.random().toString(36).slice(2);
+    setCharts((all) => (open ? all.map((c) => (c.id === id ? { ...c, focus, alert } : c)) : [...all, { id, symbol: a.symbol, date: '', focus, alert }]));
+    setup.markOpened(a.id);
+    setScrollTo({ id, n: focus.n });
+  };
+  openSetupRef.current = openSetup;
   useEffect(() => {
     if (!scrollTo) return;
     const t = setTimeout(() => document.getElementById(`chart-${scrollTo.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -287,10 +319,12 @@ export default function OrderBookPage() {
             </div>
           )}
           {listMsg && <p className="text-xs text-data-caution">{listMsg}</p>}
+          <ScanLine info={setup.info} hasToken={!!token} />
         </section>
 
         {/* reversal alerts: bottom right, on top of everything, until closed */}
-        <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} asks={asks} onAsk={askAlert} />
+        <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} asks={asks} onAsk={askAlert}
+          setups={setup.alerts} onOpenSetup={openSetup} onDismissSetup={dismissSetup} />
 
         {/* charts */}
         {charts.map((c, i) => (
@@ -310,12 +344,55 @@ export default function OrderBookPage() {
 }
 
 type AskState = { busy: boolean; text?: string; err?: string; cost?: number };
-function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissAll, onAskPerm, asks, onAsk }: {
+/** One line under the list: what the setup alerts are doing. */
+function ScanLine({ info, hasToken }: { info: ScanInfo; hasToken: boolean }) {
+  if (!info.watching) return null;
+  const t = info.at ? new Date(info.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }) : '';
+  return (
+    <p className={`text-[11px] ${info.error ? 'text-data-caution' : 'text-ink-3'}`}>
+      Setup alerts: {!hasToken ? 'need the Dhan token' : info.noResults ? 'no backtest results yet (My Analysis → My Setups → Run)' : `watching ${info.watching} stocks once a minute, 09:20-15:00${t ? ` · last check ${t}` : ''}`}
+      {info.error ? ` · ${info.error}` : ''}
+    </p>
+  );
+}
+
+function SetupCard({ a, onOpen, onDismiss }: { a: SetupAlert; onOpen: (a: SetupAlert) => void; onDismiss: (id: string) => void }) {
+  const long = a.signal.dir === 1;
+  const st = a.stats;
+  const tgt = TARGET_LABEL[PRIMARY_TARGET[a.family]];
+  return (
+    <div className={`relative rounded-xl border bg-brand-card shadow-lg ${long ? 'border-data-green/70' : 'border-data-red/70'} ${a.opened ? 'opacity-75' : ''}`}>
+      <button onClick={() => onOpen(a)} className="block w-full px-3 py-2 pr-9 text-left" title="Open the chart at this moment">
+        <span className="flex items-center gap-1.5 text-sm font-black">
+          <BellRing className="h-4 w-4 text-brand-accent" />
+          {a.symbol}
+          <span className={long ? 'text-data-green' : 'text-data-red-text'}>{long ? '▲' : '▼'} {a.name}</span>
+          <span className="ml-auto font-mono text-[11px] font-normal text-ink-3">{clock(a.at)}</span>
+        </span>
+        <span className="mt-1 block rounded-md border border-line bg-brand-bg px-2 py-1 font-mono text-[11px] text-ink">
+          {a.signal.case === 'M9'
+            ? <>Limit {long ? 'buy' : 'sell'} @ {(a.signal.entry - a.signal.dir * 0.5 * a.signal.atr).toFixed(2)} (valid 30 min) · stop {a.signal.stop.toFixed(2)} · target 2R</>
+            : <>{long ? 'Buy' : 'Sell'} @ {a.signal.entry.toFixed(2)} · stop {a.signal.stop.toFixed(2)}{a.signal.capped ? ' (2x ATR cap)' : ''} · target {a.signal.target.toFixed(2)}</>}
+        </span>
+        {st && (
+          <span className="mt-1 block text-[11px] leading-snug text-ink-2">
+            Past: <b className="text-ink">{Math.round(st.hit * 100)}%</b> reached {tgt} first in <b className="text-ink">{st.n}</b> cases · <span className={st.netR > 0 ? 'text-data-green' : 'text-data-red-text'}>{st.netR > 0 ? '+' : ''}{st.netR.toFixed(2)}R</span> after costs · halves {Math.round(st.h1.hit * 100)}%/{Math.round(st.h2.hit * 100)}%
+          </span>
+        )}
+        <span className="mt-0.5 block text-[10px] text-ink-3">{a.signal.stretch}% of daily range · Nifty open→now {a.signal.nDay.toLowerCase()} · {a.signal.emaInWay ? '200 EMA in the way' : 'EMA clear'}{a.family === 'REVERSAL' ? ' · check the book for a real rejection' : ''}</span>
+      </button>
+      <button onClick={() => onDismiss(a.id)} aria-label="Close alert" className="absolute right-1.5 top-1.5 rounded p-1 text-ink-3 hover:text-ink"><X className="h-3.5 w-3.5" /></button>
+    </div>
+  );
+}
+
+function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissAll, onAskPerm, asks, onAsk, setups, onOpenSetup, onDismissSetup }: {
   alerts: Alert[]; recording: boolean; perm: NotificationPermission | 'unsupported';
   onOpen: (a: ReversalAlert) => void; onDismiss: (id: string) => void; onDismissAll: () => void; onAskPerm: () => void;
   asks: Record<string, AskState>; onAsk: (a: ReversalAlert) => void;
+  setups: SetupAlert[]; onOpenSetup: (a: SetupAlert) => void; onDismissSetup: (id: string) => void;
 }) {
-  if (!alerts.length && !(recording && perm === 'default')) return null;
+  if (!alerts.length && !setups.length && !(recording && perm === 'default')) return null;
   return (
     <div className="fixed bottom-4 right-4 z-40 flex max-h-[75vh] w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto">
       {recording && perm === 'default' && (
@@ -323,9 +400,10 @@ function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissA
           <Bell className="h-4 w-4 shrink-0" />Turn on desktop alerts, so reversals reach you on other tabs too
         </button>
       )}
-      {alerts.length > 1 && (
-        <button onClick={onDismissAll} className="self-end rounded-lg border border-line-strong bg-brand-card px-2 py-1 text-[11px] font-bold text-ink-2 shadow">Close all ({alerts.length})</button>
+      {alerts.length + setups.length > 1 && (
+        <button onClick={onDismissAll} className="self-end rounded-lg border border-line-strong bg-brand-card px-2 py-1 text-[11px] font-bold text-ink-2 shadow">Close all ({alerts.length + setups.length})</button>
       )}
+      {setups.map((a) => <SetupCard key={a.id} a={a} onOpen={onOpenSetup} onDismiss={onDismissSetup} />)}
       {alerts.map((a) => {
         const long = a.side === 'LONG';
         const extreme = a.kind === 'EXTREME';

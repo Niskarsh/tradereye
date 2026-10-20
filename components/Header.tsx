@@ -7,7 +7,7 @@ import { useSession } from '@/context/SessionContext';
 
 /**
  * Signed out: Home only, and "Sign in with Google" on the right.
- * Signed in (laptop / tablet): two menus, My Performance and My Live Trading, plus YouTube and the account.
+ * Signed in (laptop / tablet): three menus, My Performance, My Live Trading and My Analysis, plus YouTube and the account.
  * Phone: the same pages one below the other (no nesting), and sign in / out at the bottom.
  */
 
@@ -15,7 +15,6 @@ interface Item { name: string; href: string }
 const PERFORMANCE: Item[] = [
     { name: 'Home', href: '/' },
     { name: 'My Journal', href: '/journal' },
-    { name: 'My Stats', href: '/stats' },
     { name: 'Fetch Today\'s Trades', href: '/sync-trades' },
 ];
 const LIVE_TRADING: Item[] = [
@@ -24,6 +23,10 @@ const LIVE_TRADING: Item[] = [
     { name: 'Order Book', href: '/order-book' },
     { name: 'Backfill', href: '/backfill' },
     { name: 'Dhan login', href: '/dhan-login' },
+];
+const ANALYSIS: Item[] = [
+    { name: 'My Stats', href: '/stats' },
+    { name: 'My Setups', href: '/setups' },
 ];
 const YOUTUBE = 'https://www.youtube.com/@CandlesBeforeCubicles?sub_confirmation=1';
 
@@ -92,7 +95,7 @@ export default function Header() {
         );
     };
 
-    const flat = signedIn ? [...PERFORMANCE, ...LIVE_TRADING] : PERFORMANCE.slice(0, 1);
+    const flat = signedIn ? [...PERFORMANCE, ...LIVE_TRADING, ...ANALYSIS] : PERFORMANCE.slice(0, 1);
 
     return (
         <>
@@ -125,6 +128,7 @@ export default function Header() {
                                     <>
                                         {group('My Performance', PERFORMANCE)}
                                         {group('My Live Trading', LIVE_TRADING)}
+                                        {group('My Analysis', ANALYSIS)}
                                         <a href={YOUTUBE} target="_blank" rel="noopener noreferrer" className={classNames(link, idle)}>Youtube</a>
                                         <Menu as="div" className="relative ml-2">
                                             <MenuButton className="flex items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/60" aria-label="Account">

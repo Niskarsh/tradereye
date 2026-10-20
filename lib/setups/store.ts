@@ -1,0 +1,61 @@
+import { gunzip, gzip } from '../book/record';
+import type { Summary } from './stats';
+import type { CaseId } from './cases';
+
+/**
+ * Where the setup backtest keeps things in S3 (same bucket as everything else):
+ *
+ *   setups/status.json                      the run in progress / the last run (the page polls it)
+ *   setups/pending/<runId>.json             the Dhan token handed to the GitHub job (overwritten as soon as it is read)
+ *   setups/runs/index.json                  every run, newest first
+ *   setups/runs/<runId>/summary.json.gz     the numbers per case, the rule checks, the alert lookup
+ *   setups/runs/<runId>/signals-<case>.json.gz   every past trade of that case (for the page's filters)
+ *   setups/candles/1m/<SYMBOL>/<YYYY-MM>.json.gz  one month of 1-minute candles (a finished month is never fetched again)
+ *   setups/candles/daily/<SYMBOL>.json.gz   daily candles (fetched again on each run: one request per stock)
+ */
+
+export interface Store {
+  get(key: string): Promise<Uint8Array | undefined>;
+  put(key: string, body: Uint8Array): Promise<void>;
+}
+
+export type RunState = 'queued' | 'running' | 'done' | 'failed';
+export interface RunStatus {
+  runId: string;
+  state: RunState;
+  phase?: string;
+  done?: number;
+  total?: number;
+  message?: string;
+  startedAt: number;
+  updatedAt: number;
+  finishedAt?: number;
+}
+export interface RunIndexItem { runId: string; createdAt: number; period: Summary['period']; signals: number; symbols: number }
+
+export const STATUS_KEY = 'setups/status.json';
+export const INDEX_KEY = 'setups/runs/index.json';
+export const pendingKey = (runId: string) => `setups/pending/${runId}.json`;
+export const summaryKey = (runId: string) => `setups/runs/${runId}/summary.json.gz`;
+export const signalsKey = (runId: string, c: CaseId) => `setups/runs/${runId}/signals-${c}.json.gz`;
+export const monthKey = (symbol: string, month: string) => `setups/candles/1m/${symbol.toUpperCase()}/${month}.json.gz`;
+export const dailyKey = (symbol: string) => `setups/candles/daily/${symbol.toUpperCase()}.json.gz`;
+
+export const RUN_ID = /^[0-9A-Za-z-]{6,40}$/;
+
+/** A run whose status has not moved for this long is treated as dead (the job was cancelled or timed out). */
+export const STALE_MS = 20 * 60_000;
+export function isActive(s: RunStatus | undefined, now = Date.now()): boolean {
+  return !!s && (s.state === 'queued' || s.state === 'running') && now - s.updatedAt < STALE_MS;
+}
+
+const enc = new TextEncoder(), dec = new TextDecoder();
+export async function getJson<T>(store: Store, key: string): Promise<T | undefined> {
+  const b = await store.get(key);
+  if (!b) return undefined;
+  try { return JSON.parse(key.endsWith('.gz') ? await gunzip(b) : dec.decode(b)) as T; } catch { return undefined; }
+}
+export async function putJson(store: Store, key: string, value: unknown): Promise<void> {
+  const text = JSON.stringify(value);
+  await store.put(key, key.endsWith('.gz') ? await gzip(text) : enc.encode(text));
+}
