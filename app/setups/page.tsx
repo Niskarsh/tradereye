@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { ProgressBar } from '@/components/ui/progress';
 import { Card, Delta, StatCells, StatHead, Verdict, pct, rr } from '@/components/setups/parts';
-import { CASES, CASE_BY_ID, PRIMARY_TARGET, STRETCH_CUMULATIVE, TARGET_LABEL, type CaseId, type Signal } from '@/lib/setups/cases';
+import { CASE_BY_ID, EXIT_KEYS, EXIT_LABEL, PRIMARY_TARGET, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, TARGET_LABEL, hhmm, type CaseId, type OutKey, type Signal } from '@/lib/setups/cases';
 import { DIMS, applyFilter, statsOf, unpack, type DimKey, type Filter, type Packed, type Stats, type Summary } from '@/lib/setups/stats';
 import type { RunIndexItem, RunStatus } from '@/lib/setups/store';
 
@@ -76,7 +76,7 @@ export default function SetupsPage() {
         <header className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-3">
           <div>
             <h1 className="text-2xl font-black tracking-tighter">My Setups</h1>
-            <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">Two years of your screener's stocks · after Dhan's charges · nothing after 15:00</p>
+            <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">Two years of your screener's stocks · 10-minute chart · after Dhan's charges · nothing after 15:00</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {data && data.runs.length > 1 && (
@@ -111,8 +111,11 @@ export default function SetupsPage() {
               {fmtDate(s.period.from)} – {fmtDate(s.period.to)} · {s.universe.symbols} stocks on {s.universe.stockDays.toLocaleString('en-IN')} stock-days · {s.universe.signals.toLocaleString('en-IN')} past trades · {s.universe.source}
               {prev && <> · ▲▼ = hit rate change in points vs the run of {fmtTime(prev.createdAt)}</>}
             </p>
+            {s.v !== 2 && (
+              <p className="rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">This run used the old rules (1-minute triggers, no swing stops, no discretionary exits). Press Re-run for the 10-minute version.</p>
+            )}
             <CaseTable summary={s} minHit={minHit} prevCase={prevCase} hasPrev={!!prev} open={open} onOpen={(id) => setOpen(open === id ? null : id)} />
-            {open && <CaseDetail key={`${s.runId}-${open}`} summary={s} minHit={minHit} id={open} prev={prevCase(open)} onClose={() => setOpen(null)} />}
+            {open && s.v === 2 && <CaseDetail key={`${s.runId}-${open}`} summary={s} minHit={minHit} id={open} prev={prev?.v === 2 ? prevCase(open) : undefined} onClose={() => setOpen(null)} />}
             <Rules summary={s} previous={prev} />
           </>
         )}
@@ -136,9 +139,13 @@ function RunLine({ status }: { status: Status }) {
 }
 
 function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summary: Summary; minHit: number; prevCase: (id: CaseId) => Summary['cases'][number] | undefined; hasPrev: boolean; open: CaseId | null; onOpen: (id: CaseId) => void }) {
-  const fams = ['MOMENTUM', 'REVERSAL'] as const;
+  const groups = [
+    { title: 'Combined: several conditions together', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'COMBINED' },
+    { title: 'Momentum building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'MOMENTUM' },
+    { title: 'Reversal building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'REVERSAL' },
+  ];
   return (
-    <Card title="Every setup" sub={`Hit rate = target before stop (momentum: 1R, reversal: its level). Alert-worthy = 50+ trades, ${Math.round(minHit * 100)}%+ hit, makes money after charges, steady in both halves. Tap a setup for the details.`}>
+    <Card title="Every setup" sub={`Hit rate = target before stop (momentum: 1R, reversal: its level). Alert-worthy = 50+ trades, ${Math.round(minHit * 100)}%+ hit, makes money after charges, steady in both halves. Tap a setup for its stops, exits, stretch steps and times.`}>
       <div className="-mx-2 overflow-x-auto">
         <table className="w-full min-w-[560px] text-xs">
           <thead>
@@ -152,10 +159,10 @@ function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summa
               <th className="px-2 py-1.5 text-right">Verdict</th>
             </tr>
           </thead>
-          {fams.map((f) => (
-            <tbody key={f}>
-              <tr><td colSpan={7} className="px-2 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.2em] text-brand-accent">{f === 'MOMENTUM' ? 'Momentum' : 'Reversal'}</td></tr>
-              {summary.cases.filter((c) => CASE_BY_ID.get(c.id)?.family === f).map((c) => {
+          {groups.map((g) => (
+            <tbody key={g.title}>
+              <tr><td colSpan={7} className="px-2 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.2em] text-brand-accent">{g.title}</td></tr>
+              {summary.cases.filter((c) => g.pick(c.id)).map((c) => {
                 const info = CASE_BY_ID.get(c.id)!;
                 return (
                   <tr key={c.id} onClick={() => onOpen(c.id)} className={`cursor-pointer border-b border-line/60 hover:bg-white/5 ${open === c.id ? 'bg-white/5' : ''}`}>
@@ -164,6 +171,7 @@ function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summa
                         {open === c.id ? <ChevronDown className="h-3.5 w-3.5 text-brand-accent" /> : <ChevronRight className="h-3.5 w-3.5 text-ink-3" />}
                         <span className="font-mono text-[10px] text-ink-3">{c.id}</span>
                         <span className="font-bold">{info.name}</span>
+                        <span className={`text-[9px] font-black uppercase ${info.family === 'MOMENTUM' ? 'text-data-green' : 'text-data-red-text'}`}>{info.family === 'MOMENTUM' ? 'mom' : 'rev'}</span>
                         {c.all.fill !== undefined && <span className="text-[10px] text-ink-3">· filled {pct(c.all.fill)}</span>}
                       </span>
                     </td>
@@ -204,32 +212,50 @@ function CaseDetail({ summary, minHit, id, prev, onClose }: { summary: Summary; 
   const { sigs, err } = useSignals(summary.runId, id);
   const [f, setF] = useState<Filter>({});
   const filtered = useMemo(() => (sigs ? applyFilter(sigs, f) : []), [sigs, f]);
-  const fs = useMemo(() => (sigs ? statsOf(filtered, 'PRIMARY', summary.period.mid) : undefined), [sigs, filtered, summary.period.mid]);
+  const [exitKey, setExitKey] = useState<OutKey>(PRIMARY_TARGET[info.family]);
+  const fs = useMemo(() => (sigs ? statsOf(filtered, exitKey, summary.period.mid) : undefined), [sigs, filtered, exitKey, summary.period.mid]);
   const anyFilter = Object.values(f).some((v) => (Array.isArray(v) ? v.length : v !== undefined));
   const toggle = (k: DimKey, v: string) => setF((x) => { const cur = x[k] ?? []; const nxt = cur.includes(v) ? cur.filter((y) => y !== v) : [...cur, v]; return { ...x, [k]: nxt }; });
   // where it works best: the alert buckets of this case, best first
   const buckets = Object.entries(summary.lookup).filter(([k]) => k.startsWith(`${id}|`) && k.split('|').length >= 3)
     .sort((a, b) => b[1].hit - a[1].hit || b[1].netR - a[1].netR).slice(0, 8);
-  const prim = TARGET_LABEL[PRIMARY_TARGET[info.family]];
+  const outLabel = (k: OutKey) => (k.startsWith('T') ? (k === 'TS' ? `${TARGET_LABEL.TS} (${info.target})` : TARGET_LABEL[k as 'T1' | 'T15']) : EXIT_LABEL[k as keyof typeof EXIT_LABEL]);
 
   return (
     <Card title={`${id} · ${info.name}`} sub={info.rule} right={<button onClick={onClose} aria-label="Close" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}>
+      <p className="text-[11px] text-ink-3">
+        Stops: {pct(c.slices.stopType?.SWING ? c.slices.stopType.SWING.n / Math.max(1, c.all.n) : 0)} at a solid swing, the rest at 2x ATR (no solid swing).
+        {c.skippedFar > 0 && <> {c.skippedFar.toLocaleString('en-IN')} more times the setup appeared but the solid swing was beyond 2x ATR, so it was not taken.</>}
+      </p>
       <div className="grid gap-4 lg:grid-cols-2">
-        <MiniTable title="By target" first="Target" rows={(['T1', 'T15', 'TS'] as const).map((t) => ({ label: t === 'TS' ? `${TARGET_LABEL.TS} (${info.target})` : TARGET_LABEL[t], s: c.byTarget[t], before: prev?.byTarget[t] }))} />
-        {c.stretchAtLeast && (
-          <MiniTable title="% of daily range moved, at least" first="Stretch" rows={STRETCH_CUMULATIVE.map((t) => ({ label: `${t}%+`, s: c.stretchAtLeast![`${t}%+`], before: prev?.stretchAtLeast?.[`${t}%+`] }))} />
+        <MiniTable title="Systematic exits (hit = target before stop)" first="Exit" rows={TARGET_KEYS.map((k) => ({ label: outLabel(k), s: c.byOut[k], before: prev?.byOut?.[k] }))} />
+        <MiniTable title="Discretionary exits (hit = made money after charges)" first="Exit when" rows={EXIT_KEYS.map((k) => ({ label: outLabel(k), s: c.byOut[k], before: prev?.byOut?.[k] }))} />
+        {c.stretchUnder && (
+          <MiniTable title="% of daily range moved, under" first="Stretch" rows={STRETCH_UNDER.map((t) => ({ label: `under ${t}%`, s: c.stretchUnder![`under ${t}%`], before: prev?.stretchUnder?.[`under ${t}%`] }))} />
         )}
+        {c.stretchAtLeast && (
+          <MiniTable title="% of daily range moved, at least" first="Stretch" rows={STRETCH_AT_LEAST.map((t) => ({ label: `${t}%+`, s: c.stretchAtLeast![`${t}%+`], before: prev?.stretchAtLeast?.[`${t}%+`] }))} />
+        )}
+        {c.tests && c.tests.length > 0 && <TestsTable rows={c.tests} />}
         {buckets.length > 0 && (
           <MiniTable title="Where it works best (50+ trades each)" first="Stretch · time · Nifty open → trade" rows={buckets.map(([k, s]) => ({ label: k.split('|').slice(1).join(' · '), s }))} />
         )}
         {c.combos.length > 0 && (
           <MiniTable title="Together with another setup (same way, within 30 min)" first="With" rows={c.combos.map((x) => ({ label: `${x.with} ${CASE_BY_ID.get(x.with)?.name ?? ''}`, s: x.stats }))} />
         )}
+        {c.slices.slot30 && (
+          <MiniTable title="When it sets up (30-minute slots)" first="From" rows={Object.entries(c.slices.slot30).map(([k, s]) => ({ label: k, s }))} />
+        )}
       </div>
 
       <div className="space-y-2 rounded-xl border border-line bg-brand-bg p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[10px] font-black uppercase tracking-widest text-ink-3">Combine any slices ({prim} target)</p>
+          <p className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-widest text-ink-3">
+            Combine any slices · exit
+            <select value={exitKey} onChange={(e) => setExitKey(e.target.value as OutKey)} className="h-7 max-w-[260px] rounded-md border border-line-strong bg-brand-bg px-1.5 text-[11px] font-bold normal-case tracking-normal text-ink-2 outline-none">
+              {[...TARGET_KEYS, ...EXIT_KEYS].map((k) => <option key={k} value={k}>{outLabel(k)}</option>)}
+            </select>
+          </p>
           {anyFilter && <button onClick={() => setF({})} className="text-[11px] font-bold text-brand-accent">Clear</button>}
         </div>
         {DIMS.map((d) => {
@@ -264,9 +290,46 @@ function CaseDetail({ summary, minHit, id, prev, onClose }: { summary: Summary; 
             <Verdict s={fs} minHit={minHit} />
           </div>
         )}
-        {sigs && filtered.length > 0 && <RecentTrades sigs={filtered} target={PRIMARY_TARGET[info.family]} />}
+        {sigs && filtered.length > 0 && <RecentTrades sigs={filtered} target={exitKey} />}
       </div>
     </Card>
+  );
+}
+
+/** Which test of the day's high / low, and at what time each test set up. */
+function TestsTable({ rows }: { rows: { test: string; stats: Stats; bySlot: Record<string, Stats> }[] }) {
+  return (
+    <div className="lg:col-span-2">
+      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">By test of the day&apos;s high / low, and when that test set up</p>
+      <div className="-mx-2 overflow-x-auto">
+        <table className="w-full text-xs">
+          <StatHead first="Test" />
+          <tbody>
+            {rows.map((r) => (
+              <React.Fragment key={r.test}>
+                <tr className="border-b border-line/60">
+                  <td className="px-2 py-1.5 font-bold">{r.test === '1' ? '1st test' : r.test === '2' ? '2nd test' : '3rd test or later'}</td>
+                  <StatCells s={r.stats} />
+                </tr>
+                <tr className="border-b border-line/60">
+                  <td colSpan={5} className="px-2 pb-2 pt-0.5">
+                    <span className="flex flex-wrap gap-1">
+                      {Object.entries(r.bySlot).map(([slot, s]) => (
+                        <span key={slot} title={`${s.n} trades, ${pct(s.hit)} hit, ${rr(s.netR)} after costs`}
+                          className={`rounded-md border px-1.5 py-0.5 font-mono text-[10px] ${s.n < 20 ? 'border-line text-ink-4' : s.netR > 0 ? 'border-data-green/50 text-data-green' : 'border-line-strong text-ink-2'}`}>
+                          {slot} · {s.n} · {pct(s.hit)}
+                        </span>
+                      ))}
+                    </span>
+                  </td>
+                </tr>
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-[10px] text-ink-3">Chips: the 30-minute slot the test happened in · trades · hit rate. Green = makes money after charges (20+ trades).</p>
+    </div>
   );
 }
 
@@ -292,10 +355,9 @@ function MiniTable({ title, first, rows }: { title: string; first: string; rows:
   );
 }
 
-function RecentTrades({ sigs, target }: { sigs: Signal[]; target: 'T1' | 'T15' | 'TS' }) {
+function RecentTrades({ sigs, target }: { sigs: Signal[]; target: OutKey }) {
   const [n, setN] = useState(12);
-  const last = sigs.slice(-n).reverse();
-  const hhmm = (slot: number) => { const m = 555 + slot; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+  const last = sigs.filter((s) => s.out).slice(-n).reverse();
   return (
     <div className="border-t border-line pt-2">
       <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">Latest examples (check them on your chart)</p>
@@ -309,8 +371,8 @@ function RecentTrades({ sigs, target }: { sigs: Signal[]; target: 'T1' | 'T15' |
                   <td className="px-2 py-1 font-mono text-ink-3">{s.date} {hhmm(s.slot)}</td>
                   <td className="px-2 py-1 font-bold">{s.symbol}</td>
                   <td className={`px-2 py-1 font-bold ${s.dir === 1 ? 'text-data-green' : 'text-data-red-text'}`}>{s.dir === 1 ? 'LONG' : 'SHORT'}</td>
-                  <td className="px-2 py-1 font-mono">@ {s.entry} · stop {s.stop} · target {s.target}</td>
-                  <td className="px-2 py-1 font-mono text-ink-3">{s.stretch}% range</td>
+                  <td className="px-2 py-1 font-mono">@ {s.entry} · stop {s.stop}{s.stopType === 'ATR2' ? ' (2x ATR)' : ''} · target {s.target}</td>
+                  <td className="px-2 py-1 font-mono text-ink-3">{s.stretch}% range{s.testNo ? ` · test ${s.testNo} (${s.tests.map(hhmm).join(', ')})` : ''}</td>
                   <td className={`px-2 py-1 text-right font-mono ${o && o.net > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{s.case === 'M9' && !s.out?.filled ? 'not filled' : o ? `${o.hit ? 'hit' : 'miss'} ${rr(o.net)}` : '–'}</td>
                 </tr>
               );
@@ -346,7 +408,8 @@ function HowItWorks({ open, onToggle }: { open: boolean; onToggle: () => void })
       {open && (
         <div className="mt-3 space-y-3 text-xs leading-relaxed text-ink-2">
           <p><b>Which stocks:</b> each day, the Nifty 500 stocks your screener would have shown that morning (previous close ₹250–340, 10-day average volume above 3M). Today&apos;s Nifty 500 members are used, so stocks that left the index are missed; that flatters the numbers slightly.</p>
-          <p><b>How a trade is scored:</b> entry at the close of the minute the setup appears; stop beyond the structure, capped at 2x ATR; when stop and target are hit in the same minute it counts as the stop; anything open is closed at 15:00. Size = your ₹300 risk / stop distance, and Dhan&apos;s charges at that size are taken off every result. Order-book rejection cannot be tested (no past order books), so confirm it on the Order Book page.</p>
+          <p><b>How a trade is scored:</b> everything is decided on the 10-minute chart: a setup appears only when a 10-minute candle closes, and the entry is that close. The stop goes 0.1 ATR beyond the nearest solid swing (a 10-min swing low/high that price moved away from by 0.75 ATR+, came back to and was rejected, and has not been broken since). If that swing is beyond 2x ATR the trade is not taken; with no solid swing the stop is 2x ATR. 1-minute candles are used only to see whether the stop or the target came first inside a 10-minute candle; when both are touched in the same minute it counts as the stop. Anything open is closed at 15:00. Size = your ₹300 risk / stop distance, and Dhan&apos;s charges at that size are taken off every result. Order-book rejection cannot be tested (no past order books), so confirm it on the Order Book page.</p>
+          <p><b>Exits:</b> systematic = 1R, 1.5R, the structural target. Discretionary = the first time one marker shows up (checked at each 10-minute close): structure breaks, a heavy candle against you, Nifty turns against you, the day range reaches 95% of usual, the next obstacle, no progress after 30 minutes, give-back from +1R. Their &quot;hit&quot; = the trade made money after charges.</p>
           <p><b>Halves:</b> the two years are split in the middle. A setup that only works in one half was probably luck or one market mood.</p>
           <p><b>Re-run:</b> runs on GitHub Actions with today&apos;s Dhan token. Finished months of 1-minute candles are kept in S3 and never fetched again, so a re-run a month later only fetches the new month.</p>
           <p><b>One-time setup.</b> GitHub repo → Settings → Secrets and variables → Actions: <code>DHAN_CLIENT_ID</code>, <code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, <code>AWS_REGION</code>, <code>S3_BUCKET</code>. Vercel → Environment Variables: <code>GH_DISPATCH_TOKEN</code> (fine-grained token, tradereye only, Actions: Read and write), then redeploy. Optional: <code>SETUPS_ALERT_MIN_HIT</code> (default 0.6) for the Order Book alerts.</p>

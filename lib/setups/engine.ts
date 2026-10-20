@@ -1,18 +1,19 @@
 import type { Candles } from '../dhan';
 import { tenMinuteBars, type Bar, type Session } from '../live/enrich';
 import { istParts, SESSION_OPEN_MIN } from '../live/time';
-import { hasSuspectGap, nMinuteBars, pointOfControl } from '../copilot/features';
+import { hasSuspectGap, nMinuteBars, pointOfControl, pullbackNumber } from '../copilot/features';
 import { roundTripCharges, sizeFor } from './costs';
-import { CASE_BY_ID, timeBucket, type CaseId, type Outcome, type Rel, type RvolBucket, type Signal, type TargetResult } from './cases';
+import { CASE_BY_ID, EXIT_KEYS, TARGET_KEYS, timeBucket, type CaseId, type ExitKey, type OutKey, type Outcome, type Rel, type RvolBucket, type Signal, type TargetResult } from './cases';
 
 /**
- * The setup engine: one stock, one day, replayed minute by minute. Pure code (no network, no clock), so the backtest
- * and the live alerts run exactly the same rules on exactly the same numbers.
+ * The setup engine: one stock, one day, replayed on the 10-minute chart. Pure code (no network, no clock), so the
+ * backtest and the live alerts run exactly the same rules on exactly the same numbers.
  *
- * At decision minute k (0 = 09:15) only the 1-minute candles that started before k are used; the entry price is the
- * close of minute k-1. Bars are aligned at 09:15, the 10-minute chart is built from them (the candle still forming
- * counts, the way the chart shows it), and ATR(14) / the 200 EMAs / VWAP are computed the same way as the co-pilot.
- * Decisions run from 09:20 to 14:59; anything still open is closed at 15:00 (he never trades the last 30 minutes).
+ * Decisions happen only when a 10-minute candle closes (09:25, 09:35 ... 14:55), using only the candles closed by
+ * then; the entry is that close. Bars are aligned at 09:15; ATR(14) / the 200 EMAs / VWAP / POC are computed the same
+ * way as the co-pilot. The stop goes beyond a solid swing (tested, rejected, unbroken; see swingStop) and is never
+ * wider than 2x ATR. 1-minute candles are used only to follow a trade (which came first inside a 10-minute candle,
+ * the stop or the target). Anything still open is closed at 15:00 (he never trades the last 30 minutes).
  */
 
 export interface Params {
@@ -29,8 +30,8 @@ export interface Params {
 }
 export const DEFAULT_PARAMS: Params = { riskInr: 300, niftyDirPct: 0.15, niftyRecentPct: 0.05, emaReachAtr: 2, pocRows: 30 };
 
-export const FIRST_DECISION = 5;   // 09:20
-export const LAST_DECISION = 344;  // 14:59
+export const FIRST_DECISION = 10;  // 09:25, the first 10-minute close
+export const LAST_DECISION = 340;  // 14:55, the close of the 14:45-14:54 candle
 export const EXIT_SLOT = 345;      // 15:00: anything open is closed at the 14:59 close
 
 export interface DayInput {
@@ -149,9 +150,78 @@ function barOf(s: Slots, from: number, toExcl: number): B10 {
   return { o: s.o[from], h, l, c: s.c[toExcl - 1], v };
 }
 
+/* ---- solid swings (the stop) ------------------------------------------------------------------------------ */
+
+/**
+ * The stop the way he sets it: just beyond the nearest SOLID swing on the stop side, on the 10-minute chart.
+ * Solid = all of:
+ *  - a swing: a 10-min low (high) at or below the two candles before it and the one after it;
+ *  - with width: price moved at least 0.75 ATR away from it afterwards;
+ *  - tested: a later candle came back within 0.25 ATR of it and closed back above (below) it (the rejection), which
+ *    can be the entry candle itself;
+ *  - unbroken: no candle since closed beyond it or traded more than 0.15 ATR through it, up to the entry.
+ * Stop = 0.1 ATR beyond it (at least 0.25 ATR from the entry). The nearest solid swing more than 2x ATR away = no
+ * trade (FAR). No solid swing at all = 2x ATR (ATR2).
+ */
+export function swingStop(d: 1 | -1, price: number, atr: number, bars: B10[]): { stop: number; type: 'SWING' | 'ATR2' | 'FAR' } {
+  const n = bars.length;
+  let best: number | undefined;
+  for (let i = 2; i < n - 1; i++) {
+    const S = d === 1 ? bars[i].l : bars[i].h;
+    const beyond = (x: number) => (S - x) * d;           // > 0 = x is past S on the stop side
+    if ((price - S) * d <= 0) continue;                   // must be on the stop side of the entry
+    const ext = (b: B10) => (d === 1 ? b.l : b.h);
+    if (![bars[i - 2], bars[i - 1], bars[i + 1]].every((b) => beyond(ext(b)) <= 0)) continue;
+    let wide = false, tested = false, broken = false;
+    for (let j = i + 1; j < n; j++) {
+      const b = bars[j];
+      if ((S - b.c) * d > 0 || beyond(ext(b)) > 0.15 * atr) { broken = true; break; }
+      // a test: back within 0.25 ATR of the swing after the move away, and closed back (a long candle can do both)
+      if (wide && -beyond(ext(b)) <= 0.25 * atr && (b.c - S) * d > 0) tested = true;
+      if ((d === 1 ? b.h - S : S - b.l) >= 0.75 * atr) wide = true;
+    }
+    if (broken || !wide || !tested) continue;
+    if (best === undefined || (S - best) * d > 0) best = S;   // the nearest one to the entry
+  }
+  if (best === undefined) return { stop: price - d * 2 * atr, type: 'ATR2' };
+  let stop = best - d * 0.1 * atr;
+  if ((price - stop) * d < 0.25 * atr) stop = price - d * 0.25 * atr;
+  if ((price - stop) * d > 2 * atr) return { stop, type: 'FAR' };
+  return { stop, type: 'SWING' };
+}
+
+/* ---- tests of the day's high / low ----------------------------------------------------------------------- */
+
+/**
+ * The day's high (low) zone and its tests, on 10-minute candles. The first candle to make the high is test 1; price
+ * then has to pull back 0.5 ATR+ before a candle that reaches within 0.25 ATR of the high again counts as the next
+ * test. A new high more than 0.25 ATR above the zone starts a new zone (test 1 again).
+ */
+export class Zone {
+  level = NaN; tests: number[] = []; pulled = false;
+  constructor(private d: 1 | -1) {} // 1 = the day's high, -1 = the day's low
+  push(b: B10, slot: number, atr: number) {
+    const ext = this.d === 1 ? b.h : b.l;
+    const far = (x: number) => (x - this.level) * this.d; // > 0 = beyond the level
+    let inZone = true;
+    if (!Number.isFinite(this.level) || far(ext) > 0.25 * atr) { this.level = ext; this.tests = [slot]; this.pulled = false; }
+    else if (far(ext) >= -0.25 * atr) {
+      if (this.pulled) { this.tests.push(slot); this.pulled = false; }
+      if (far(ext) > 0) this.level = ext;
+    } else inZone = false;
+    // the pullback: a candle that reached the zone counts only by its close (its low may have come before it got there)
+    const away = inZone ? b.c : this.d === 1 ? b.l : b.h;
+    const back = (this.level - away) * this.d;
+    if (back >= 0.5 * atr) this.pulled = true;
+  }
+  /** the test number of a candle that is in the zone now (0 = not in the zone) */
+  testOf(b: B10, atr: number) { const ext = this.d === 1 ? b.h : b.l; return (ext - this.level) * this.d >= -0.25 * atr ? this.tests.length : 0; }
+}
+
 /* ---- the day ---------------------------------------------------------------------------------------------- */
 
-interface Draft { id: CaseId; d: 1 | -1; stop: number; capped: boolean; target: number; slot: number; price: number; atr: number; ctx: DimCtx }
+interface ExitCtx { obstacle?: number; medV: number; adr: number; dayHi: number; dayLo: number; entryBar: B10 }
+interface Draft { id: CaseId; d: 1 | -1; stop: number; stopType: 'SWING' | 'ATR2' | 'FAR'; target: number; slot: number; price: number; atr: number; ctx: DimCtx; ex: ExitCtx; testNo: number; tests: number[]; level: Signal['level']; pullbackNo: number }
 interface DimCtx { nFirst5?: number; nDay?: number; nRecent?: number; rvolSame?: number; openBusy: boolean; ext?: number; e5?: number; e10?: number; e1d?: number; gapPct: number }
 
 export function runDay(inp: DayInput): Signal[] {
@@ -189,6 +259,8 @@ export function runDay(inp: DayInput): Signal[] {
   const pva = prevSession ? valueArea(prevSession.bars, P.pocRows) : undefined;
   const openInVa = !!pva && open >= pva.val && open <= pva.vah;
   const medBase = tenMinuteBars(hist.slice(-2)).map((b) => b.v);
+  // yesterday's 10-minute candles: a solid swing can be from yesterday
+  const prevTens: B10[] = prevSession ? tenMinuteBars([prevSession]) : [];
 
   const K = Math.min(day.n, nifty.n);
   const lastK = Math.min(K, LAST_DECISION);
@@ -198,8 +270,10 @@ export function runDay(inp: DayInput): Signal[] {
 
   // ---- running state for the day
   const tens: B10[] = [];
+  const hiBefore: number[] = [], loBefore: number[] = []; // the day's high / low before each 10-min candle
+  const hiZone = new Zone(1), loZone = new Zone(-1);
   let pv = 0, vv = 0, cumV = 0;
-  let dayHi = -Infinity, dayLo = Infinity, hiSlot = 0, loSlot = 0, lowSinceHi = Infinity, highSinceLo = -Infinity;
+  let dayHi = -Infinity, dayLo = Infinity, lowSinceHi = Infinity, highSinceLo = -Infinity;
   let or10: B10 | undefined, or30: B10 | undefined, openBusy = false;
   let brkHi = -1, maxSinceBrk = -Infinity, brkLo = -1, minSinceBrk = Infinity;
   let medV = median(medBase);
@@ -209,14 +283,17 @@ export function runDay(inp: DayInput): Signal[] {
   for (let k = 1; k <= lastK; k++) {
     // ---- add minute k-1
     const s = k - 1;
-    if (day.h[s] > dayHi) { dayHi = day.h[s]; hiSlot = s; lowSinceHi = Infinity; } else lowSinceHi = Math.min(lowSinceHi, day.l[s]);
-    if (day.l[s] < dayLo) { dayLo = day.l[s]; loSlot = s; highSinceLo = -Infinity; } else highSinceLo = Math.max(highSinceLo, day.h[s]);
+    if (s % 10 === 0) { hiBefore.push(dayHi); loBefore.push(dayLo); }
+    if (day.h[s] > dayHi) { dayHi = day.h[s]; lowSinceHi = Infinity; } else lowSinceHi = Math.min(lowSinceHi, day.l[s]);
+    if (day.l[s] < dayLo) { dayLo = day.l[s]; highSinceLo = -Infinity; } else highSinceLo = Math.max(highSinceLo, day.h[s]);
     cumV += day.v[s];
     if ((s + 1) % 10 === 0) {
       const b = barOf(day, s - 9, s + 1);
       tens.push(b); atrC.push(b); ema10.push(b.c);
       pv += ((b.h + b.l + b.c) / 3) * b.v; vv += b.v;
       medV = median([...medBase, ...tens.map((x) => x.v)]);
+      const a = atrC.peek();
+      if (a) { hiZone.push(b, s - 9, a); loZone.push(b, s - 9, a); }
     }
     if ((s + 1) % 5 === 0) ema5.push(day.c[s]);
     if (k === 10) or10 = barOf(day, 0, 10);
@@ -228,91 +305,149 @@ export function runDay(inp: DayInput): Signal[] {
       if (brkLo < 0 && day.l[s] < or10.l) brkLo = s;
       if (brkLo >= 0) minSinceBrk = Math.min(minSinceBrk, day.l[s]);
     }
-    if (k < FIRST_DECISION) continue;
+    // ---- decisions only at a 10-minute close
+    if (k < FIRST_DECISION || k % 10 !== 0) continue;
 
-    // ---- the picture at minute k
-    const price = day.c[k - 1], prev = day.c[k - 2];
-    const formStart = Math.floor(k / 10) * 10;
-    const forming = k % 10 ? barOf(day, formStart, k) : undefined;
-    const atr = atrC.peek(forming);
+    const L = tens.length;
+    const T = tens[L - 1], Pv = tens[L - 2] as B10 | undefined;
+    const price = T.c;
+    const atr = atrC.peek();
     if (!atr || !(atr > 0)) continue;
-    const e10 = ema10.peek(forming ? price : undefined);
-    const e5 = ema5.peek(k % 5 ? price : undefined);
-    const e1d = suspect ? undefined : ema1d.peek(price);
-    const fv = forming?.v ?? 0;
-    const vwap = vv + fv > 0 ? (pv + (forming ? ((forming.h + forming.l + forming.c) / 3) * fv : 0)) / (vv + fv) : undefined;
+    const e10 = ema10.peek(), e5 = ema5.peek(), e1d = suspect ? undefined : ema1d.peek(price);
+    const vwap = vv > 0 ? pv / vv : undefined;
     const nDay = nPct(k - 1);
     const nRecent = k >= 31 ? (nifty.c[k - 1] / nifty.c[k - 31] - 1) * 100 : undefined;
     const rvolSame = cumV / sameAvg(k);
+    const rvolTV = cumV / fullAvg;
     const ext = ((price - open) / adr) * 100;
     const ctxBase: DimCtx = { nFirst5, nDay: k >= 15 ? nDay : undefined, nRecent, rvolSame: Number.isFinite(rvolSame) ? rvolSame : undefined, openBusy, e5, e10, e1d, gapPct };
+    const first5Dir = dirOf(nFirst5, P.niftyDirPct), dayDir = k >= 15 ? dirOf(nDay, P.niftyDirPct) : 0, recentDir = dirOf(nRecent, P.niftyRecentPct);
     /** Nifty his way: before 09:30 by the first 5 minutes (his rule), from 09:30 by open -> now */
-    const niftyWith = (d: 1 | -1) => (k < 15 ? dirOf(nFirst5, P.niftyDirPct) : dirOf(nDay, P.niftyDirPct)) === d;
-
-    const clampStop = (d: 1 | -1, raw: number) => {
-      let stop = raw, capped = false;
-      if ((price - stop) * d < 0.25 * atr) stop = price - d * 0.25 * atr;
-      if ((price - stop) * d > 2 * atr) { stop = price - d * 2 * atr; capped = true; }
-      return { stop, capped };
-    };
-    /** momentum stop: beyond the last two 10-min candles and the one forming (the co-pilot's stop idea) */
-    const momStop = (d: 1 | -1) => {
-      const recent = forming ? [...tens.slice(-2), forming] : tens.slice(-3);
-      const pool = recent.length ? recent : [barOf(day, 0, k)];
-      return clampStop(d, d === 1 ? Math.min(...pool.map((b) => b.l)) - 0.1 * atr : Math.max(...pool.map((b) => b.h)) + 0.1 * atr);
-    };
-    const revStop = (d: 1 | -1, extreme: number) => clampStop(d, extreme - d * 0.1 * atr);
+    const niftyWith = (d: 1 | -1) => (k < 15 ? first5Dir : dayDir) === d;
+    /** Nifty directional his way in the first 5 minutes and still his way open -> now */
+    const niftyLed = (d: 1 | -1) => first5Dir === d && (k < 15 || dayDir === d);
+    /** busier than usual: at the open his TradingView rule (rvol > 0.1), later vs the same time of day */
+    const busy = k < 20 ? rvolTV > 0.1 : rvolSame > 1;
+    const quiet = Number.isFinite(rvolSame) && rvolSame <= 1;
+    const emaInPath = (d: 1 | -1) => [e5, e10, e1d].some((e) => e !== undefined && (e - price) * d > 0 && Math.abs(e - price) <= P.emaReachAtr * atr);
+    const emaBetween = (tgt: number) => [e5, e10, e1d].some((e) => e !== undefined && (e - price) * (tgt - e) > 0);
+    const swingBars = [...prevTens, ...tens];
 
     let pocMemo: number | undefined | null = null, poc2Memo: number | undefined | null = null;
     const pocToday = () => (pocMemo === null ? (pocMemo = pointOfControl(day.bars.slice(0, k), P.pocRows)) : pocMemo);
     const poc2d = () => (poc2Memo === null ? (poc2Memo = prevSession ? pointOfControl([...prevSession.bars, ...day.bars.slice(0, k)], P.pocRows) : undefined) : poc2Memo);
     /** reversal target: today's POC from 10:15 (six completed 10-min candles), the 2-day POC before */
     const pocTarget = () => (k >= 60 ? pocToday() : poc2d());
+    /** the nearest level in the trade's way, for the "next obstacle" exit */
+    const obstacleFor = (d: 1 | -1, tgt?: number) => {
+      const lv = [d === 1 ? pdh : pdl, e10, e1d, pocToday(), pva?.vah, pva?.val].filter((x): x is number => x !== undefined && Number.isFinite(x) && (x - price) * d > 0.3 * atr && (tgt === undefined || (tgt - x) * d > 0));
+      return lv.length ? lv.reduce((a, b) => (Math.abs(b - price) < Math.abs(a - price) ? b : a)) : undefined;
+    };
 
-    const add = (id: CaseId, d: 1 | -1, st: { stop: number; capped: boolean }, target?: number) => {
+    const add = (id: CaseId, d: 1 | -1, target?: number, extra: { testNo?: number; level?: Signal['level'] } = {}) => {
       const key = `${id}${d}`;
       if (fired.has(key)) return false;
+      const st = swingStop(d, price, atr, swingBars);
       const dist = Math.abs(price - st.stop);
       const family = CASE_BY_ID.get(id)!.family;
       let tgt = target;
       if (family === 'MOMENTUM') tgt = price + d * 2 * dist;
       if (tgt === undefined || !Number.isFinite(tgt) || (tgt - price) * d < 0.5 * dist) return false; // no room
+      if (family === 'REVERSAL' && (id === 'D' || id === 'E' || id === 'F' || id === 'J') && emaBetween(tgt)) return false;
       fired.add(key);
-      drafts.push({ id, d, stop: st.stop, capped: st.capped, target: tgt, slot: k, price, atr, ctx: { ...ctxBase, ext: family === 'MOMENTUM' ? ext * d : ext * -d } });
+      const zone = d === -1 ? hiZone : loZone; // a short fades the high, a long the low
+      const testNo = extra.testNo ?? (family === 'REVERSAL' ? zone.testOf(T, atr) : 0);
+      drafts.push({
+        id, d, stop: st.stop, stopType: st.type, target: tgt, slot: k, price, atr,
+        ctx: { ...ctxBase, ext: family === 'MOMENTUM' ? ext * d : ext * -d },
+        ex: { obstacle: obstacleFor(d, family === 'REVERSAL' ? tgt : undefined), medV, adr, dayHi, dayLo, entryBar: T },
+        testNo, tests: testNo ? [...zone.tests] : [], level: extra.level ?? '',
+        pullbackNo: family === 'MOMENTUM' ? pullbackNumber(tens.map((b, i) => ({ t: i, ...b })), d, 0.5 * atr) : 0,
+      });
       return true;
     };
     const mom = (id: CaseId, d: 1 | -1) => {
-      const ok = add(id, d, momStop(d));
+      const ok = add(id, d);
       // M9: the same moment as an opening range break with Nifty strong, entered on a pullback instead
-      if (ok && (id === 'M1' || id === 'M2') && nDay * d >= 0.3) add('M9', d, momStop(d));
+      if (ok && (id === 'M1' || id === 'M2') && nDay * d >= 0.3) add('M9', d);
     };
 
     for (const d of [1, -1] as const) {
       const up = d === 1;
-      // ---- momentum
-      if (or10 && niftyWith(d)) {
+      const r = -d as 1 | -1; // reversal: the run being faded
+      const runUp = r === 1;
+      const prevHi = hiBefore[L - 1], prevLo = loBefore[L - 1]; // the day's high / low before this candle
+      const turned10 = !!Pv && (up ? T.c > Pv.h : T.c < Pv.l);   // closes beyond the previous candle, his way
+      const turnedRev = !!Pv && (runUp ? T.c < Pv.l : T.c > Pv.h); // closes beyond the previous candle, against the run
+
+      /* ---- combined (his playbook) ---- */
+      const momCtx = niftyLed(d) && busy && !emaInPath(d) && ext * d >= 10 && ext * d < 80;
+      if (momCtx && Pv) {
+        const newExt = up ? T.c > prevHi : T.c < prevLo;
+        const orx = or10 && L >= 2 && (up ? T.c > or10.h && Pv.c <= or10.h : T.c < or10.l && Pv.c >= or10.l);
+        if (newExt || orx) add('A', d);
+        const levels = [or10 ? (up ? or10.h : or10.l) : NaN, up ? (open < pdh && dayHi > pdh ? pdh : NaN) : (open > pdl && dayLo < pdl ? pdl : NaN)];
+        const pull = up ? Pv.l : Pv.h;
+        const holds = (lv: number) => Number.isFinite(lv) && Math.abs(pull - lv) <= 0.3 * atr && (price - lv) * d > 0;
+        if (turned10 && (up ? dayHi - Pv.l : Pv.h - dayLo) >= 0.5 * atr && (levels.some(holds) || holds(pocToday() ?? NaN))) add('B', d);
+        if (k >= 40 && nRecent !== undefined && nRecent * d <= -P.niftyRecentPct && (price - day.c[k - 31]) * d >= 0) {
+          const last3 = tens.slice(-3);
+          if (up ? price >= Math.max(...last3.map((b) => b.h)) - 0.15 * atr : price <= Math.min(...last3.map((b) => b.l)) + 0.15 * atr) add('C', d);
+        }
+      }
+      const niftyNotWithRun = k >= 31 ? recentDir !== r : first5Dir !== r;
+      const revCtx = quiet && ext * r >= 50 && niftyNotWithRun;
+      if (revCtx) {
+        const inZone = runUp ? dayHi - T.h <= 0.25 * atr : T.l - dayLo <= 0.25 * atr;
+        const rng = T.h - T.l;
+        const rejection = rng > 0 && (runUp ? T.c <= T.l + 0.5 * rng : T.c >= T.h - 0.5 * rng);
+        if (inZone && rejection) add('D', d, pocTarget());
+        const lvls: [Signal['level'], number | undefined][] = [['DAY', runUp ? prevHi : prevLo], ['PD', runUp ? pdh : pdl], ['VA', pva ? (runUp ? pva.vah : pva.val) : undefined]];
+        for (const [name, lv] of lvls) {
+          if (lv === undefined || !Number.isFinite(lv)) continue;
+          if (runUp ? T.h > lv && T.c < lv : T.l < lv && T.c > lv) {
+            add('E', d, pocTarget(), { level: name, testNo: (runUp ? hiZone : loZone).testOf(T, atr) });
+            break;
+          }
+        }
+        if (Pv && L >= 2) {
+          const before = runUp ? hiBefore[L - 2] : loBefore[L - 2];
+          const newExt = runUp ? Pv.h >= before : Pv.l <= before;
+          const stall = runUp ? T.h <= Pv.h && T.c < T.o : T.l >= Pv.l && T.c > T.o;
+          if (medV > 0 && Pv.v >= 3 * medV && newExt && stall) add('F', d, pocTarget());
+        }
+      }
+      if (k === 20 && L === 2 && tens.every((b) => (b.c - b.o) * d > 0) && ((Math.sign(gapPct) === d && Math.abs(gapPct) >= 0.3) || first5Dir === d) && busy) add('G', d);
+      if (Pv && niftyWith(d) && ext * d >= 30 && ext * d < 80) {
+        const narrow = Pv.h - Pv.l < 0.5 * atr;
+        const nearExt = up ? hiBefore[L - 1] - Pv.h <= 0.3 * atr : Pv.l - loBefore[L - 1] <= 0.3 * atr;
+        if (narrow && nearExt && (up ? T.c > Pv.h : T.c < Pv.l)) add('I', d);
+      }
+      if (k >= 15 && Math.abs(ext) >= 50 && Math.sign(ext) === r && dayDir === -r && recentDir !== r && turnedRev) add('J', d, pocTarget());
+      if (k >= 230 && k <= 310 && Pv && ext * d >= 60 && dayDir === d && turned10 && (up ? dayHi - Pv.l : Pv.h - dayLo) >= 0.5 * atr) add('K', d);
+
+      /* ---- building blocks ---- */
+      if (or10 && Pv && niftyWith(d)) {
         const lvl = up ? or10.h : or10.l;
-        if ((price - lvl) * d > 0 && (prev - lvl) * d <= 0) mom('M1', d);
+        if ((price - lvl) * d > 0 && (Pv.c - lvl) * d <= 0) mom('M1', d);
       }
-      if (or30 && k >= 30 && niftyWith(d)) {
+      if (or30 && k >= 40 && Pv && niftyWith(d)) {
         const lvl = up ? or30.h : or30.l;
-        if ((price - lvl) * d > 0 && (prev - lvl) * d <= 0) mom('M2', d);
+        if ((price - lvl) * d > 0 && (Pv.c - lvl) * d <= 0) mom('M2', d);
       }
-      if (k === 10 && tens.length === 1 && Math.abs(gapPct) >= 0.5 && Math.sign(gapPct) === d && dirOf(nFirst5, P.niftyDirPct) === d) {
-        const b = tens[0];
-        if ((b.c - b.o) * d > 0 && (up ? b.l > prevClose : b.h < prevClose)) mom('M3', d);
+      if (k === 10 && L === 1 && Math.abs(gapPct) >= 0.5 && Math.sign(gapPct) === d && first5Dir === d) {
+        if ((T.c - T.o) * d > 0 && (up ? T.l > prevClose : T.h < prevClose)) mom('M3', d);
       }
-      if (k >= 20 && ext * d >= 30 && niftyWith(d)) {
+      if (k >= 20 && ext * d >= 30 && niftyWith(d) && turned10) {
         const depth = up ? dayHi - lowSinceHi : highSinceLo - dayLo;
         const pull = up ? lowSinceHi : highSinceLo;
-        const turned = up ? day.c[k - 1] > day.h[k - 2] : day.c[k - 1] < day.l[k - 2];
-        if (Number.isFinite(depth) && depth >= 0.5 * atr && turned) {
+        if (Number.isFinite(depth) && depth >= 0.5 * atr) {
           const levels = [or10 ? (up ? or10.h : or10.l) : NaN, up ? (open < pdh && dayHi > pdh ? pdh : NaN) : (open > pdl && dayLo < pdl ? pdl : NaN)];
-          const holds = (L: number) => Number.isFinite(L) && Math.abs(pull - L) <= 0.3 * atr && (price - L) * d > 0;
+          const holds = (lv: number) => Number.isFinite(lv) && Math.abs(pull - lv) <= 0.3 * atr && (price - lv) * d > 0;
           if (levels.some(holds) || holds(pocToday() ?? NaN)) mom('M4', d);
         }
       }
-      if (k >= 31) {
+      if (k >= 30) {
         const w0 = k - 21;
         let nExt = nifty.c[w0], sMin = day.c[w0], sMax = day.c[w0], hiW = -Infinity, loW = Infinity;
         for (let i = w0; i < k; i++) {
@@ -320,83 +455,71 @@ export function runDay(inp: DayInput): Signal[] {
           sMin = Math.min(sMin, day.c[i]); sMax = Math.max(sMax, day.c[i]);
           hiW = Math.max(hiW, day.h[i]); loW = Math.min(loW, day.l[i]);
         }
-        const dip = (nExt / nifty.c[w0] - 1) * 100 * d;          // < 0 = Nifty went against him
-        const resume = (nifty.c[k - 1] / nExt - 1) * 100 * d;    // > 0 = Nifty coming back his way
+        const dip = (nExt / nifty.c[w0] - 1) * 100 * d;
+        const resume = (nifty.c[k - 1] / nExt - 1) * 100 * d;
         const held = up ? sMin >= day.c[w0] - 0.1 * atr : sMax <= day.c[w0] + 0.1 * atr;
         const atExt = up ? price >= hiW - 0.15 * atr : price <= loW + 0.15 * atr;
-        if (dip <= -0.1 && resume >= 0.05 && (nifty.c[k - 1] - nifty.c[k - 4]) * d > 0 && held && atExt) mom('M5', d);
+        if (dip <= -0.1 && resume >= 0.05 && (nifty.c[k - 1] - nifty.c[k - 11]) * d > 0 && held && atExt) mom('M5', d);
       }
-      if (k % 10 === 0 && tens.length >= 2 && niftyWith(d)) {
-        const B = tens[tens.length - 2], C = tens[tens.length - 1];
-        const refC = tens.length >= 3 ? tens[tens.length - 3].c : prevClose;
+      if (L >= 2 && niftyWith(d)) {
+        const B = tens[L - 2], C = tens[L - 1];
+        const refC = L >= 3 ? tens[L - 3].c : prevClose;
         const lvl = up ? pdh : pdl;
         if ((B.c - lvl) * d > 0 && ((refC - lvl) * d <= 0 || (B.o - lvl) * d <= 0) && (C.c - lvl) * d > 0) mom('M6', d);
       }
-      if (k >= 40 && tens.length >= 3 && niftyWith(d)) {
-        const box = tens.slice(-3);
+      if (k >= 40 && L >= 4 && niftyWith(d)) {
+        const box = tens.slice(-4, -1);
         if (box.every((b) => b.h - b.l < 0.6 * atr)) {
           const lvl = up ? Math.max(...box.map((b) => b.h)) : Math.min(...box.map((b) => b.l));
-          if ((price - lvl) * d > 0 && (prev - lvl) * d <= 0) mom('M7', d);
+          if ((price - lvl) * d > 0) mom('M7', d);
         }
       }
-      if (pva && openInVa && k % 10 === 0 && tens.length >= 2 && niftyWith(d)) {
+      if (pva && openInVa && L >= 2 && niftyWith(d)) {
         const lvl = up ? pva.vah : pva.val;
         if (tens.slice(-2).every((b) => (b.c - lvl) * d > 0)) mom('M8', d);
       }
 
-      // ---- reversal: d is the trade, the run being faded goes -d
-      const r = -d as 1 | -1;
-      const runUp = r === 1;
       const extreme = runUp ? dayHi : dayLo;
-      const turnedBack = runUp ? day.c[k - 1] < day.l[k - 2] : day.c[k - 1] > day.h[k - 2];
-      if (ext * r >= 50 && turnedBack && (extreme - price) * r <= 0.5 * atr && k - 1 - (runUp ? hiSlot : loSlot) <= 20) {
-        add('R1', d, revStop(d, extreme), pocTarget());
-      }
-      if (or10 && k >= 11) {
+      if (ext * r >= 50 && turnedRev && (extreme - (runUp ? T.h : T.l)) * r <= 0.25 * atr) add('R1', d, pocTarget());
+      if (or10 && k >= 20) {
         const lvl = runUp ? or10.h : or10.l;
         const brk = runUp ? brkHi : brkLo;
         const far = runUp ? maxSinceBrk - or10.h : or10.l - minSinceBrk;
-        // the first close back inside after the break (within 20 minutes of it)
-        if (brk >= 0 && k - 1 > brk && k - 1 - brk <= 20 && far >= 0.1 * atr && (price - lvl) * r < 0) {
-          add('R2', d, revStop(d, runUp ? maxSinceBrk : minSinceBrk), runUp ? or10.l : or10.h);
-        }
+        if (brk >= 0 && k - 1 > brk && k - 1 - brk <= 20 && far >= 0.1 * atr && (price - lvl) * r < 0) add('R2', d, runUp ? or10.l : or10.h);
       }
-      if (k === 10 && tens.length === 1 && Math.abs(gapPct) >= 0.5 && Math.sign(gapPct) === r && (ctxBase.rvolSame ?? 1) < 1 && dirOf(nFirst5, P.niftyDirPct) !== r) {
-        const b = tens[0];
-        if ((b.c - b.o) * r < 0 && (price - prevClose) * r > 0) add('R3', d, revStop(d, extreme), prevClose);
+      if (k === 10 && L === 1 && Math.abs(gapPct) >= 0.5 && Math.sign(gapPct) === r && (ctxBase.rvolSame ?? 1) < 1 && first5Dir !== r) {
+        if ((T.c - T.o) * r < 0 && (price - prevClose) * r > 0) add('R3', d, prevClose);
       }
-      if (k % 10 === 0 && tens.length >= 2) {
-        const X = tens[tens.length - 2], S = tens[tens.length - 1];
-        const before = tens.slice(0, -2);
-        const newExt = runUp ? X.h >= Math.max(...before.map((b) => b.h), -Infinity) : X.l <= Math.min(...before.map((b) => b.l), Infinity);
-        const stall = runUp ? S.h <= X.h && S.c < S.o : S.l >= X.l && S.c > S.o;
-        if (medV > 0 && X.v >= 3 * medV && newExt && stall && (runUp ? X.h > open : X.l < open)) add('R4', d, revStop(d, runUp ? X.h : X.l), pocTarget());
+      if (L >= 2) {
+        const X = tens[L - 2], S2 = tens[L - 1];
+        const before = runUp ? hiBefore[L - 2] : loBefore[L - 2];
+        const newExt = runUp ? X.h >= before : X.l <= before;
+        const stall = runUp ? S2.h <= X.h && S2.c < S2.o : S2.l >= X.l && S2.c > S2.o;
+        if (medV > 0 && X.v >= 3 * medV && newExt && stall && (runUp ? X.h > open : X.l < open)) add('R4', d, pocTarget());
       }
-      if (pva && openInVa && k % 10 === 0 && tens.length >= 1) {
-        const T = tens[tens.length - 1];
+      if (pva && openInVa) {
         const edge = runUp ? pva.vah : pva.val;
-        if ((runUp ? T.h >= edge : T.l <= edge) && (T.c - edge) * r < 0) add('R5', d, revStop(d, extreme), pva.poc);
+        if ((runUp ? T.h >= edge : T.l <= edge) && (T.c - edge) * r < 0) add('R5', d, pva.poc);
       }
-      if (k % 10 === 0 && tens.length >= 1) {
-        const T = tens[tens.length - 1];
+      {
         const lvl = runUp ? pdh : pdl;
-        if ((open - lvl) * r < 0 && (runUp ? T.h > lvl : T.l < lvl) && (T.c - lvl) * r < 0) add('R6', d, revStop(d, extreme), pocTarget());
+        if ((open - lvl) * r < 0 && (runUp ? T.h > lvl : T.l < lvl) && (T.c - lvl) * r < 0) add('R6', d, pocTarget());
       }
-      if ((ctxBase.rvolSame ?? 0) >= 1.5 && (extreme - open) * r >= 0.3 * adr && niftyWith(r)) {
+      if (Pv && (ctxBase.rvolSame ?? 0) >= 1.5 && (extreme - open) * r >= 0.3 * adr && niftyWith(r)) {
         const lvl = extreme - r * atr;
-        if ((price - lvl) * r <= 0 && (prev - lvl) * r > 0) add('R7', d, revStop(d, extreme), pocTarget());
+        if ((price - lvl) * r <= 0 && (Pv.c - lvl) * r > 0) add('R7', d, pocTarget());
       }
-      if (vwap !== undefined && (price - vwap) * r >= 1.5 * atr && turnedBack) add('R8', d, revStop(d, extreme), vwap);
+      if (vwap !== undefined && (price - vwap) * r >= 1.5 * atr && turnedRev) add('R8', d, vwap);
     }
   }
 
   // ---- signals with their slices (and outcomes in the backtest)
   const out: Signal[] = drafts.map((x) => toSignal(inp.symbol, inp.date, x, P));
-  for (const sig of out) {
+  out.forEach((sig, i) => {
     sig.with = out.filter((o) => o !== sig && o.dir === sig.dir && o.case !== 'M9' && sig.case !== 'M9' && o.slot <= sig.slot && o.slot >= sig.slot - 30 && o.case !== sig.case)
-      .map((o) => o.case).filter((c, i, a) => a.indexOf(c) === i);
-    if (inp.simulate) sig.out = simulate(sig, day, P);
-  }
+      .map((o) => o.case).filter((c, j, a) => a.indexOf(c) === j);
+    if (inp.simulate && sig.stopType !== 'FAR') sig.out = simulate(sig, day, P, { ...drafts[i].ex, nifty });
+  });
   return out;
 }
 
@@ -408,23 +531,32 @@ function toSignal(symbol: string, date: string, x: Draft, P: Params): Signal {
   const inWay = [c.e5, c.e10, c.e1d].some((e) => e !== undefined && (e - x.price) * d > 0 && Math.abs(e - x.price) <= P.emaReachAtr * x.atr);
   return {
     case: x.id, symbol, date, slot: x.slot, dir: d,
-    entry: r2(x.price), stop: r2(x.stop), target: r2(x.target), stopAtr: r2(Math.abs(x.price - x.stop) / x.atr), atr: r2(x.atr), capped: x.capped,
+    entry: r2(x.price), stop: r2(x.stop), target: r2(x.target), stopAtr: r2(Math.abs(x.price - x.stop) / x.atr), atr: r2(x.atr),
+    capped: x.stopType === 'ATR2', stopType: x.stopType,
     time: timeBucket(x.slot),
     nFirst5: relPct(c.nFirst5, P.niftyDirPct),
     nDay: c.nDay === undefined ? 'EARLY' : relPct(c.nDay, P.niftyDirPct),
     nRecent: c.nRecent === undefined ? 'EARLY' : relPct(c.nRecent, P.niftyRecentPct),
-    rvol, openBusy: c.openBusy, stretch: Math.round(c.ext ?? 0), emaInWay: inWay, gapPct: r2(c.gapPct), with: [],
+    rvol, openBusy: c.openBusy, stretch: Math.round(c.ext ?? 0), emaInWay: inWay, gapPct: r2(c.gapPct),
+    testNo: x.testNo, tests: x.tests, level: x.level, pullbackNo: x.pullbackNo, with: [],
   };
 }
 
 /**
- * What happened next, minute by minute until 15:00. The stop is checked before the target inside a minute (when both
- * are touched in the same minute the trade counts as stopped), so results are on the cautious side.
+ * What happened next, minute by minute until 15:00, for every exit at once.
+ *  Systematic: 1R, 1.5R, the structural target (momentum 2R).
+ *  Discretionary (checked when each 10-minute candle closes, exit at that close, unless said otherwise):
+ *   X1 the candle closes beyond the previous candle against the trade · X2 a candle against the trade with 2x normal
+ *   volume · X3 Nifty 500 moved against the trade over the last 30 minutes · X4 the day's range reaches 95% of the
+ *   usual (exit when it happens) · X5 price reaches the next obstacle (exit at the level) · X6 under 0.3R after three
+ *   candles · X7 was +1R, back to +0.3R · XA whichever of those comes first.
+ * The stop is checked first inside every minute, so a minute that touches both counts as the stop (cautious).
  */
-export function simulate(sig: Signal, day: Slots, P: Params): Outcome {
+export function simulate(sig: Signal, day: Slots, P: Params, ex?: ExitCtx & { nifty?: Slots }): Outcome {
   const d = sig.dir;
   let entry = sig.entry, start = sig.slot, filled: boolean | undefined;
   const stop = sig.stop;
+  const none = (): TargetResult => ({ hit: false, r: 0, net: 0, min: 0 });
   if (sig.case === 'M9') {
     // a limit order 0.5 ATR back, same stop, valid 30 minutes
     const limit = sig.entry - d * 0.5 * sig.atr;
@@ -435,41 +567,69 @@ export function simulate(sig: Signal, day: Slots, P: Params): Outcome {
       }
     }
     if (!filled) {
-      const none: TargetResult = { hit: false, r: 0, net: 0, min: 0 };
-      return { T1: none, T15: { ...none }, TS: { ...none }, mfe: 0, mae: 0, costR: 0, filled: false };
+      const o = {} as Outcome;
+      for (const k of [...TARGET_KEYS, ...EXIT_KEYS]) o[k] = none();
+      return { ...o, mfe: 0, mae: 0, costR: 0, filled: false };
     }
   }
   const dist = Math.abs(entry - stop);
-  const levels = { T1: entry + d * dist, T15: entry + d * 1.5 * dist, TS: sig.case === 'M9' ? entry + d * 2 * dist : sig.target };
-  const res: Partial<Record<keyof typeof levels, { hit: boolean; exit: number; slot: number }>> = {};
+  const levels: Record<'T1' | 'T15' | 'TS', number> = { T1: entry + d * dist, T15: entry + d * 1.5 * dist, TS: sig.case === 'M9' ? entry + d * 2 * dist : sig.target };
+  const res: Partial<Record<OutKey, { exit: number; slot: number; target?: boolean }>> = {};
+  const discr: ExitKey[] = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7'];
+  const allKeys: OutKey[] = [...TARGET_KEYS, ...discr];
   let mfe = 0, mae = 0;
   const end = Math.min(EXIT_SLOT, day.n);
+  let hi = ex?.dayHi ?? -Infinity, lo = ex?.dayLo ?? Infinity;
+  const rangeStart = ex ? (hi - lo) / ex.adr : 1;
+  let prevBar = ex?.entryBar, candles = 0;
+  const R = (px: number) => ((px - entry) * d) / dist;
   for (let s = start; s < end; s++) {
-    const hi = day.h[s], lo = day.l[s];
-    const stopHit = d === 1 ? lo <= stop : hi >= stop;
-    // on the fill minute of a limit order, only the stop counts (the high may have come before the fill)
-    const canTarget = !(sig.case === 'M9' && s === start);
-    if (stopHit) {
-      for (const k of ['T1', 'T15', 'TS'] as const) if (!res[k]) res[k] = { hit: false, exit: stop, slot: s };
+    const h = day.h[s], l = day.l[s];
+    hi = Math.max(hi, h); lo = Math.min(lo, l);
+    if (d === 1 ? l <= stop : h >= stop) {
+      for (const k of allKeys) if (!res[k]) res[k] = { exit: stop, slot: s };
       mae = 1; break;
     }
-    mfe = Math.max(mfe, ((d === 1 ? hi : lo) - entry) * d / dist);
-    mae = Math.max(mae, (entry - (d === 1 ? lo : hi)) * d / dist);
-    if (canTarget) for (const k of ['T1', 'T15', 'TS'] as const) {
-      if (!res[k] && (d === 1 ? hi >= levels[k] : lo <= levels[k])) res[k] = { hit: true, exit: levels[k], slot: s };
+    mfe = Math.max(mfe, R(d === 1 ? h : l));
+    mae = Math.max(mae, -R(d === 1 ? l : h));
+    // on the fill minute of a limit order, only the stop counts (the high may have come before the fill)
+    const canTarget = !(sig.case === 'M9' && s === start);
+    if (canTarget) {
+      for (const k of TARGET_KEYS) if (!res[k] && (d === 1 ? h >= levels[k] : l <= levels[k])) res[k] = { exit: levels[k], slot: s, target: true };
+      if (ex) {
+        if (!res.X5 && ex.obstacle !== undefined && (d === 1 ? h >= ex.obstacle : l <= ex.obstacle)) res.X5 = { exit: ex.obstacle, slot: s };
+        if (!res.X4 && rangeStart < 0.95 && (hi - lo) / ex.adr >= 0.95) res.X4 = { exit: day.c[s], slot: s };
+      }
     }
-    if (res.T1 && res.T15 && res.TS) break;
+    if (ex && (s + 1) % 10 === 0 && s >= 9) {
+      const b = barOf(day, s - 9, s + 1);
+      candles++;
+      const at = { exit: b.c, slot: s };
+      if (!res.X1 && prevBar && (d === 1 ? b.c < prevBar.l : b.c > prevBar.h)) res.X1 = at;
+      if (!res.X2 && (b.c - b.o) * d < 0 && ex.medV > 0 && b.v >= 2 * ex.medV) res.X2 = at;
+      if (!res.X3 && ex.nifty && s >= 30 && ((ex.nifty.c[s] / ex.nifty.c[s - 30] - 1) * 100) * d <= -P.niftyRecentPct) res.X3 = at;
+      if (!res.X6 && candles >= 3 && R(b.c) < 0.3) res.X6 = at;
+      if (!res.X7 && mfe >= 1 && R(b.c) <= 0.3) res.X7 = at;
+      prevBar = b;
+    }
+    if (allKeys.every((k) => res[k])) break;
   }
   const lastClose = day.c[Math.max(0, end - 1)];
+  // XA: the first discretionary marker
+  const firstX = discr.map((k) => res[k]).filter((x): x is { exit: number; slot: number } => !!x).sort((a, b) => a.slot - b.slot)[0];
+  if (firstX) res.XA = firstX;
   const qty = sizeFor(P.riskInr, dist);
-  const one = (k: keyof typeof levels): TargetResult => {
-    const x = res[k] ?? { hit: false, exit: lastClose, slot: end - 1 };
-    const r = ((x.exit - entry) * d) / dist;
+  const one = (k: OutKey): TargetResult => {
+    const x = res[k] ?? { exit: lastClose, slot: end - 1 };
+    const r = R(x.exit);
     const cost = roundTripCharges(qty, entry, x.exit, d) / (qty * dist);
-    return { hit: x.hit, r: r2(r), net: r2(r - cost), min: Math.max(1, x.slot - sig.slot + 1) };
+    const net = r2(r - cost);
+    return { hit: k.startsWith('T') ? !!x.target : net > 0, r: r2(r), net, min: Math.max(1, x.slot - sig.slot + 1) };
   };
+  const o = {} as Outcome;
+  for (const k of [...TARGET_KEYS, ...EXIT_KEYS]) o[k] = one(k);
   return {
-    T1: one('T1'), T15: one('T15'), TS: one('TS'),
+    ...o,
     mfe: r2(mfe), mae: r2(Math.min(mae, 1)),
     costR: r2(roundTripCharges(qty, entry, entry, d) / (qty * dist)),
     ...(filled !== undefined ? { filled } : {}),

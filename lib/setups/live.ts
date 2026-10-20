@@ -77,7 +77,7 @@ export async function scan(deps: ScanDeps, list: { symbol: string; securityId?: 
         const day = toSessions(today).find((s) => s.date === date)?.bars.filter((b) => b.t * 1000 < asOf) ?? [];
         const sigs = runDay({ symbol: it.symbol, date, history: h.sessions, day, nifty: niftyBars, daily });
         for (const s of sigs) {
-          if (s.slot < curSlot - recent) continue;
+          if (s.slot < curSlot - recent || s.stopType === 'FAR') continue; // FAR: the solid swing is beyond 2x ATR: no trade
           const info = CASE_BY_ID.get(s.case)!;
           const m = summary ? lookupFor(summary, s) : undefined;
           alerts.push({

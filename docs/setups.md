@@ -1,34 +1,46 @@
 # My Setups (backtest) and setup alerts
 
-**My Analysis → My Setups** shows how 17 setups did over the last two years on the stocks his screener would have
+**My Analysis → My Setups** shows how 27 setups (10 combined, 17 building blocks) did over the last two years on the stocks his screener would have
 shown each morning, with Dhan's charges taken off every trade. **Re-run** tests everything again; the page shows
 what changed against the previous run. The **Order Book** page alerts on a setup only when its past numbers clear the bar.
 
 ## The setups (lib/setups/cases.ts)
-Momentum (Nifty 500 his way: before 09:30 by the first 5 minutes, from 09:30 by open → now):
-M1 10-min opening range break · M2 30-min opening range break · M3 gap and go · M4 trend pullback that holds ·
-M5 relative strength vs Nifty · M6 previous day high/low break that holds · M7 squeeze then expansion ·
-M8 value area acceptance · M9 the same moments as M1/M2 with strong Nifty, but entered on a 0.5 ATR pullback.
+Everything is decided on the **10-minute chart**: a setup appears only when a 10-minute candle closes, and the entry
+is that close. 1-minute candles are used only to follow a trade (did the stop or the target come first inside a
+10-minute candle).
 
-Reversal: R1 overextension (50%+ of the daily range, turning in the day high/low zone) · R2 opening range failure ·
-R3 gap fill · R4 volume climax then stall · R5 value area edge rejection · R6 previous day high/low rejection ·
-R7 failed momentum (high rvol reversing: tests his skip rule) · R8 VWAP reversion (belief check).
+**Combined (several conditions together, his way of trading):**
+A momentum, Nifty-led · B momentum pullback (split by pullback number) · C momentum with relative strength ·
+D reversal at the extreme · E reversal after a failed break (day high/low, previous day high/low, value area edge;
+split by 1st / 2nd / 3rd+ test of the day's high/low, with the time of each test) · F reversal after exhaustion ·
+G opening drive · I narrow candle at the extreme, then break · J divergence fade · K afternoon trend pullback.
 
-Every trade is sliced by: side, time of day, Nifty first 5 minutes, Nifty open → trade, Nifty 30 minutes before the
-trade, volume vs usual, rvol > 0.1 at 09:20, % of the daily range moved, 200 EMA in the way, stop capped, and which
-other setups fired the same way in the 30 minutes before (combinations). The page lets him combine any of these.
+Momentum context (A-C): Nifty 500 directional his way in the first 5 minutes and still his way open → now, the stock
+busier than usual, no 200 EMA in the way, the stock 10-80% of its daily range his way.
+Reversal context (D-F): a quiet stock, 50%+ of its daily range moved, Nifty flat or turning against the stock over
+the last 30 minutes, no 200 EMA between price and the target.
+
+**Building blocks (one condition each):** M1-M9 and R1-R8, so the page shows what each condition adds.
+
+Stretch steps: momentum under 50 / 60 / 70 / 80%, reversal at least 50 / 60 / 70 / 80 / 90 / 95%.
 
 ## How a trade is scored (lib/setups/engine.ts)
-- Only 1-minute candles complete at the decision minute are used; entry at the close of the minute before.
-- 10-minute chart, ATR(14), the 200 EMAs (5m, 10m, 1D), VWAP and POC are computed like the co-pilot's.
-- Stop: momentum beyond the last two 10-min candles (and the forming one); reversal beyond the day's extreme.
-  At least 0.25 ATR, at most 2x ATR.
-- Targets: 1R, 1.5R and the structural one (momentum 2R; reversal the POC / previous close / VWAP / other side of
-  the opening range). The hit rate is quoted at 1R for momentum, at the structural target for reversals.
+- **Stop**: 0.1 ATR beyond the nearest solid swing on the 10-minute chart (today or yesterday): a swing low (high)
+  that price moved away from by 0.75 ATR+, that was tested again (back within 0.25 ATR and rejected, closing back),
+  and that no candle has closed beyond (or traded 0.15 ATR+ through) up to the entry. A solid swing beyond 2x ATR =
+  the trade is not taken (counted as "skipped"). No solid swing = 2x ATR. R is measured from this stop.
+- **Systematic exits**: 1R, 1.5R and the structural target (momentum 2R; reversal the POC / previous close / VWAP /
+  other side of the opening range). Hit = target before stop.
+- **Discretionary exits** (checked at each 10-minute close): X1 the candle closes beyond the previous one against
+  you · X2 a candle against you with 2x normal volume · X3 Nifty 500 against you over the last 30 minutes · X4 the
+  day's range reaches 95% of its usual · X5 the next obstacle (previous day high/low, 10m 200 EMA, POC, value area
+  edge) · X6 under 0.3R after 30 minutes · X7 was +1R, back to +0.3R · XA the first of them. Hit = made money after
+  charges.
 - Stop and target in the same minute = stop. Anything open is closed at 15:00. Each setup fires at most once per
   stock, per day and side.
 - Size = ₹300 / stop distance; Dhan's charges at that size are subtracted (lib/setups/costs.ts).
 - The two years are split in half; "steady" means the hit rate holds in both.
+- Every setup records the 30-minute slot it set up in.
 - Order-book rejection cannot be backtested (no past order books): the alert says to confirm it on the book.
 
 The live alerts run the same engine on today's candles so far (tests/setups.test.ts checks that a live run gives
