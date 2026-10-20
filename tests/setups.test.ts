@@ -209,7 +209,7 @@ test('screener: price 250-340 at the previous close and 10-day average volume ab
 
 /* ---- the whole job against a fake Dhan and a fake S3 ---------------------------------------------------- */
 import { runBacktest } from '../lib/setups/job';
-import { INDEX_KEY, STATUS_KEY, getJson, summaryKey, signalsKey, type RunStatus } from '../lib/setups/store';
+import { INDEX_KEY, STATUS_KEY, getJson, summaryKey, signalsKey, studyKey, type RunStatus } from '../lib/setups/store';
 import { unpack as unpack2, type Packed, type Summary } from '../lib/setups/stats';
 
 function fakeWorld() {
@@ -259,6 +259,8 @@ test('the backtest job: screener, history cache, results, run index and status',
   assert.equal(idx[0].runId, '2026-10-20-11-30-ab12');
   const saved = (await getJson<Summary>(w.store, summaryKey('2026-10-20-11-30-ab12')))!;
   assert.equal(saved.cases.length, 35);
+  const study = await getJson<{ combos: unknown[]; moments: number }>(w.store, studyKey('2026-10-20-11-30-ab12'));
+  assert.ok(study && study.combos.length === 4 && study.moments > 0, 'the reversal study is saved with the run');
   assert.ok(signals.filter((s) => s.slot !== 370).every((s) => s.inPlay !== undefined), 'every intraday signal knows whether its stock was in play');
   assert.ok(signals.every((s) => s.slot % 10 === 0), 'every decision at a 10-minute close');
   const r1 = unpack2((await getJson<Packed>(w.store, signalsKey('2026-10-20-11-30-ab12', 'R1')))!);

@@ -86,10 +86,10 @@ export function toSlots(bars: Bar[]): Slots | undefined {
 
 /* ---- small helpers ---------------------------------------------------------------------------------------- */
 
-interface B10 { o: number; h: number; l: number; c: number; v: number }
+export interface B10 { o: number; h: number; l: number; c: number; v: number }
 
-const median = (a: number[]) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-const dirOf = (pct: number | undefined, th: number): 1 | -1 | 0 => (pct === undefined ? 0 : pct >= th ? 1 : pct <= -th ? -1 : 0);
+export const median = (a: number[]) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+export const dirOf = (pct: number | undefined, th: number): 1 | -1 | 0 => (pct === undefined ? 0 : pct >= th ? 1 : pct <= -th ? -1 : 0);
 const rel = (d: 1 | -1, x: 1 | -1 | 0): Rel => (x === 0 ? 'FLAT' : x === d ? 'WITH' : 'AGAINST');
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -121,7 +121,7 @@ export function valueArea(bars: Bar[], rows: number): { vah: number; val: number
 }
 
 /** EMA as TradingView's ta.ema (seeded with the first value), carried bar by bar. */
-class Ema {
+export class Ema {
   n = 0; e = NaN;
   constructor(private len: number) {}
   get a() { return 2 / (this.len + 1); }
@@ -135,7 +135,7 @@ class Ema {
 }
 
 /** Wilder ATR(14) as lib/live/enrich.ts computes it (first value = the first true range), carried bar by bar. */
-class Atr {
+export class Atr {
   n = 0; v = NaN; lastClose = NaN;
   private tr(b: B10) { let tr = b.h - b.l; if (this.n > 0) tr = Math.max(tr, Math.abs(b.h - this.lastClose), Math.abs(b.l - this.lastClose)); return tr; }
   push(b: B10) { const tr = this.tr(b); this.v = this.n === 0 ? tr : (13 / 14) * this.v + tr / 14; this.n++; this.lastClose = b.c; }
@@ -147,7 +147,7 @@ class Atr {
   }
 }
 
-function barOf(s: Slots, from: number, toExcl: number): B10 {
+export function barOf(s: Slots, from: number, toExcl: number): B10 {
   let h = -Infinity, l = Infinity, v = 0;
   for (let i = from; i < toExcl; i++) { if (s.h[i] > h) h = s.h[i]; if (s.l[i] < l) l = s.l[i]; v += s.v[i]; }
   return { o: s.o[from], h, l, c: s.c[toExcl - 1], v };

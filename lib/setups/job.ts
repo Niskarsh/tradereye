@@ -6,7 +6,9 @@ import { CASES, type Signal } from './cases';
 import { buildSummary, pack, type Summary } from './stats';
 import { monthsNeeded, screenerDays, SCREENER, type ScreenerFilter } from './universe';
 import { monthEndsOf, prepare, runMonthly, runSingle, runSwing, type DailyStock } from './swing';
-import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, monthKey, putJson, signalsKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
+import { mineDay, type Moment } from '../study/mine';
+import { analyze } from '../study/analyze';
+import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, monthKey, putJson, signalsKey, studyKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
 
 /**
  * The backtest, start to finish (run by the GitHub Action; see scripts/setups-backtest.ts):
@@ -154,6 +156,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
 
   // ---- 4. replay
   let done = 0, skipped = 0;
+  const moments: Moment[] = [];
   /** first-10-minute volume vs usual, per day and stock: the 20 busiest are "in play" that day */
   const busyByDate = new Map<string, { symbol: string; x: number }[]>();
   await pool(plan, deps.concurrency ?? 3, async (p) => {
@@ -174,6 +177,8 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
       const x = first10Busy(sess, i);
       if (x !== undefined) { const a = busyByDate.get(d) ?? []; a.push({ symbol: p.symbol, x }); busyByDate.set(d, a); }
       signals.push(...runDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, params, simulate: true }));
+      // the reversal study: every moment that could have been a reversal entry, labelled with what happened next
+      moments.push(...mineDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, riskInr: params.riskInr, pocRows: params.pocRows }));
     }
     done++;
     await status({ phase: 'Testing the setups', done, total: plan.length });
@@ -194,6 +199,11 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   });
   for (const c of CASES) await putJson(deps.store, signalsKey(runId, c.id), pack(signals.filter((s) => s.case === c.id)));
   await putJson(deps.store, summaryKey(runId), summary);
+  // the reversal study (rules searched on year 1, traded on year 2)
+  await status({ phase: `Reversal study: ${moments.length.toLocaleString('en-IN')} possible entries` }, true);
+  log(`study: ${moments.length} moments`);
+  const study = analyze(moments, { runId, createdAt: now(), period: { from, to, mid } });
+  await putJson(deps.store, studyKey(runId), study);
   const index = (await getJson<RunIndexItem[]>(deps.store, INDEX_KEY)) ?? [];
   const item: RunIndexItem = { runId, createdAt: summary.createdAt, period: summary.period, signals: signals.length, symbols: plan.length };
   await putJson(deps.store, INDEX_KEY, [item, ...index.filter((x) => x.runId !== runId)].slice(0, 36));
