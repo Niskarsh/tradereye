@@ -1,6 +1,6 @@
 "use client";
-import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, HelpCircle, Loader2, Sparkles } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
 import type { ComboStudy, Outcomes, Study } from '@/lib/study/analyze';
 import type { RunIndexItem } from '@/lib/setups/store';
@@ -18,6 +18,98 @@ const inr = (x: number | null) => (ok(x) ? `${x < 0 ? '−' : '+'}₹${Math.abs(
 const band = (lo: number | null, hi: number | null) => (!ok(hi) ? `${lo ?? 0}+` : `${lo ?? 0}–${hi}`);
 const num = (x: number | null) => (!ok(x) ? '–' : Math.abs(x) >= 100 ? x.toFixed(0) : Math.abs(x) >= 10 ? x.toFixed(1) : x.toFixed(2));
 const show = (x: number | null | undefined) => (ok(x) ? String(x) : '–');
+
+/* ---- "Explain this" (one Claude call per press; the numbers are taken from the saved study on the server) ---- */
+
+const ExplainCtx = createContext<{ run: string; combo: number }>({ run: '', combo: 0 });
+type Answer = { text?: string; err?: string; busy?: boolean; cost?: number };
+const ANSWERS_KEY = 'tradereye-study-explain';
+const loadAnswers = (): Record<string, Answer> => { try { return JSON.parse(localStorage.getItem(ANSWERS_KEY) ?? '{}'); } catch { return {}; } };
+
+/**
+ * A button that asks Claude to explain one part of the study like he is five, with a box for a follow-up question.
+ * The answer is kept in this browser (per run and part), so opening the page again costs nothing.
+ */
+function Explain({ part, item, label = 'Explain this', small = false, combo: comboOverride }: { part: string; item?: number | string; label?: string; small?: boolean; combo?: number }) {
+  const ctx = useContext(ExplainCtx);
+  const combo = comboOverride ?? ctx.combo;
+  const key = `${ctx.run}|${part}|${part === 'overview' ? '' : combo}|${item ?? ''}`;
+  const [a, setA] = useState<Answer | undefined>(undefined);
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  useEffect(() => { const saved = loadAnswers()[key]; setA(saved); setOpen(!!saved); }, [key]);
+  const ask = async (question?: string) => {
+    setA({ busy: true }); setOpen(true);
+    try {
+      const r = await fetch('/api/study/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run: ctx.run, part, combo, item, question }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      const ans = { text: question ? `Q: ${question}\n\n${j.text}` : j.text, cost: j.costInr };
+      setA(ans); setQ('');
+      try { const all = loadAnswers(); all[key] = ans; localStorage.setItem(ANSWERS_KEY, JSON.stringify(all)); } catch { /* ignore */ }
+    } catch (e) { setA({ err: (e as Error).message }); }
+  };
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => (a?.text && !open ? setOpen(true) : void ask())} disabled={a?.busy}
+          className={`flex items-center gap-1 rounded-lg border border-brand-accent/60 font-black text-brand-accent hover:bg-brand-accent/10 disabled:opacity-50 ${small ? 'h-7 px-2 text-[11px]' : 'h-8 px-3 text-xs'}`}>
+          {a?.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {a?.busy ? 'Claude is reading…' : a?.text && !open ? 'Show the explanation' : label}
+        </button>
+        {a?.text && open && <button onClick={() => void ask()} className="text-[11px] font-bold text-ink-3 hover:text-ink">Ask again</button>}
+        {a?.text && open && <button onClick={() => setOpen(false)} className="text-[11px] font-bold text-ink-3 hover:text-ink">Hide</button>}
+      </div>
+      {open && a?.err && <p className="text-xs text-data-red-text">{a.err}</p>}
+      {open && a?.text && (
+        <div className="space-y-2 rounded-xl border border-brand-accent/30 bg-brand-bg p-3">
+          <p className="whitespace-pre-line text-[13px] leading-relaxed text-ink">{a.text}</p>
+          <p className="text-[10px] text-ink-3">{a.cost !== undefined ? `₹${a.cost.toFixed(2)} · ` : ''}from the saved numbers of this run</p>
+          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (q.trim()) void ask(q.trim()); }}>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask a follow-up about this part…"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-line bg-brand-card px-2 text-xs outline-none focus:border-brand-accent" />
+            <button type="submit" disabled={!q.trim() || a?.busy} className="h-8 rounded-lg bg-brand-accent px-3 text-xs font-black text-brand-bg disabled:opacity-40">Ask</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What every number on this page means, in plain words. */
+function Glossary() {
+  const [open, setOpen] = useState(false);
+  const items: [string, string][] = [
+    ['Possible entry', 'A moment where a reversal trade could have been taken: a 10-minute candle closing while the stock is down from its open (up, for shorts), still below VWAP (above, for shorts) and close to its day low (high). Entry at that close.'],
+    ['Stop and target', 'The stop sits just beyond the day\'s low (high) so far. The target is VWAP (as it was at entry) on the VWAP tabs, the day\'s open on the "open" tabs. Anything still open is closed at 15:00.'],
+    ['Clean', 'Reached the target before touching the stop. This is the trade you want.'],
+    ['Messy', 'Touched the stop first, then went to the target anyway. With a stop at the low you lose; a wider stop could have won. The "2 ATR stop" number shows that case.'],
+    ['Fail', 'Never reached the target by 15:00. Failures are always counted: nothing is hidden.'],
+    ['R', 'Your risk on the trade: ₹300. +1R = +₹300, −1R = −₹300. +0.10R per trade = +₹30 per trade on average.'],
+    ['R before costs / after costs', 'Before = is there an edge at all. After = after Dhan\'s charges (brokerage, STT, exchange fees, GST) at your size. Only "after costs" decides if you make money.'],
+    ['₹ / month', 'R after costs × ₹300 × trades per month: what it would have made if you took every trade the rule gave.'],
+    ['Year 1 / Year 2', 'The two years are cut in half. Rules are searched only on year 1, so they always look good there. Year 2 was never seen by the search: it is the honest test. Trust year 2.'],
+    ['Baseline', 'Taking every possible entry with no rule. A rule is only useful if it beats this on year 2.'],
+    ['First of each day', 'A stock can give many possible entries in one day; only the first counts as the trade, like you would trade it.'],
+    ['ATR', 'The stock\'s normal 10-minute candle size. "1.5 ATR" = one and a half normal candles.'],
+    ['× daily range', 'Compared with how much the stock usually moves from high to low in a day. "Fell 0.6× daily range" = it fell 60% of its usual daily move.'],
+    ['Five groups of a fact', 'Every value of a fact (say, volume) is sorted and cut into five equal piles. If one pile has many more clean wins and better R than the others, that fact matters.'],
+    ['Held up / Did not hold', 'Held up = the rule made money after charges on year 2 with at least 50 trades. Did not hold = it lost on year 2 (it was probably luck on year 1).'],
+  ];
+  return (
+    <section className="rounded-2xl border border-line p-4">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between text-left text-sm font-black">
+        <span className="flex items-center gap-2"><HelpCircle className="h-4 w-4 text-brand-accent" />What the numbers mean</span>
+        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      </button>
+      {open && (
+        <dl className="mt-3 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
+          {items.map(([k, v]) => <div key={k}><dt className="font-black text-ink">{k}</dt><dd className="leading-relaxed text-ink-2">{v}</dd></div>)}
+        </dl>
+      )}
+    </section>
+  );
+}
 
 export default function StudyPage() {
   const [data, setData] = useState<{ runs: RunIndexItem[]; study: Study | null } | null>(null);
@@ -46,7 +138,7 @@ export default function StudyPage() {
           </Card>
         )}
         {s && c && (
-          <>
+          <ExplainCtx.Provider value={{ run: s.runId, combo: pick }}>
             <p className="text-[11px] text-ink-3">
               {fmtDate(s.period.from)} – {fmtDate(s.period.to)} · year 1 until {fmtDate(s.period.mid)}, year 2 after · {s.moments.toLocaleString('en-IN')} possible entries.
               Every 10-min close where the stock was down from the open (up, for shorts), still on the far side of VWAP and within 1.5 ATR of its low, is a possible entry: stop 0.1 ATR beyond the low, target VWAP or the open.
@@ -60,11 +152,20 @@ export default function StudyPage() {
                 </button>
               ))}
             </div>
+            <Glossary />
+            <section className="rounded-2xl bg-brand-card p-4 space-y-2">
+              <p className="text-sm font-black">Ask Claude to explain</p>
+              <p className="text-[11px] text-ink-3">In plain words, from the numbers of this run. One Claude call per press; the answer is kept on this device.</p>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <Explain part="overview" label="Explain all four tabs" />
+                <Explain part="tab" label={`Explain this tab (${c.dir === 'LONG' ? 'long' : 'short'} → ${c.target === 'VWAP' ? 'VWAP' : 'open'})`} />
+              </div>
+            </section>
             <Moves c={c} />
             <Rules c={c} months2={months2} />
             <Drop c={c} />
             <Facts c={c} />
-          </>
+          </ExplainCtx.Provider>
         )}
       </div>
     </div>
@@ -88,9 +189,12 @@ function OutRow({ label, o, extra }: { label: React.ReactNode; o: Outcomes; extr
 const OutHead = ({ first, extra }: { first: string; extra?: React.ReactNode }) => (
   <thead>
     <tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
-      <th className="px-2 py-1.5 text-left">{first}</th><th className="px-2 py-1.5 text-right">Trades</th>
-      <th className="px-2 py-1.5 text-right">Clean</th><th className="px-2 py-1.5 text-right">Messy</th><th className="px-2 py-1.5 text-right">Fail</th>
-      <th className="hidden px-2 py-1.5 text-right sm:table-cell">R before</th><th className="px-2 py-1.5 text-right">R after costs</th>{extra}
+      <th className="px-2 py-1.5 text-left">{first}</th><th className="px-2 py-1.5 text-right" title="How many trades">Trades</th>
+      <th className="px-2 py-1.5 text-right" title="Reached the target before the stop">Clean</th>
+      <th className="px-2 py-1.5 text-right" title="Stop hit first, but price reached the target later">Messy</th>
+      <th className="px-2 py-1.5 text-right" title="Never reached the target by 15:00">Fail</th>
+      <th className="hidden px-2 py-1.5 text-right sm:table-cell" title="Average result per trade before Dhan's charges, in R (1R = ₹300)">R before</th>
+      <th className="px-2 py-1.5 text-right" title="Average result per trade after Dhan's charges, in R (1R = ₹300). This decides if it makes money.">R after costs</th>{extra}
     </tr>
   </thead>
 );
@@ -122,6 +226,7 @@ function Moves({ c }: { c: ComboStudy }) {
         </table>
       </div>
       <p className="text-[11px] text-ink-3">This is the baseline: what a rule has to beat. A rule is worth something only if it lifts the clean share and R after costs above these rows, on year 2.</p>
+      <p className="text-[11px] text-ink-2"><b>How to read it:</b> clean + messy + fail = 100% of the trades. If R after costs is negative here, taking every reversal blindly loses money, and only a rule that turns it positive on year 2 is worth using.</p>
     </Card>
   );
 }
@@ -131,6 +236,8 @@ function Rules({ c, months2 }: { c: ComboStudy; months2: number }) {
   const held = (o: Outcomes) => (o.n < 50 ? { t: 'Too few', cls: 'border-line-strong text-ink-3' } : o.netR > 0 ? { t: 'Held up', cls: 'border-data-green/60 text-data-green' } : { t: 'Did not hold', cls: 'border-data-red/60 text-data-red-text' });
   return (
     <Card title="Rules found on year 1, traded on year 2" sub="Each rule is the best combination of facts on year 1 (scored cautiously, failures included). Each next rule was searched on the days the earlier ones did not take. Year 2 was never seen by the search: it is the proof.">
+      <p className="text-[11px] text-ink-2"><b>How to read it:</b> each row is one rule (all its boxes must be true at the same 10-min close). Grey Y1 columns are where the rule was found, so they always look good. Look at the Y2 columns: Y2 R after costs above 0 and above the baseline = the rule held up. Tap a rule to see its latest trades.</p>
+      <Explain part="rules" label="Explain these rules" />
       {!c.rules.length && <p className="text-xs text-ink-3">No combination of facts had enough trades on year 1.</p>}
       <div className="-mx-2 overflow-x-auto">
         <table className="w-full min-w-[640px] text-xs">
@@ -177,6 +284,7 @@ function Rules({ c, months2 }: { c: ComboStudy; months2: number }) {
                           ))}
                         </tbody></table>
                         <p className="mt-1 text-[11px] text-ink-3">With a 2 ATR stop instead of the low: {rr(r.y2.netWide)} per trade on year 2 (catches some of the messy ones). Average {r.y2.min} min in the trade.</p>
+                        <div className="mt-2"><Explain part="rule" item={i} label={`Explain rule ${i + 1}`} small /></div>
                       </td>
                     </tr>
                   )}
@@ -223,6 +331,8 @@ function Drop({ c }: { c: ComboStudy }) {
           </tbody>
         </table>
       </div>
+      <p className="text-[11px] text-ink-2"><b>How to read it:</b> each row is how far the stock had already fallen from its open when the entry came, compared with its usual daily move (0.6 = 60% of a normal day). The row with the best R after costs on year 1 is highlighted; the last column says whether that range still paid on year 2.</p>
+      <Explain part="drop" label="Explain the fall ranges" />
       {c.bestDrop && (
         <p className="text-[11px] text-ink-2">Best range on year 1: a fall of <b>{band(c.bestDrop.lo, c.bestDrop.hi)}×</b> the daily range ({rr(c.bestDrop.y1.netR)} on {c.bestDrop.y1.n} trades). On year 2 the same range made <b className={c.bestDrop.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}>{rr(c.bestDrop.y2.netR)}</b> on {c.bestDrop.y2.n} trades.</p>
       )}
@@ -230,15 +340,27 @@ function Drop({ c }: { c: ComboStudy }) {
   );
 }
 
+/** a small "?" per fact that opens its own explanation */
+function ExplainFact({ f }: { f: string }) {
+  const [show, setShow] = useState(false);
+  if (!show) return <button onClick={() => setShow(true)} className="flex items-center gap-1 text-[10px] font-bold text-brand-accent hover:underline"><Sparkles className="h-3 w-3" />Explain</button>;
+  return <div className="w-full"><Explain part="fact" item={f} label="Explain this fact" small /></div>;
+}
+
 function Facts({ c }: { c: ComboStudy }) {
   const [all, setAll] = useState(false);
   const list = useMemo(() => (all ? c.features : c.features.slice(0, 10)), [all, c.features]);
   return (
     <Card title="Every fact, winners vs failures" sub="Each fact split into five equal groups (on year 1). For each group: how often it was a clean win, a messy win or a failure, and R after costs; year 2 on the right. Sorted by how much the fact changes R.">
+      <p className="text-[11px] text-ink-2"><b>How to read it:</b> each table is one thing you could see on the chart at the entry, cut into five equal groups by its value. Compare the rows: if one group has clearly more clean wins, fewer fails and a better R after costs than the others — on year 1 and still on year 2 (last column) — that fact really separates good reversals from bad ones.</p>
+      <Explain part="facts" label="Explain these facts" />
       <div className="grid gap-4 lg:grid-cols-2">
         {list.map((f) => (
-          <div key={f.f}>
-            <p className="mb-1 text-[11px] font-bold">{f.label}</p>
+          <div key={f.f} className="space-y-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] font-bold">{f.label}</p>
+              <ExplainFact f={f.f} />
+            </div>
             <div className="-mx-2 overflow-x-auto">
               <table className="w-full text-[11px]">
                 <OutHead first="Value" extra={<th className="px-2 py-1.5 text-right">Y2 R</th>} />

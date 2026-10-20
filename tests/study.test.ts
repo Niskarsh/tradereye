@@ -70,3 +70,31 @@ test('the study: failures stay in, rules are searched on year 1 and judged on ye
   for (const r of c.rules) { assert.ok(r.conds.length >= 1 && r.conds.length <= 4); assert.ok(r.y1.n >= 40); }
   assert.ok(Date.now() - t0 < 60_000, 'fast enough');
 });
+
+/* ---- "Explain this": the message sent to Claude --------------------------------------------------------- */
+import { buildExplainMessage, EXPLAIN_PARTS } from '../lib/study/explain';
+
+test('explain: every part builds a plain-text message from a saved study, small enough to send', () => {
+  let seed = 5; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const H = hist('2024-12');
+  const ms: Moment[] = [];
+  const dates: string[] = [];
+  for (let t = Date.parse('2025-01-01T00:00:00Z'); dates.length < 60; t += 86400_000) { const d = new Date(t); if (d.getUTCDay() % 6) dates.push(d.toISOString().slice(0, 10)); }
+  for (const sym of ['A', 'B', 'C']) for (const d of dates) {
+    let p = 300; const px: number[] = []; for (let k = 0; k < 375; k++) { p += (rnd() - 0.5) * 0.8; px.push(p); }
+    ms.push(...mineDay({ symbol: sym, date: d, history: H, day: session(d, (k) => px[k]), nifty: session(d, () => 20000), daily: daily() }));
+  }
+  // saved and read back: Infinity / NaN become null, exactly like the real page gets it
+  const st = JSON.parse(JSON.stringify(analyze(ms, { runId: 'r', createdAt: 0, period: { from: dates[0], to: dates[59], mid: dates[30] } }, { minTrades: 20, maxRules: 3 })));
+  for (const part of EXPLAIN_PARTS) {
+    const item = part === 'rule' ? 0 : part === 'fact' ? st.combos[0].features[0].f : undefined;
+    if (part === 'rule' && !st.combos[0].rules.length) continue;
+    const m = buildExplainMessage(st, part, 0, item);
+    assert.ok(m.includes('Key to the terms'), part);
+    assert.ok(m.includes('Year 2') || m.includes('year 2'), part);
+    assert.ok(!/NaN|undefined|Infinity|null/.test(m), `${part}: no broken numbers`);
+    assert.ok(m.length < 40_000, `${part}: ${m.length} chars`);
+  }
+  assert.ok(buildExplainMessage(st, 'tab', 1, undefined, 'why is fail so high?').includes('His question: why is fail so high?'));
+  assert.throws(() => buildExplainMessage(st, 'fact', 0, 'nope'));
+});
