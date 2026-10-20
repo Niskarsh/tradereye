@@ -9,8 +9,9 @@ export const PeriodCtx = createContext<{ months: number; riskInr: number }>({ mo
 export const inrPerMonth = (s: Stats | undefined, months: number, riskInr: number) => (s && months > 0 ? (s.netR * riskInr * s.n) / months : undefined);
 const inr = (x: number | undefined) => (x === undefined || !Number.isFinite(x) ? '–' : `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`);
 
-export const pct = (x: number | undefined) => (x === undefined ? '–' : `${Math.round(x * 100)}%`);
-export const rr = (x: number | undefined) => (x === undefined ? '–' : `${x > 0 ? '+' : ''}${x.toFixed(2)}R`);
+/** saved results come back through JSON, where NaN and Infinity become null: every formatter accepts null */
+export const pct = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '–' : `${Math.round(x * 100)}%`);
+export const rr = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '–' : `${x > 0 ? '+' : ''}${x.toFixed(2)}R`);
 
 /** An honest one-word verdict for a set of numbers. */
 export function verdict(s: Stats | undefined, minHit: number): { label: string; tone: 'good' | 'ok' | 'bad' | 'thin' } {
