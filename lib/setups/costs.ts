@@ -3,7 +3,8 @@
  * uses the published rates, not a contract note.
  *  - brokerage: ₹20 or 0.03% of the order value per executed order, whichever is lower
  *  - STT 0.025% on the sell side; NSE transaction 0.00297% both sides; SEBI ₹10 per crore; stamp duty 0.003% on the buy
- *  - GST 18% on brokerage + transaction + SEBI
+ *  - NSE investor protection fund (IPFT) ₹10 per crore both sides
+ *  - GST 18% on brokerage + transaction + SEBI + IPFT
  */
 export function roundTripCharges(qty: number, entry: number, exit: number, dir: 1 | -1): number {
   if (!(qty > 0)) return 0;
@@ -13,9 +14,10 @@ export function roundTripCharges(qty: number, entry: number, exit: number, dir: 
   const stt = sell * 0.00025;
   const txn = (buy + sell) * 0.0000297;
   const sebi = (buy + sell) * 0.000001;
+  const ipft = (buy + sell) * 0.000001; // NSE investor protection fund: ₹10 per crore
   const stamp = buy * 0.00003;
-  const gst = 0.18 * (brokerage + txn + sebi);
-  return brokerage + stt + txn + sebi + stamp + gst;
+  const gst = 0.18 * (brokerage + txn + sebi + ipft);
+  return brokerage + stt + txn + sebi + ipft + stamp + gst;
 }
 
 /** Shares bought for a risk budget: as many as the stop distance allows (at least 1). */

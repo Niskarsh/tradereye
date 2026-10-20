@@ -86,7 +86,7 @@ function Glossary() {
     ['Messy', 'Touched the stop first, then went to the target anyway. With a stop at the low you lose; a wider stop could have won. The "2 ATR stop" number shows that case.'],
     ['Fail', 'Never reached the target by 15:00. Failures are always counted: nothing is hidden.'],
     ['R', 'Your risk on the trade: ₹300. +1R = +₹300, −1R = −₹300. +0.10R per trade = +₹30 per trade on average.'],
-    ['R before costs / after costs', 'Before = is there an edge at all. After = after Dhan\'s charges (brokerage, STT, exchange fees, GST) at your size. Only "after costs" decides if you make money.'],
+    ['R before costs / after costs', 'Both already use the cautious fills (slippage). Before = before Dhan\'s charges: is there an edge at all. After = after Dhan\'s charges (brokerage, STT, exchange, SEBI, IPFT, stamp, GST) at your size. Only "after costs" decides if you make money.'],
     ['₹ / month', 'R after costs × ₹300 × trades per month: what it would have made if you took every trade the rule gave.'],
     ['Year 1 / Year 2', 'The two years are cut in half. Rules are searched only on year 1, so they always look good there. Year 2 was never seen by the search: it is the honest test. Trust year 2.'],
     ['Baseline', 'Taking every possible entry with no rule. A rule is only useful if it beats this on year 2.'],
@@ -94,7 +94,11 @@ function Glossary() {
     ['ATR', 'The stock\'s normal 10-minute candle size. "1.5 ATR" = one and a half normal candles.'],
     ['× daily range', 'Compared with how much the stock usually moves from high to low in a day. "Fell 0.6× daily range" = it fell 60% of its usual daily move.'],
     ['Five groups of a fact', 'Every value of a fact (say, volume) is sorted and cut into five equal piles. If one pile has many more clean wins and better R than the others, that fact matters.'],
-    ['Held up / Did not hold', 'Held up = the rule made money after charges on year 2 with at least 50 trades. Did not hold = it lost on year 2 (it was probably luck on year 1).'],
+    ['Held up / Green, could be luck / Did not hold', 'Held up = made money after charges on year 2, 50+ trades and t of 2 or more. Green, could be luck = made money on year 2 but t under 2. Did not hold = lost on year 2 (it was luck on year 1).'],
+    ['t (how sure)', 'The average R after costs divided by how much it could wobble by chance. 2 or more: unlikely to be luck. 1–2: maybe. Under 1: could easily be luck. The more rules you look at, the more greens appear by luck, so prefer t of 2+.'],
+    ['Year 1, year 2, both years', 'Each counted on its own. Year 2 is the rule applied to every day of year 2, not what was left after year 1. Both years = year 1 + year 2 together (flattered by year 1, where the rule was found).'],
+    ['Fills (slippage)', 'Cautious, like live: you buy 1 tick (₹0.05) worse than the 10-min close, the stop fills 1 tick beyond the stop, the target fills only if price trades through it, stop and target in the same minute counts as the stop, and stops/targets sit on ₹0.05 ticks.'],
+    ['Position', 'Rupees in the trade at ₹300 risk. A tight stop means a big position (₹300 ÷ a 30 paise stop = 1,000 shares ≈ ₹3 lakh), which needs intraday margin.'],
   ];
   return (
     <section className="rounded-2xl border border-line p-4">
@@ -152,7 +156,17 @@ export default function StudyPage() {
                 </button>
               ))}
             </div>
+            {s.v !== 2 && (
+              <p className="rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">
+                This study was made before the fills were corrected (entries and stops 1 tick worse, targets only when traded through, stops and targets on ticks, no trades with less than 2 ticks to the target) and before the &quot;both years&quot; and &quot;t&quot; numbers. Its greens may be too good. Press Re-run on My Setups for the corrected numbers.
+              </p>
+            )}
             <Glossary />
+            <section className="rounded-2xl border border-brand-accent/40 bg-brand-card p-4 space-y-2">
+              <p className="text-sm font-black">Find insights in everything</p>
+              <p className="text-[11px] text-ink-3">Sends every number of all four tabs (every rule, every fall range, all {c.features.length} facts, year 1 and year 2) and asks Claude to dig: what holds up on year 2, what is probably luck, what points the same way across tabs, and what to try next. Takes up to a few minutes; about ₹10–20 per press.</p>
+              <Explain part="insights" label="Find insights" />
+            </section>
             <section className="rounded-2xl bg-brand-card p-4 space-y-2">
               <p className="text-sm font-black">Ask Claude to explain</p>
               <p className="text-[11px] text-ink-3">In plain words, from the numbers of this run. One Claude call per press; the answer is kept on this device.</p>
@@ -172,6 +186,13 @@ export default function StudyPage() {
   );
 }
 
+/** how sure a number is: t (R after costs ÷ its standard error), coloured */
+function Sure({ o }: { o: Outcomes }) {
+  if (o.t == null || !o.n) return <span className="text-ink-4">–</span>;
+  const cls = Math.abs(o.t) >= 2 ? (o.t > 0 ? 'text-data-green font-bold' : 'text-data-red-text font-bold') : Math.abs(o.t) >= 1 ? 'text-ink-2' : 'text-ink-4';
+  return <span className={cls} title={Math.abs(o.t) >= 2 ? 'unlikely to be luck' : Math.abs(o.t) >= 1 ? 'maybe' : 'could easily be luck'}>{o.t.toFixed(1)}</span>;
+}
+
 function OutRow({ label, o, extra }: { label: React.ReactNode; o: Outcomes; extra?: React.ReactNode }) {
   return (
     <tr className="border-b border-line/60 font-mono tabular-nums">
@@ -182,6 +203,7 @@ function OutRow({ label, o, extra }: { label: React.ReactNode; o: Outcomes; extr
       <td className="px-2 py-1.5 text-right text-data-red-text">{pct(o.fail)}</td>
       <td className="hidden px-2 py-1.5 text-right sm:table-cell">{rr(o.grossR)}</td>
       <td className={`px-2 py-1.5 text-right ${o.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(o.netR)}</td>
+      <td className="hidden px-2 py-1.5 text-right sm:table-cell"><Sure o={o} /></td>
       {extra}
     </tr>
   );
@@ -194,7 +216,8 @@ const OutHead = ({ first, extra }: { first: string; extra?: React.ReactNode }) =
       <th className="px-2 py-1.5 text-right" title="Stop hit first, but price reached the target later">Messy</th>
       <th className="px-2 py-1.5 text-right" title="Never reached the target by 15:00">Fail</th>
       <th className="hidden px-2 py-1.5 text-right sm:table-cell" title="Average result per trade before Dhan's charges, in R (1R = ₹300)">R before</th>
-      <th className="px-2 py-1.5 text-right" title="Average result per trade after Dhan's charges, in R (1R = ₹300). This decides if it makes money.">R after costs</th>{extra}
+      <th className="px-2 py-1.5 text-right" title="Average result per trade after Dhan's charges and 1-tick slippage, in R (1R = ₹300). This decides if it makes money.">R after costs</th>
+      <th className="hidden px-2 py-1.5 text-right sm:table-cell" title="How sure: R after costs ÷ its standard error. 2 or more = unlikely to be luck; under 1 = could easily be luck.">t</th>{extra}
     </tr>
   </thead>
 );
@@ -222,6 +245,7 @@ function Moves({ c }: { c: ComboStudy }) {
           <tbody>
             <OutRow label="Year 1" o={c.base.y1First} />
             <OutRow label="Year 2" o={c.base.y2First} />
+            {c.base.allFirst && <OutRow label="Both years" o={c.base.allFirst} />}
           </tbody>
         </table>
       </div>
@@ -233,20 +257,44 @@ function Moves({ c }: { c: ComboStudy }) {
 
 function Rules({ c, months2 }: { c: ComboStudy; months2: number }) {
   const [open, setOpen] = useState<number | null>(null);
-  const held = (o: Outcomes) => (o.n < 50 ? { t: 'Too few', cls: 'border-line-strong text-ink-3' } : o.netR > 0 ? { t: 'Held up', cls: 'border-data-green/60 text-data-green' } : { t: 'Did not hold', cls: 'border-data-red/60 text-data-red-text' });
+  const held = (o: Outcomes) => (o.n < 50 ? { t: 'Too few', cls: 'border-line-strong text-ink-3' }
+    : o.netR <= 0 ? { t: 'Did not hold', cls: 'border-data-red/60 text-data-red-text' }
+    : (o.t ?? 0) >= 2 ? { t: 'Held up', cls: 'border-data-green/60 text-data-green' }
+    : { t: 'Green, could be luck', cls: 'border-brand-accent/60 text-brand-accent' });
+  const cells = (o: Outcomes | undefined, strong: boolean) => !o ? <><td /><td /><td /><td /><td /><td /></> : (
+    <>
+      <td className="px-2 py-1.5 text-right">{o.n}</td>
+      <td className="px-2 py-1.5 text-right font-bold text-data-green">{pct(o.clean)}</td>
+      <td className="px-2 py-1.5 text-right text-ink-2">{pct(o.messy)}</td>
+      <td className="px-2 py-1.5 text-right text-data-red-text">{pct(o.fail)}</td>
+      <td className={`px-2 py-1.5 text-right ${strong ? 'font-bold' : ''} ${o.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(o.netR)}</td>
+      <td className="px-2 py-1.5 text-right"><Sure o={o} /></td>
+    </>
+  );
   return (
     <Card title="Rules found on year 1, traded on year 2" sub="Each rule is the best combination of facts on year 1 (scored cautiously, failures included). Each next rule was searched on the days the earlier ones did not take. Year 2 was never seen by the search: it is the proof.">
-      <p className="text-[11px] text-ink-2"><b>How to read it:</b> each row is one rule (all its boxes must be true at the same 10-min close). Grey Y1 columns are where the rule was found, so they always look good. Look at the Y2 columns: Y2 R after costs above 0 and above the baseline = the rule held up. Tap a rule to see its latest trades.</p>
+      <p className="text-[11px] text-ink-2"><b>How to read it:</b> each row is one rule (all its boxes must be true at the same 10-min close). Year 1, year 2 and both years are each counted on their own: year 2 is the rule on <i>all</i> of year 2&apos;s days, not what year 1 left. Clean + messy + fail = 100%. Year 1 is where the rule was found, so it always looks good: judge on year 2. &quot;Held up&quot; = green on year 2 with t ≥ 2 (unlikely to be luck); &quot;Green, could be luck&quot; = green but not sure enough yet. With many rules on the page, a few greens are expected by luck alone. Tap a rule to see its latest trades.</p>
       <Explain part="rules" label="Explain these rules" />
       {!c.rules.length && <p className="text-xs text-ink-3">No combination of facts had enough trades on year 1.</p>}
       <div className="-mx-2 overflow-x-auto">
         <table className="w-full min-w-[640px] text-xs">
           <thead>
+            <tr className="text-[10px] font-black uppercase tracking-widest text-ink-3">
+              <th />
+              <th colSpan={2} className="border-b border-line px-2 py-1 text-center">Year 1 (found here)</th>
+              <th colSpan={7} className="border-b border-data-green/40 px-2 py-1 text-center text-ink-2">Year 2 (never seen by the search)</th>
+              <th colSpan={2} className="border-b border-line px-2 py-1 text-center">Both years</th>
+              <th />
+            </tr>
             <tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
               <th className="px-2 py-1.5 text-left">Rule</th>
-              <th className="px-2 py-1.5 text-right">Y1 trades</th><th className="px-2 py-1.5 text-right">Y1 R</th>
-              <th className="px-2 py-1.5 text-right">Y2 trades</th><th className="px-2 py-1.5 text-right">Y2 clean</th><th className="px-2 py-1.5 text-right">Y2 fail</th>
-              <th className="px-2 py-1.5 text-right">Y2 R after costs</th><th className="px-2 py-1.5 text-right">Y2 ₹/month</th><th className="px-2 py-1.5 text-right"></th>
+              <th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">R</th>
+              <th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right" title="Reached the target before the stop">Clean</th>
+              <th className="px-2 py-1.5 text-right" title="Stop hit first, target reached later">Messy</th><th className="px-2 py-1.5 text-right" title="Never reached the target by 15:00">Fail</th>
+              <th className="px-2 py-1.5 text-right" title="After Dhan's charges and 1-tick slippage">R after costs</th>
+              <th className="px-2 py-1.5 text-right" title="How sure: 2 or more = unlikely to be luck">t</th><th className="px-2 py-1.5 text-right">₹/month</th>
+              <th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">R</th>
+              <th className="px-2 py-1.5 text-right"></th>
             </tr>
           </thead>
           <tbody>
@@ -263,16 +311,15 @@ function Rules({ c, months2 }: { c: ComboStudy; months2: number }) {
                     </td>
                     <td className="px-2 py-1.5 text-right text-ink-3">{r.y1.n}</td>
                     <td className="px-2 py-1.5 text-right text-ink-3">{rr(r.y1.netR)}</td>
-                    <td className="px-2 py-1.5 text-right">{r.y2.n}</td>
-                    <td className="px-2 py-1.5 text-right font-bold text-data-green">{pct(r.y2.clean)}</td>
-                    <td className="px-2 py-1.5 text-right text-data-red-text">{pct(r.y2.fail)}</td>
-                    <td className={`px-2 py-1.5 text-right font-bold ${r.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(r.y2.netR)}</td>
+                    {cells(r.y2, true)}
                     <td className={`px-2 py-1.5 text-right ${r.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{inr((r.y2.netR * 300 * r.y2.n) / months2)}</td>
+                    <td className="px-2 py-1.5 text-right text-ink-3">{r.all?.n ?? '–'}</td>
+                    <td className={`px-2 py-1.5 text-right ${r.all ? (r.all.netR > 0 ? 'text-data-green' : 'text-data-red-text') : 'text-ink-3'}`}>{r.all ? rr(r.all.netR) : '–'}</td>
                     <td className="px-2 py-1.5 text-right"><span className={`whitespace-nowrap rounded-md border px-1.5 py-0.5 font-sans text-[10px] font-black uppercase ${h.cls}`}>{h.t}</span></td>
                   </tr>
                   {open === i && (
                     <tr className="border-b border-line/60">
-                      <td colSpan={9} className="px-2 pb-3 pt-1">
+                      <td colSpan={13} className="px-2 pb-3 pt-1">
                         <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">Latest year-2 trades of this rule (check them on your chart)</p>
                         <table className="w-full text-[11px]"><tbody>
                           {r.examples.map((e) => (
@@ -283,7 +330,7 @@ function Rules({ c, months2 }: { c: ComboStudy; months2: number }) {
                             </tr>
                           ))}
                         </tbody></table>
-                        <p className="mt-1 text-[11px] text-ink-3">With a 2 ATR stop instead of the low: {rr(r.y2.netWide)} per trade on year 2 (catches some of the messy ones). Average {r.y2.min} min in the trade.</p>
+                        <p className="mt-1 text-[11px] text-ink-3">With a 2 ATR stop instead of the low: {rr(r.y2.netWide)} per trade on year 2 (catches some of the messy ones). Average {r.y2.min} min in the trade.{r.y2.posMed ? ` Median position ₹${r.y2.posMed.toLocaleString('en-IN')} at ₹300 risk (tight stops = big positions: check your margin).` : ''}</p>
                         <div className="mt-2"><Explain part="rule" item={i} label={`Explain rule ${i + 1}`} small /></div>
                       </td>
                     </tr>
@@ -295,10 +342,10 @@ function Rules({ c, months2 }: { c: ComboStudy; months2: number }) {
               <tr className="font-mono tabular-nums">
                 <td className="px-2 py-1.5 font-sans font-black">All rules together</td>
                 <td className="px-2 py-1.5 text-right text-ink-3">{c.together.y1.n}</td><td className="px-2 py-1.5 text-right text-ink-3">{rr(c.together.y1.netR)}</td>
-                <td className="px-2 py-1.5 text-right">{c.together.y2.n}</td><td className="px-2 py-1.5 text-right font-bold text-data-green">{pct(c.together.y2.clean)}</td>
-                <td className="px-2 py-1.5 text-right text-data-red-text">{pct(c.together.y2.fail)}</td>
-                <td className={`px-2 py-1.5 text-right font-black ${c.together.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(c.together.y2.netR)}</td>
+                {cells(c.together.y2, true)}
                 <td className={`px-2 py-1.5 text-right font-black ${c.together.y2.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{inr((c.together.y2.netR * 300 * c.together.y2.n) / months2)}</td>
+                <td className="px-2 py-1.5 text-right text-ink-3">{c.together.all?.n ?? '–'}</td>
+                <td className="px-2 py-1.5 text-right text-ink-3">{c.together.all ? rr(c.together.all.netR) : '–'}</td>
                 <td />
               </tr>
             )}

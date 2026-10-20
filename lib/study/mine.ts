@@ -19,8 +19,16 @@ import { roundTripCharges, sizeFor } from '../setups/costs';
  *  CLEAN  the target was reached before the stop (a stop under the low survived),
  *  MESSY  the stop was hit first, but price still reached the target before 15:00,
  *  FAIL   the target was not reached by 15:00 (whatever the stop did).
- * R before / after Dhan's charges at his risk for the "stop at the low" trade, plus the same trade with a 2 ATR stop.
+ * Fills are taken on the cautious side, as they would happen live (TICK = one NSE tick, ₹0.05 at ₹250-1000):
+ *  - entry 1 tick worse than the 10-minute close (a market order right after it),
+ *  - the stop exits 1 tick beyond the stop price, a 15:00 exit 1 tick worse than the close,
+ *  - the target fills only if price trades 1 tick THROUGH it (a touch is not a fill),
+ *  - stop and target in the same minute = the stop.
+ * R before charges (with those fills) and after Dhan's charges at his risk, plus the same trade with a 2 ATR stop.
+ * A target is left out (not a trade) when it is less than 2 ticks beyond the entry fill, and the open target also
+ * when the open is less than 0.1 ATR ahead of the entry.
  */
+export const TICK = 0.05;
 
 export const FEATURES = [
   ['runAdr', 'How far the day\'s low is from the open (× usual daily range)'],
@@ -76,8 +84,14 @@ export interface Moment {
   /** facts at that moment, in FEATURE_KEYS order (NaN = unknown) */
   x: number[];
   /** per target (VWAP, open): label, R before charges, R after charges (stop at the low), R after charges (2 ATR stop) */
-  v: { label: Label; r: number; net: number; netWide: number; min: number };
-  o: { label: Label; r: number; net: number; netWide: number; min: number };
+  /** null when the target is not at least 2 ticks beyond the entry fill (nothing to capture: not a trade) */
+  v: Result | null;
+  o: Result | null;
+}
+export interface Result {
+  label: Label; r: number; net: number; netWide: number; min: number;
+  /** rupees in the position (entry × quantity at his risk) */
+  posInr: number;
 }
 
 export interface MineInput {
@@ -85,6 +99,8 @@ export interface MineInput {
 }
 
 const LAST = 340, END = 345;
+/** a price on the NSE tick grid, rounded up (dir 1) or down (dir -1) */
+export const onTick = (px: number, dir: 1 | -1) => { const t = px / TICK; return Math.round((dir === 1 ? Math.ceil(t - 1e-9) : Math.floor(t + 1e-9)) * TICK * 100) / 100; };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -155,11 +171,15 @@ export function mineDay(inp: MineInput): Moment[] {
       if ((vwap - price) * d <= 0) continue;               // price must still be on the far side of VWAP
       const off = (price - ext) * d;                       // how far price has come back
       if (off > 1.5 * atr) continue;
-      let stop = ext - d * 0.1 * atr;
-      if ((price - stop) * d < 0.25 * atr) stop = price - d * 0.25 * atr;
+      let stopRaw = ext - d * 0.1 * atr;
+      if ((price - stopRaw) * d < 0.25 * atr) stopRaw = price - d * 0.25 * atr;
+      // orders sit on ticks: the stop rounded away from the entry
+      const stop = onTick(stopRaw, (-d) as 1 | -1);
       const dist = (price - stop) * d;
       if (dist > 2 * atr) continue;
       const toV = (vwap - price) * d, toO = (open - price) * d;
+      /** a target is a trade only if it is at least 2 ticks beyond the entry fill (the close + 1 tick) */
+      const room = (tgt: number) => (tgt - (price + d * TICK)) * d >= 2 * TICK - 1e-9;
       let runCandles = 0;
       for (let i = L - 2; i >= 0 && (tens[i].c - tens[i].o) * r > 0; i--) runCandles++;
       const rng = T.h - T.l;
@@ -190,35 +210,42 @@ export function mineDay(inp: MineInput): Moment[] {
         prevDayRun: prevDayRet * r,
       };
       out.push({
-        symbol: inp.symbol, date: inp.date, slot: k, dir: d, entry: r2(price), stop: r2(stop), vwap: r2(vwap), open: r2(open),
+        symbol: inp.symbol, date: inp.date, slot: k, dir: d, entry: r2(price), stop, vwap: onTick(vwap, d), open: r2(open),
         x: FEATURE_KEYS.map((f) => (Number.isFinite(x[f]) ? r3(x[f]) : NaN)),
-        v: follow(day, k, d, price, stop, vwap, atr, risk), o: follow(day, k, d, price, stop, open, atr, risk),
+        // the target limit sits on a tick, rounded the cautious way (further from the entry)
+        v: room(onTick(vwap, d)) ? follow(day, k, d, price, stop, onTick(vwap, d), atr, risk) : null,
+        o: room(open) && toO > 0.1 * atr ? follow(day, k, d, price, stop, open, atr, risk) : null,
       });
     }
   }
   return out;
 }
 
-/** What happened next for one target: stop at the low (checked first in each minute) and a 2 ATR stop. */
-function follow(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, entry: number, stop: number, target: number, atr: number, risk: number) {
-  const dist = (entry - stop) * d, wide = entry - d * 2 * atr;
-  let stopAt = -1, targetAt = -1, wideAt = -1;
-  for (let s = k; s < END; s++) {
-    const h = day.h[s], l = day.l[s];
-    if (stopAt < 0 && (d === 1 ? l <= stop : h >= stop)) stopAt = s;
-    if (wideAt < 0 && (d === 1 ? l <= wide : h >= wide)) wideAt = s;
-    if (targetAt < 0 && (d === 1 ? h >= target : l <= target)) { targetAt = s; if (stopAt === s) stopAt = s; } // same minute: the stop counts first
-    if (targetAt >= 0 && stopAt >= 0 && wideAt >= 0) break;
-  }
-  const last = day.c[END - 1];
-  const label: Label = targetAt >= 0 && (stopAt < 0 || targetAt < stopAt) ? 'C' : targetAt >= 0 ? 'M' : 'F';
-  const exit = label === 'C' ? target : stopAt >= 0 ? stop : last;
-  const qty = sizeFor(risk, dist);
-  const r = ((exit - entry) * d) / dist;
-  const net = r - roundTripCharges(qty, entry, exit, d) / (qty * dist);
-  const wDist = 2 * atr, wQty = sizeFor(risk, wDist);
-  const wExit = targetAt >= 0 && (wideAt < 0 || targetAt < wideAt) ? target : wideAt >= 0 ? wide : last;
-  const netWide = ((wExit - entry) * d) / wDist - roundTripCharges(wQty, entry, wExit, d) / (wQty * wDist);
-  const end = label === 'C' ? targetAt : stopAt >= 0 ? stopAt : END - 1;
-  return { label, r: r2(r), net: r2(net), netWide: r2(netWide), min: end - k + 1 };
+/**
+ * What happened next for one target, with live-like fills (see TICK above): the stop at the low (checked first in
+ * every minute) and, separately, a 2 ATR stop. Exits: the target (filled only when traded through), the stop (1 tick
+ * beyond it), or the 15:00 close (1 tick worse).
+ */
+export function follow(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, close: number, stop: number, target: number, atr: number, risk: number): Result {
+  const entry = close + d * TICK;
+  const run = (stopPx: number) => {
+    let stopAt = -1, targetAt = -1;
+    for (let s = k; s < END; s++) {
+      const h = day.h[s], l = day.l[s];
+      if (stopAt < 0 && (d === 1 ? l <= stopPx : h >= stopPx)) stopAt = s;
+      if (targetAt < 0 && (d === 1 ? h >= target + TICK : l <= target - TICK)) targetAt = s;
+      if (stopAt >= 0 && targetAt >= 0) break;
+    }
+    // the same minute: the stop counts first (cautious)
+    const label: Label = targetAt >= 0 && (stopAt < 0 || targetAt < stopAt) ? 'C' : targetAt >= 0 ? 'M' : 'F';
+    const exit = label === 'C' ? target : stopAt >= 0 ? stopPx - d * TICK : day.c[END - 1] - d * TICK;
+    const dist = (entry - stopPx) * d;
+    const qty = sizeFor(risk, dist);
+    const r = ((exit - entry) * d) / dist;
+    const net = r - roundTripCharges(qty, entry, exit, d) / (qty * dist);
+    const end = label === 'C' ? targetAt : stopAt >= 0 ? stopAt : END - 1;
+    return { label, r, net, min: end - k + 1, posInr: qty * entry };
+  };
+  const a = run(stop), w = run(onTick(close - d * 2 * atr, (-d) as 1 | -1));
+  return { label: a.label, r: r2(a.r), net: r2(a.net), netWide: r2(w.net), min: a.min, posInr: Math.round(a.posInr) };
 }
