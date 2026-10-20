@@ -1,14 +1,14 @@
 import type { Candles } from '../dhan';
 
 /**
- * Which stocks the backtest looks at on each day: the ones his TradingView screener would have shown that morning.
- * Price and 10-day average volume are rebuilt exactly from daily candles (both are known before the open: the
- * previous close and the 10 sessions before). His market-cap floor (₹10,000 cr) is covered by starting from the
- * Nifty 500 list, which uses today's members (a stock that left the index in the last two years is missed).
+ * Which stocks the backtest looks at on each day: every NSE equity in his price range (₹250-340 at the previous
+ * close), with a liquidity floor so the results could actually be traded (10-day average volume of 500,000 shares,
+ * about ₹15 cr a day). Both are known before the open. Which of them were "in play" that day (unusually busy) is a
+ * slice, not a filter (set by the job from the first 10 minutes).
  */
 
 export interface ScreenerFilter { priceMin: number; priceMax: number; avgVolMin: number }
-export const SCREENER: ScreenerFilter = { priceMin: 250, priceMax: 340, avgVolMin: 3_000_000 };
+export const SCREENER: ScreenerFilter = { priceMin: 250, priceMax: 340, avgVolMin: 500_000 };
 
 const IST = 19800_000;
 const dateOf = (sec: number) => new Date(sec * 1000 + IST).toISOString().slice(0, 10);

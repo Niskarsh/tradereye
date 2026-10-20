@@ -33,6 +33,9 @@ export const DEFAULT_PARAMS: Params = { riskInr: 300, niftyDirPct: 0.15, niftyRe
 export const FIRST_DECISION = 10;  // 09:25, the first 10-minute close
 export const LAST_DECISION = 340;  // 14:55, the close of the 14:45-14:54 candle
 export const EXIT_SLOT = 345;      // 15:00: anything open is closed at the 14:59 close
+/** the research cases decided at 15:00 (last half hour) are held to the 15:29 close */
+export const LATE_SLOT = 345;
+export const CLOSE_SLOT = 375;
 
 export interface DayInput {
   symbol: string;
@@ -220,6 +223,9 @@ export class Zone {
 
 /* ---- the day ---------------------------------------------------------------------------------------------- */
 
+/** the breakout setups the breakout fade (FB) takes the other way */
+const FADED = new Set<CaseId>(['A', 'G', 'I', 'M1', 'M2', 'M6', 'M7']);
+
 interface ExitCtx { obstacle?: number; medV: number; adr: number; dayHi: number; dayLo: number; entryBar: B10 }
 interface Draft { id: CaseId; d: 1 | -1; stop: number; stopType: 'SWING' | 'ATR2' | 'FAR'; target: number; slot: number; price: number; atr: number; ctx: DimCtx; ex: ExitCtx; testNo: number; tests: number[]; level: Signal['level']; pullbackNo: number }
 interface DimCtx { nFirst5?: number; nDay?: number; nRecent?: number; rvolSame?: number; openBusy: boolean; ext?: number; e5?: number; e10?: number; e1d?: number; gapPct: number }
@@ -263,7 +269,7 @@ export function runDay(inp: DayInput): Signal[] {
   const prevTens: B10[] = prevSession ? tenMinuteBars([prevSession]) : [];
 
   const K = Math.min(day.n, nifty.n);
-  const lastK = Math.min(K, LAST_DECISION);
+  const lastK = Math.min(K, LATE_SLOT);
   const nOpen = nifty.o[0];
   const nPct = (i: number) => (nifty.c[i] / nOpen - 1) * 100;
   const nFirst5 = K >= 5 ? (nifty.c[4] / nOpen - 1) * 100 : undefined;
@@ -305,15 +311,17 @@ export function runDay(inp: DayInput): Signal[] {
       if (brkLo < 0 && day.l[s] < or10.l) brkLo = s;
       if (brkLo >= 0) minSinceBrk = Math.min(minSinceBrk, day.l[s]);
     }
-    // ---- decisions only at a 10-minute close
-    if (k < FIRST_DECISION || k % 10 !== 0) continue;
+    // ---- decisions only at a 10-minute close (and once at 15:00 for the last-half-hour research cases)
+    const late = k === LATE_SLOT;
+    if (k < FIRST_DECISION || (!late && (k % 10 !== 0 || k > LAST_DECISION))) continue;
 
     const L = tens.length;
     const T = tens[L - 1], Pv = tens[L - 2] as B10 | undefined;
-    const price = T.c;
-    const atr = atrC.peek();
+    const price = day.c[k - 1]; // = the 10-min close (at 15:00: the 14:59 close)
+    const formingBar = k % 10 ? barOf(day, Math.floor(k / 10) * 10, k) : undefined;
+    const atr = atrC.peek(formingBar);
     if (!atr || !(atr > 0)) continue;
-    const e10 = ema10.peek(), e5 = ema5.peek(), e1d = suspect ? undefined : ema1d.peek(price);
+    const e10 = ema10.peek(formingBar ? price : undefined), e5 = ema5.peek(k % 5 ? price : undefined), e1d = suspect ? undefined : ema1d.peek(price);
     const vwap = vv > 0 ? pv / vv : undefined;
     const nDay = nPct(k - 1);
     const nRecent = k >= 31 ? (nifty.c[k - 1] / nifty.c[k - 31] - 1) * 100 : undefined;
@@ -344,14 +352,14 @@ export function runDay(inp: DayInput): Signal[] {
       return lv.length ? lv.reduce((a, b) => (Math.abs(b - price) < Math.abs(a - price) ? b : a)) : undefined;
     };
 
-    const add = (id: CaseId, d: 1 | -1, target?: number, extra: { testNo?: number; level?: Signal['level'] } = {}) => {
+    const add = (id: CaseId, d: 1 | -1, target?: number, extra: { testNo?: number; level?: Signal['level']; stop?: number } = {}): boolean => {
       const key = `${id}${d}`;
       if (fired.has(key)) return false;
-      const st = swingStop(d, price, atr, swingBars);
+      const st = extra.stop !== undefined ? { stop: extra.stop, type: 'ATR2' as const } : swingStop(d, price, atr, swingBars);
       const dist = Math.abs(price - st.stop);
       const family = CASE_BY_ID.get(id)!.family;
       let tgt = target;
-      if (family === 'MOMENTUM') tgt = price + d * 2 * dist;
+      if (family === 'MOMENTUM' || id === 'FB' || id === 'L2') tgt = price + d * 2 * dist;
       if (tgt === undefined || !Number.isFinite(tgt) || (tgt - price) * d < 0.5 * dist) return false; // no room
       if (family === 'REVERSAL' && (id === 'D' || id === 'E' || id === 'F' || id === 'J') && emaBetween(tgt)) return false;
       fired.add(key);
@@ -364,8 +372,21 @@ export function runDay(inp: DayInput): Signal[] {
         testNo, tests: testNo ? [...zone.tests] : [], level: extra.level ?? '',
         pullbackNo: family === 'MOMENTUM' ? pullbackNumber(tens.map((b, i) => ({ t: i, ...b })), d, 0.5 * atr) : 0,
       });
+      // the breakout fade: every breakout, taken the other way at the same close
+      if (FADED.has(id)) add('FB', (-d) as 1 | -1);
       return true;
     };
+
+    if (late) {
+      // ---- 15:00: the last-half-hour research cases (held to the 15:29 close), nothing else
+      const nFirst30 = (nifty.c[29] / nOpen - 1) * 100;
+      const sFirst30 = (day.c[29] / open - 1) * 100, sDay = (price / open - 1) * 100;
+      const d30 = dirOf(nFirst30, 0.1);
+      if (d30 !== 0 && Math.sign(sFirst30) === d30 && Math.sign(sDay) === d30) add('L1', d30, undefined, { stop: price - d30 * atr });
+      const relDay = sDay - nPct(k - 1);
+      if (Math.abs(relDay) >= 1.5) { const d = (relDay < 0 ? 1 : -1) as 1 | -1; add('L2', d, undefined, { stop: price - d * atr }); }
+      continue;
+    }
     const mom = (id: CaseId, d: 1 | -1) => {
       const ok = add(id, d);
       // M9: the same moment as an opening range break with Nifty strong, entered on a pullback instead
@@ -574,11 +595,13 @@ export function simulate(sig: Signal, day: Slots, P: Params, ex?: ExitCtx & { ni
   }
   const dist = Math.abs(entry - stop);
   const levels: Record<'T1' | 'T15' | 'TS', number> = { T1: entry + d * dist, T15: entry + d * 1.5 * dist, TS: sig.case === 'M9' ? entry + d * 2 * dist : sig.target };
+  const targetKeys = ['T1', 'T15', 'TS'] as const;
   const res: Partial<Record<OutKey, { exit: number; slot: number; target?: boolean }>> = {};
   const discr: ExitKey[] = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7'];
   const allKeys: OutKey[] = [...TARGET_KEYS, ...discr];
   let mfe = 0, mae = 0;
-  const end = Math.min(EXIT_SLOT, day.n);
+  // the last-half-hour cases are held to the 15:29 close; everything else is closed at 15:00
+  const end = Math.min(sig.case === 'L1' || sig.case === 'L2' ? CLOSE_SLOT : EXIT_SLOT, day.n);
   let hi = ex?.dayHi ?? -Infinity, lo = ex?.dayLo ?? Infinity;
   const rangeStart = ex ? (hi - lo) / ex.adr : 1;
   let prevBar = ex?.entryBar, candles = 0;
@@ -595,7 +618,7 @@ export function simulate(sig: Signal, day: Slots, P: Params, ex?: ExitCtx & { ni
     // on the fill minute of a limit order, only the stop counts (the high may have come before the fill)
     const canTarget = !(sig.case === 'M9' && s === start);
     if (canTarget) {
-      for (const k of TARGET_KEYS) if (!res[k] && (d === 1 ? h >= levels[k] : l <= levels[k])) res[k] = { exit: levels[k], slot: s, target: true };
+      for (const k of targetKeys) if (!res[k] && (d === 1 ? h >= levels[k] : l <= levels[k])) res[k] = { exit: levels[k], slot: s, target: true };
       if (ex) {
         if (!res.X5 && ex.obstacle !== undefined && (d === 1 ? h >= ex.obstacle : l <= ex.obstacle)) res.X5 = { exit: ex.obstacle, slot: s };
         if (!res.X4 && rangeStart < 0.95 && (hi - lo) / ex.adr >= 0.95) res.X4 = { exit: day.c[s], slot: s };
@@ -624,7 +647,7 @@ export function simulate(sig: Signal, day: Slots, P: Params, ex?: ExitCtx & { ni
     const r = R(x.exit);
     const cost = roundTripCharges(qty, entry, x.exit, d) / (qty * dist);
     const net = r2(r - cost);
-    return { hit: k.startsWith('T') ? !!x.target : net > 0, r: r2(r), net, min: Math.max(1, x.slot - sig.slot + 1) };
+    return { hit: k === 'TC' || !k.startsWith('T') ? net > 0 : !!x.target, r: r2(r), net, min: Math.max(1, x.slot - sig.slot + 1) };
   };
   const o = {} as Outcome;
   for (const k of [...TARGET_KEYS, ...EXIT_KEYS]) o[k] = one(k);

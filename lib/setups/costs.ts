@@ -22,3 +22,19 @@ export function roundTripCharges(qty: number, entry: number, exit: number, dir: 
 export function sizeFor(riskInr: number, stopDist: number): number {
   return stopDist > 0 ? Math.max(1, Math.floor(riskInr / stopDist)) : 0;
 }
+
+/**
+ * Dhan's charges for one NSE delivery round trip (buy, hold, sell), in rupees: brokerage ₹0, STT 0.1% on both sides,
+ * NSE transaction 0.00297% both sides, SEBI ₹10 per crore, stamp duty 0.015% on the buy, DP charge ₹12.50 + GST on
+ * the sell, GST 18% on transaction + SEBI + DP.
+ */
+export function deliveryCharges(qty: number, buyPx: number, sellPx: number): number {
+  if (!(qty > 0)) return 0;
+  const buy = qty * buyPx, sell = qty * sellPx;
+  const stt = (buy + sell) * 0.001;
+  const txn = (buy + sell) * 0.0000297;
+  const sebi = (buy + sell) * 0.000001;
+  const stamp = buy * 0.00015;
+  const dp = 12.5;
+  return stt + txn + sebi + stamp + dp + 0.18 * (txn + sebi + dp);
+}

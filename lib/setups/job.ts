@@ -4,25 +4,24 @@ import { joinCandles } from '../candles/store';
 import { runDay, DEFAULT_PARAMS, type Params } from './engine';
 import { CASES, type Signal } from './cases';
 import { buildSummary, pack, type Summary } from './stats';
-import { monthsNeeded, parseIndexCsv, screenerDays, SCREENER, type ScreenerFilter } from './universe';
+import { monthsNeeded, screenerDays, SCREENER, type ScreenerFilter } from './universe';
+import { runSwing } from './swing';
 import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, monthKey, putJson, signalsKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
 
 /**
  * The backtest, start to finish (run by the GitHub Action; see scripts/setups-backtest.ts):
- *  1. the universe: today's Nifty 500 list, mapped to Dhan security ids
- *  2. daily candles for each stock (one request each) -> the days it passed his screener in the last 2 years
+ *  1. the universe: every NSE equity in Dhan's instrument list
+ *  2. daily candles for each stock (one request each) -> the days it was in his price range with enough volume in the
+ *     last 2 years; the 5-day reversal (S1) is run on these daily candles
  *  3. 1-minute candles for those months only (plus ~5 weeks before, for ATR / EMA / relative volume), from S3 when
  *     already saved; a finished month is saved and never fetched again
- *  4. every passing day replayed through the engine; every signal followed to its outcome
+ *  4. every passing day replayed through the engine; every signal followed to its outcome; the 20 busiest stocks of
+ *     each day at 09:25 marked as "in play"
  *  5. the summary, the per-case signal files and the run index written to S3
  * Progress goes to setups/status.json every few seconds. Nothing here prints the token.
  */
 
 export const NIFTY500 = { symbol: 'NIFTY500', securityId: '19', segment: 'IDX_I', instrument: 'INDEX' };
-export const INDEX_URLS = [
-  'https://niftyindices.com/IndexConstituent/ind_nifty500list.csv',
-  'https://archives.nseindia.com/content/indices/ind_nifty500list.csv',
-];
 const DAY = 86400_000;
 const IST = 19800_000;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
@@ -65,6 +64,15 @@ async function pool<T>(items: T[], n: number, fn: (x: T, i: number) => Promise<v
 
 export interface JobResult { summary: Summary; signals: Signal[] }
 
+/** volume of the first 10 minutes (09:15-09:24) vs the same window over the previous 10 sessions */
+export function first10Busy(sess: Session[], i: number): number | undefined {
+  const w = (s: Session) => s.bars.reduce((a, b) => { const m = new Date(b.t * 1000 + IST).getUTCHours() * 60 + new Date(b.t * 1000 + IST).getUTCMinutes(); return m >= 555 && m < 565 ? a + b.v : a; }, 0);
+  const priors = sess.slice(Math.max(0, i - 10), i).map(w).filter((v) => v > 0);
+  if (priors.length < 5) return undefined;
+  const base = priors.reduce((a, b) => a + b, 0) / priors.length;
+  return base > 0 ? w(sess[i]) / base : undefined;
+}
+
 export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResult> {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
@@ -80,19 +88,11 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   };
   const dhanCall = async <T>(fn: () => Promise<T>): Promise<T> => { await rl.wait(); return fn(); };
 
-  // ---- 1. universe
-  await status({ phase: 'Reading the Nifty 500 list' }, true);
-  let symbols: string[] = [];
-  let source = 'Nifty 500 (today\'s members)';
-  for (const url of INDEX_URLS) {
-    try { symbols = parseIndexCsv(await deps.fetchText(url)); if (symbols.length > 400) break; } catch { /* next */ }
-  }
+  // ---- 1. universe: every NSE equity (the price range and the liquidity floor are applied day by day)
+  await status({ phase: 'Reading the NSE equity list' }, true);
   const master = parseScripMaster(await deps.fetchText(SCRIP_MASTER_URL));
-  if (symbols.length < 400) {
-    // the index list could not be downloaded: every NSE equity, the screener still applies (noted on the page)
-    symbols = [...master.keys()];
-    source = 'All NSE equities (the Nifty 500 list could not be downloaded)';
-  }
+  let symbols = [...master.keys()];
+  const source = `All NSE equities ₹${screener.priceMin}-${screener.priceMax}, 10-day average volume ${(screener.avgVolMin / 1e5).toFixed(0)} lakh+ shares`;
   if (deps.onlySymbols) symbols = symbols.filter((s) => deps.onlySymbols!.includes(s));
   const universe = symbols.map((symbol) => ({ symbol, securityId: master.get(symbol) })).filter((x): x is { symbol: string; securityId: string } => !!x.securityId);
   log(`universe: ${universe.length} stocks (${source})`);
@@ -107,14 +107,17 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const inPeriod = sessions.filter((d) => d >= from && d <= to);
   const mid = inPeriod[Math.floor(inPeriod.length / 2)] ?? to;
 
-  // ---- 2. daily candles and screener days
+  // ---- 2. daily candles, screener days, and the 5-day reversal (S1, daily candles only)
   const plan: { symbol: string; securityId: string; days: string[]; daily: Candles }[] = [];
+  const niftyClose = new Map(niftyDaily.t.map((t, i) => [dateOf(t), niftyDaily.c[i]]));
+  const signals: Signal[] = [];
   await pool(universe, deps.concurrency ?? 3, async (u, i) => {
     try {
       const daily = await dhanCall(() => deps.dhan.daily({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: addDays(from, -1150), to: today }));
       await putJson(deps.store, dailyKey(u.symbol), { v: 1, symbol: u.symbol, securityId: u.securityId, savedAt: now(), c: daily }).catch(() => {});
       const days = screenerDays(daily, screener, from, to);
       if (days.length) plan.push({ ...u, days, daily });
+      signals.push(...runSwing(u.symbol, daily, niftyClose, from, to, screener, params));
     } catch (e) { if (e instanceof DhanError && (e.isAuth || e.isNoDataPlan)) throw e; }
     await status({ phase: 'Daily candles: which stocks passed your screener', done: i + 1, total: universe.length });
   });
@@ -141,8 +144,9 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   }
 
   // ---- 4. replay
-  const signals: Signal[] = [];
   let done = 0, skipped = 0;
+  /** first-10-minute volume vs usual, per day and stock: the 20 busiest are "in play" that day */
+  const busyByDate = new Map<string, { symbol: string; x: number }[]>();
   await pool(plan, deps.concurrency ?? 3, async (p) => {
     const parts: Candles[] = [];
     for (const m of monthsNeeded(p.days)) {
@@ -158,12 +162,18 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
       const cut = dailyDates.findIndex((x) => x >= d);
       const end = cut < 0 ? dailyDates.length : cut;
       const daily: Candles = { t: p.daily.t.slice(0, end), o: p.daily.o.slice(0, end), h: p.daily.h.slice(0, end), l: p.daily.l.slice(0, end), c: p.daily.c.slice(0, end), v: p.daily.v.slice(0, end) };
+      const x = first10Busy(sess, i);
+      if (x !== undefined) { const a = busyByDate.get(d) ?? []; a.push({ symbol: p.symbol, x }); busyByDate.set(d, a); }
       signals.push(...runDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, params, simulate: true }));
     }
     done++;
     await status({ phase: 'Testing the setups', done, total: plan.length });
   });
   log(`signals: ${signals.length} (skipped ${skipped} stock-days or months without data)`);
+  // stocks in play: the 20 busiest of the day at 09:25 (and at least 1.5x their usual first 10 minutes)
+  const inPlay = new Set<string>();
+  for (const [d, list] of busyByDate) for (const it of list.sort((a, b) => b.x - a.x).slice(0, 20)) if (it.x >= 1.5) inPlay.add(`${d}|${it.symbol}`);
+  for (const sg of signals) if (sg.case !== 'S1') sg.inPlay = inPlay.has(`${sg.date}|${sg.symbol}`);
 
   // ---- 5. results
   await status({ phase: 'Writing the results' }, true);
