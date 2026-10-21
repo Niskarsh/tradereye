@@ -19,6 +19,9 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
 import ml_walkforward as ml  # noqa: E402
 
+# the proof checks the method, not the averaging: one model per decision keeps it fast (the averaging is a plain mean)
+ml.ENSEMBLE = int(os.environ.get('ENSEMBLE', '1'))
+
 FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr', 'ret30Atr', 'ret60Atr', 'distVwapAtr', 'distHiAtr', 'distLoAtr',
          'rangeAdr', 'posInRange', 'minSinceHi', 'minSinceLo', 'testsHi', 'testsLo', 'tBody', 'tUpWick', 'tLoWick', 'tRangeAtr', 'tVol', 'volTrend',
          'climax3', 'rvolSame', 'rvolDay', 'openBusy', 'atrPct', 'adrPct', 'nFirst5', 'nDay', 'nRecent30', 'nRecent10', 'nPosInRange', 'rsDay', 'rs30',
