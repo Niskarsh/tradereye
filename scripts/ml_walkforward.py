@@ -12,7 +12,7 @@ How it trades, the way an algo desk tests a model:
   * every number reported is out of sample: months the model had not seen;
   * the last EXAM_MONTHS months are the locked exam: the next iteration is decided from the months before them.
 
-Iteration 2 tests three strategies side by side (see STRATEGIES and CHANGES).
+Each iteration tests a few strategies side by side (see STRATEGIES and CHANGES).
 """
 import json
 import math
@@ -24,18 +24,19 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 2
+ITERATION = 3
 CHANGES = [
-    'Removed "how many stocks were in the universe": it was a calendar in disguise (the #2 input of iteration 1).',
-    '4 years of history instead of 2, so there are about 40 blind months to judge on instead of 19.',
-    'Wider trades so the charges shrink: a wide bracket (stop ½ the usual daily range) and a ride to the close.',
-    'A market-neutral basket: the 3 best and the 3 worst stocks at the same minute, long and short, so the market\'s direction cancels.',
-    'At most 4 trades a side a day: one guess about the market can no longer be 10 bets.',
-    'The bar to trade is a top slice of the predictions (top 10% … 0.5%), picked on the 2 months before.',
-    'The last 6 months are a locked exam: the next step is decided from the earlier months only.',
+    'Memory: 11 new facts beyond today: each stock\'s habit from this time of day over its last 20 sessions (usual move to 15:15, how often up, next 30 min, keeps or reverses the day\'s direction) and the multi-day picture (5- and 20-day move, distance from the 20-day high / low, where yesterday closed, yesterday\'s last 30 min, how unusual today\'s gap is).',
+    'A test of the market-timing habit: the same wide bracket with and without the Nifty facts (iteration 2 leaned 41% on Nifty\'s first 5 minutes).',
+    'Steadier predictions: 3 models averaged (different samples of the past) instead of 1.',
+    'The bar to trade is set on the 3 months before each month instead of 2.',
+    'Dropped the ride to the close (weakest signal in iteration 2). The exam months stay locked from May 2026, the same as iteration 2.',
 ]
 TRAIN_MONTHS = 18
-VAL_MONTHS = 2
+VAL_MONTHS = 3
+EXAM_FROM = '2026-05'  # locked: the same exam months for every iteration
+ENSEMBLE = 3
+MARKET = ['nFirst5', 'nDay', 'nRecent30', 'nRecent10', 'nPosInRange']
 MIN_TRAIN_MONTHS = 6
 EXAM_MONTHS = 6
 MAX_PER_DAY = 6
@@ -44,15 +45,15 @@ QUANTS = [0.9, 0.95, 0.98, 0.99, 0.995]
 NEUTRAL_SLOTS = [30, 90, 150]  # 09:45, 10:45, 11:45
 NEUTRAL_K = 3
 NEUTRAL_MIN = 20  # at least this many stocks at that minute to rank them
-RANKED = ['retOpenPct', 'rvolSame', 'rsDay', 'rs30', 'distVwapAtr', 'ret30Atr', 'tVol', 'rangeAdr', 'atrPct']
+RANKED = ['retOpenPct', 'rvolSame', 'rsDay', 'rs30', 'distVwapAtr', 'ret30Atr', 'tVol', 'rangeAdr', 'atrPct', 'habitClose', 'ret5d']
 RISK = 300.0
-MAX_FIT_ROWS = 600_000
+MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 
 STRATEGIES = [
     {'id': 'wide', 'name': 'Wide bracket', 'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg',
      'desc': 'Long or short one stock: stop ½ of its usual daily range away, target ¾ of it, out by 15:15. The model picks the side and the moment.'},
-    {'id': 'close', 'name': 'Ride to the close', 'kind': 'dir', 'L': 'ccL', 'S': 'ccS', 'Lg': 'ccLg', 'Sg': 'ccSg',
-     'desc': 'Long or short one stock and hold to 15:15, with a safety stop ¾ of its usual daily range away. No target.'},
+    {'id': 'wideStock', 'name': 'Wide bracket, no Nifty facts', 'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'noMarket': True,
+     'desc': 'The same wide bracket, but the model never sees what Nifty is doing: only the stock itself. If this does as well, the market timing was noise.'},
     {'id': 'neutral', 'name': 'Market-neutral basket', 'kind': 'neutral', 'L': 'ccL', 'S': 'ccS', 'Lg': 'ccLg', 'Sg': 'ccSg',
      'desc': 'At 09:45, 10:45 and 11:45: buy the 3 stocks the model rates best and short the 3 it rates worst, all held to 15:15 '
              '(safety stop ¾ of the usual daily range). The market\'s direction cancels out; only the ranking can make money.'},
@@ -97,14 +98,28 @@ def sub(mask, seed):
     return idx
 
 
-def model():
+def model(seed=7):
     return HistGradientBoostingRegressor(max_iter=200, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=400,
-                                         l2_regularization=1.0, early_stopping=False, random_state=7)
+                                         l2_regularization=1.0, early_stopping=False, random_state=seed)
 
 
-def fit(X, y, idx):
-    ok = idx[np.isfinite(y[idx])]
-    return model().fit(X[ok], y[ok])
+class Ensemble:
+    """ENSEMBLE models, each on its own random sample of the training months; predictions are averaged"""
+    def __init__(self, models, cols):
+        self.models, self.cols = models, cols
+
+    def predict(self, X):
+        Xs = X[:, self.cols]
+        return np.mean([m.predict(Xs) for m in self.models], axis=0)
+
+
+def fit(X, y, mask, seed, cols):
+    ms = []
+    for e in range(ENSEMBLE):
+        idx = sub(mask, seed * 10 + e)
+        ok = idx[np.isfinite(y[idx])]
+        ms.append(model(7 + e).fit(X[np.ix_(ok, cols)], y[ok]))
+    return Ensemble(ms, cols)
 
 
 EMPTY = ['day', 'sym', 'slot', 'side', 'pred', 'net', 'gross']
@@ -191,7 +206,7 @@ def spearman(a, b):
     return None if not np.isfinite(r) else float(r)
 
 
-def add_gain(acc, models):
+def add_gain(acc, models, cols):
     """what the model leans on: each fact's share of the trees' total split gain (from the fitted trees)"""
     try:
         for m_ in models:
@@ -199,7 +214,7 @@ def add_gain(acc, models):
                 for tree in pred:
                     nodes = tree.nodes
                     split = nodes['is_leaf'] == 0
-                    np.add.at(acc, nodes['feature_idx'][split], np.maximum(nodes['gain'][split], 0))
+                    np.add.at(acc, cols[nodes['feature_idx'][split]], np.maximum(nodes['gain'][split], 0))
     except Exception:  # private sklearn internals: never let this break the run
         pass
 
@@ -222,12 +237,15 @@ def main(d):
     first_test = MIN_TRAIN_MONTHS + VAL_MONTHS
     if len(months) < first_test + 1:
         raise SystemExit('not enough months for walk-forward')
-    exam_from = months[max(first_test, len(months) - EXAM_MONTHS)]
+    exam_from = EXAM_FROM if EXAM_FROM in months[first_test:] else months[max(first_test, len(months) - EXAM_MONTHS)]
+    all_cols = np.arange(len(feats))
+    stock_cols = np.array([i for i, f in enumerate(feats) if f not in MARKET])
     mi = df['month'].map({m: i for i, m in enumerate(months)}).values
     # learn on results clipped to [-3, 3] (gaps and data errors must not steer the model); trades are scored on the real result
-    y = {c: df[c].clip(-3, 3).values.astype(np.float32) for c in ('wbL', 'wbS', 'ccL', 'ccS', 'excess')}
+    y = {c: df[c].clip(-3, 3).values.astype(np.float32) for c in ('wbL', 'wbS', 'ccL', 'ccS')}
 
     res = {st['id']: {'trades': [], 'months': [], 'gain': np.zeros(len(feats)), 'ic': []} for st in STRATEGIES}
+    y['excess'] = df['excess'].clip(-3, 3).values.astype(np.float32)
     for ti in range(first_test, len(months)):
         t0 = time.time()
         fitm = (mi >= max(0, ti - VAL_MONTHS - TRAIN_MONTHS)) & (mi < ti - VAL_MONTHS)
@@ -235,12 +253,12 @@ def main(d):
         test = mi == ti
         if fitm.sum() < 5000 or test.sum() == 0:
             continue
-        fi = sub(fitm, ti)
         vpart, tpart = df.loc[val], df.loc[test]
         for st in STRATEGIES:
             r = res[st['id']]
             if st['kind'] == 'dir':
-                ml, ms = fit(X, y[st['L']], fi), fit(X, y[st['S']], fi)
+                cols = stock_cols if st.get('noMarket') else all_cols
+                ml, ms = fit(X, y[st['L']], fitm, ti, cols), fit(X, y[st['S']], fitm, ti + 500, cols)
                 vl, vs = ml.predict(X[val]), ms.predict(X[val])
                 tl, ts = ml.predict(X[test]), ms.predict(X[test])
                 cands = [float(q) for q in np.quantile(np.maximum(vl, vs), QUANTS) if q > 0]
@@ -256,9 +274,9 @@ def main(d):
                 ics = [spearman(tl, tpart[st['L']].values), spearman(ts, tpart[st['S']].values)]
                 ics = [x for x in ics if x is not None]
                 ic = float(np.mean(ics)) if ics else None
-                add_gain(r['gain'], (ml, ms))
+                add_gain(r['gain'], ml.models + ms.models, cols)
             else:
-                mn = fit(X, y['excess'], fi)
+                mn = fit(X, y['excess'], fitm, ti + 900, all_cols)
                 vc, tc = neutral_groups(vpart, mn.predict(X[val])), neutral_groups(tpart, mn.predict(X[test]))
                 sp = spreads(vc)
                 cands = [0.0] + ([float(q) for q in np.quantile(sp, [0.25, 0.5, 0.75])] if len(sp) else [])
@@ -272,12 +290,12 @@ def main(d):
                 ok = best_thr is not None and best_sum > 0
                 tr = pick_neutral(tc, best_thr) if ok else pd.DataFrame(columns=EMPTY)
                 ic = spearman(mn.predict(X[test]), tpart['excess'].values)
-                add_gain(r['gain'], (mn,))
+                add_gain(r['gain'], mn.models, all_cols)
             tr = tr.assign(month=months[ti])
             r['trades'].append(tr)
             s = stats(tr['net'], tr['gross'])
             s.update({'month': months[ti], 'thr': None if best_thr is None else round(best_thr, 4),
-                      'note': '' if ok else 'stood aside (not profitable on the 2 months before)',
+                      'note': '' if ok else f'stood aside (not profitable on the {VAL_MONTHS} months before)',
                       'ic': None if ic is None else round(ic, 4), 'exam': months[ti] >= exam_from,
                       'baseL': round(float(np.nanmean(tpart[st['L']])), 3), 'baseS': round(float(np.nanmean(tpart[st['S']])), 3)})
             r['months'].append(s)

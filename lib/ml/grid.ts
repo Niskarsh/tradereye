@@ -71,6 +71,18 @@ export const ML_FEATURES = [
   ['upCandles', '10-min candles in a row closing up'],
   ['downCandles', '10-min candles in a row closing down'],
   ['priceRs', 'Price (₹)'],
+  // iteration 3: memory beyond today (the stock's habits over its last 20 sessions, and the multi-day picture)
+  ['habitClose', 'This stock\'s usual move from this time to 15:15, last 20 days (%)'],
+  ['habitCloseUp', 'How often it rose from this time to 15:15, last 20 days (0-1)'],
+  ['habitNext30', 'This stock\'s usual move in the next 30 min from this time, last 20 days (%)'],
+  ['habitTrend', 'How often the rest of the day kept the day\'s direction so far, at this time, last 20 days (0-1)'],
+  ['ret5d', 'Move over the last 5 days (%)'],
+  ['ret20d', 'Move over the last 20 days (%)'],
+  ['hi20Adr', 'Below the 20-day high by (× usual daily range)'],
+  ['lo20Adr', 'Above the 20-day low by (× usual daily range)'],
+  ['prevCloseLoc', 'Where yesterday closed in its range (0 = low, 1 = high)'],
+  ['prevLast30', 'Yesterday\'s last 30 minutes (%)'],
+  ['gapVsUsual', 'Today\'s gap ÷ its usual gap (last 10 days)'],
 ] as const;
 export const ML_KEYS = ML_FEATURES.map((f) => f[0]);
 /**
@@ -147,6 +159,29 @@ export function gridDay(inp: GridInput): number[][] {
   const pva = prevSession ? valueArea(prevSession.bars, rows) : undefined;
   const medBase = tenMinuteBars(hist.slice(-2)).map((b) => b.v);
   const nFirst5 = (nifty.c[4] / nOpen - 1) * 100;
+  // memory: the last 20 sessions as minute slots (only full days count for the habits)
+  const past = hist.map((h) => toSlots(h.bars)).filter((x): x is NonNullable<typeof x> => !!x && x.n >= LATE_END);
+  const habit = (k: number) => {
+    let close = 0, up = 0, next = 0, trend = 0, n = 0;
+    for (const p of past) {
+      const at = p.c[k - 1], fin = p.c[LATE_END - 1];
+      if (!(at > 0)) continue;
+      close += (fin / at - 1) * 100; up += fin > at ? 1 : 0; next += (p.c[Math.min(k + 29, LATE_END - 1)] / at - 1) * 100;
+      trend += Math.sign(fin - at) === Math.sign(at - p.o[0]) && fin !== at ? 1 : 0;
+      n++;
+    }
+    return n >= 8 ? { habitClose: close / n, habitCloseUp: up / n, habitNext30: next / n, habitTrend: trend / n } : { habitClose: NaN, habitCloseUp: NaN, habitNext30: NaN, habitTrend: NaN };
+  };
+  const back = (n: number) => (nd > n ? (daily.c[nd - 1] / daily.c[nd - 1 - n] - 1) * 100 : NaN);
+  const ret5d = back(5), ret20d = back(20);
+  const hi20 = Math.max(...daily.h.slice(-20)), lo20 = Math.min(...daily.l.slice(-20));
+  const prevCloseLoc = pdh > pdl ? (prevClose - pdl) / (pdh - pdl) : 0.5;
+  const lastPast = past.at(-1);
+  const prevLast30 = lastPast && lastPast.n >= 375 ? (lastPast.c[374] / lastPast.c[344] - 1) * 100 : NaN;
+  const gaps: number[] = [];
+  for (let i = Math.max(1, nd - 10); i < nd; i++) gaps.push(Math.abs(daily.o[i] / daily.c[i - 1] - 1) * 100);
+  const usualGap = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : NaN;
+  const gapVsUsual = usualGap > 0 ? Math.abs(gapPct) / usualGap : NaN;
 
   const tens: B10[] = [];
   const lowZone = new Zone(-1), highZone = new Zone(1);
@@ -202,6 +237,7 @@ export function gridDay(inp: GridInput): number[][] {
       pdhAtr: (pdh - price) / atr, pdlAtr: (pdl - price) / atr,
       vaHiAtr: pva ? (pva.vah - price) / atr : NaN, vaLoAtr: pva ? (pva.val - price) / atr : NaN, pocAtr: poc !== undefined ? (poc - price) / atr : NaN,
       upCandles: up, downCandles: dn, priceRs: price,
+      ...habit(k), ret5d, ret20d, hi20Adr: (hi20 - price) / adr, lo20Adr: (price - lo20) / adr, prevCloseLoc, prevLast30, gapVsUsual,
     };
     const trade = (d: 1 | -1) => follow(day, k, d, price, onTick(price - d * STOP_ATR * atr, (-d) as 1 | -1), onTick(price + d * TARGET_ATR * atr, d), atr, risk);
     const lg = trade(1), sh = trade(-1);

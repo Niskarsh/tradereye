@@ -103,6 +103,24 @@ test('grid: the wide bracket and the ride to the close match an independent repl
   assert.ok(checked > 300);
 });
 
+test('grid: memory facts come only from earlier sessions and daily candles, and add up', () => {
+  // 20 earlier sessions that each rise 1 rupee from 10:15 to 15:15 (and are flat before)
+  const b: Bar[] = [];
+  for (let i = 0; i < 20; i++) b.push(...session(`2024-11-${String(i + 1).padStart(2, '0')}`, (k) => (k < 60 ? 300 : 300 + Math.min(1, (k - 59) / 300))));
+  const H = toSessions({ t: b.map((x) => x.t), o: b.map((x) => x.o), h: b.map((x) => x.h), l: b.map((x) => x.l), c: b.map((x) => x.c), v: b.map((x) => x.v) });
+  const { px, rnd } = walk(5);
+  const d = daily();
+  d.c[d.c.length - 6] = 280; // 5 days ago
+  const rows = gridDay({ date: '2025-01-06', history: H, day: session('2025-01-06', (k) => px[k], rnd), nifty: session('2025-01-06', () => 20000), daily: d });
+  const f = (r: number[], key: string) => r[1 + ML_KEYS.indexOf(key)];
+  const at = rows.find((r) => r[0] === 60)!;
+  const exp = H.map((s) => { const c = s.bars.map((x) => x.c); return (c[359] / c[59] - 1) * 100; });
+  assert.ok(Math.abs(f(at, 'habitClose') - exp.reduce((a, x) => a + x, 0) / exp.length) < 1e-9, 'usual move from this time to 15:15');
+  assert.equal(f(at, 'habitCloseUp'), 1);
+  assert.ok(Math.abs(f(at, 'ret5d') - (300 / 280 - 1) * 100) < 1e-9, '5-day move from the daily closes before today');
+  assert.ok(Math.abs(f(at, 'prevCloseLoc') - 0.5) < 1e-9 && Math.abs(f(at, 'hi20Adr') - (303 - px[59]) / 6) < 1e-9);
+});
+
 test('grid: no look-ahead: changing everything after a 10-min close never changes its facts', () => {
   const { px, rnd } = walk(11);
   const date = '2025-04-07', H = hist(), nifty = session(date, (k) => 20000 + k);
