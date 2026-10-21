@@ -44,3 +44,21 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
           NODE_OPTIONS: --max-old-space-size=6144
+          ML_DIR: ml-data
+      # Algo Lab: walk-forward machine learning on the dataset the backtest just wrote (never uploaded as data)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet numpy pandas scikit-learn
+      - name: Algo Lab (walk-forward models)
+        run: python scripts/ml_walkforward.py ml-data
+      - name: Save the Algo Lab results and finish the run
+        if: always()
+        run: npx --yes tsx@4 scripts/ml-upload.ts
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          ML_DIR: ml-data
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}

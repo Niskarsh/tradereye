@@ -13,6 +13,7 @@ import type { CaseId } from './cases';
  *   setups/runs/<runId>/study.json.gz       the reversal study: labelled moments -> facts -> rules (year 1) -> year 2
  *   setups/runs/<runId>/moments-long|short.bin.gz  every possible reversal entry (so new rules can be tested later)
  *   setups/runs/<runId>/claude-rules.json.gz      the rules Claude wrote from year 1, with their year 1 / year 2 results
+ *   setups/runs/<runId>/ml.json.gz          Algo Lab: walk-forward machine-learning results (out of sample)
  *   setups/candles/1m/<SYMBOL>/<YYYY-MM>.json.gz  one month of 1-minute candles (a finished month is never fetched again)
  *   setups/candles/daily/<SYMBOL>.json.gz   daily candles (fetched again on each run: one request per stock)
  */
@@ -46,13 +47,15 @@ export const studyKey = (runId: string) => `setups/runs/${runId}/study.json.gz`;
 /** every possible entry of the study, per side (lib/study/moments.ts), and the rules Claude wrote for that run */
 export const momentsKey = (runId: string, dir: 1 | -1) => `setups/runs/${runId}/moments-${dir === 1 ? 'long' : 'short'}.bin.gz`;
 export const claudeRulesKey = (runId: string) => `setups/runs/${runId}/claude-rules.json.gz`;
+/** Algo Lab: the walk-forward model results of a run (scripts/ml_walkforward.py) */
+export const mlKey = (runId: string) => `setups/runs/${runId}/ml.json.gz`;
 export const monthKey = (symbol: string, month: string) => `setups/candles/1m/${symbol.toUpperCase()}/${month}.json.gz`;
 export const dailyKey = (symbol: string) => `setups/candles/daily/${symbol.toUpperCase()}.json.gz`;
 
 export const RUN_ID = /^[0-9A-Za-z-]{6,40}$/;
 
 /** A run whose status has not moved for this long is treated as dead (the job was cancelled or timed out). */
-export const STALE_MS = 45 * 60_000;
+export const STALE_MS = 150 * 60_000; // the Algo Lab model step can run for an hour without a status update
 export function isActive(s: RunStatus | undefined, now = Date.now()): boolean {
   return !!s && (s.state === 'queued' || s.state === 'running') && now - s.updatedAt < STALE_MS;
 }

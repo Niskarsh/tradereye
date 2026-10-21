@@ -28,6 +28,7 @@ const ANALYSIS: Item[] = [
     { name: 'My Stats', href: '/stats' },
     { name: 'My Setups', href: '/setups' },
     { name: 'Reversal Study', href: '/study' },
+    { name: 'Algo Lab', href: '/algo' },
 ];
 const YOUTUBE = 'https://www.youtube.com/@CandlesBeforeCubicles?sub_confirmation=1';
 
