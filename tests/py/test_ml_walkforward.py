@@ -22,7 +22,8 @@ import ml_walkforward as ml  # noqa: E402
 FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr', 'ret30Atr', 'ret60Atr', 'distVwapAtr', 'distHiAtr', 'distLoAtr',
          'rangeAdr', 'posInRange', 'minSinceHi', 'minSinceLo', 'testsHi', 'testsLo', 'tBody', 'tUpWick', 'tLoWick', 'tRangeAtr', 'tVol', 'volTrend',
          'climax3', 'rvolSame', 'rvolDay', 'openBusy', 'atrPct', 'adrPct', 'nFirst5', 'nDay', 'nRecent30', 'nRecent10', 'nPosInRange', 'rsDay', 'rs30',
-         'ema10Atr', 'ema5Atr', 'ema1dAtr', 'pdhAtr', 'pdlAtr', 'vaHiAtr', 'vaLoAtr', 'pocAtr', 'upCandles', 'downCandles', 'priceRs']
+         'ema10Atr', 'ema5Atr', 'ema1dAtr', 'pdhAtr', 'pdlAtr', 'vaHiAtr', 'vaLoAtr', 'pocAtr', 'upCandles', 'downCandles', 'priceRs',
+         'habitClose', 'habitCloseUp', 'habitNext30', 'habitTrend', 'ret5d', 'ret20d', 'hi20Adr', 'lo20Adr', 'prevCloseLoc', 'prevLast30', 'gapVsUsual']
 LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet']
 
 
@@ -103,6 +104,11 @@ assert 'tLoWick' in top and 'rvolSame' in top, f'the model must lean on the plan
 liked = {(x['side'], x['f']): x['z'] for x in w['liked']}
 assert liked.get(('long', 'tLoWick'), 0) > 0.5, 'taken longs have long lower wicks'
 assert all(m['n'] <= ml.MAX_PER_DAY * 23 for m in w['months']), 'never more than the daily cap'
+
+ws = strat(edge, 'wideStock')
+print('PLANTED wide, no Nifty', ws['overall'])
+assert ws['overall']['netR'] > 0.25 and ws['overall']['t'] > 4, 'the planted edge is in the stock facts: found without the Nifty facts too'
+assert not any(x['f'] in ml.MARKET for x in ws['importance'] if x['share'] > 0), 'the no-Nifty model never uses a Nifty fact'
 
 nb = strat(edge, 'neutral')
 o = nb['overall']

@@ -7,7 +7,8 @@ backtest run is one **iteration**; the page keeps a table of every iteration so 
    09:35–14:45 of every stock-day in the universe (NSE, ₹250–340, 5 lakh+ shares average volume) over the last
    **4 years** (`ML_YEARS`; the setups and the Reversal Study keep 2): 47 facts known at that moment (moves, VWAP, day
    range, tests of the high/low, candle shape, volume, Nifty 500, relative strength, EMAs, previous-day and value-area
-   levels, volatility, price) and the results of trades taken there, long and short, after and before Dhan's charges
+   levels, volatility, price; from iteration 3 also memory: each stock's habit from that time of day over its last 20
+   sessions and the multi-day picture) and the results of trades taken there, long and short, after and before Dhan's charges
    at ₹300 risk (entry 1 tick worse than the close, stops 1 tick worse, targets only when traded through, same minute
    = stop):
    - tight bracket: stop 1 ATR (10-min), target 1.5 ATR, out by 15:00 (iteration 1; kept as a reference);
@@ -39,4 +40,9 @@ written.
    are ~0.13% of the position a round trip, so a 1-ATR 10-min stop (~0.46% of price) starts every trade ~−0.28R; the
    model leaned on the Nifty's first 5 minutes (market-timing, many same-direction trades on one day) and on the
    number of stocks in the universe (a calendar in disguise, removed).
-2. **Wider trades, a market-neutral basket, 4 years, locked exam months** (this version).
+2. **Wider trades, a market-neutral basket, 4 years, locked exam months** (Oct 2026): costs fixed (wide bracket
+   −0.01R after costs, +0.04R before; was −0.20R). Signal real but small: rank correlation 0.04, positive in 30 of 41
+   blind months (noise: 0.002). Still 41% leaning on Nifty's first 5 minutes. Ride to the close weakest (dropped);
+   basket best signal (0.05) but 6 legs of charges, 4 of 16 months green.
+3. **Memory facts, with vs without Nifty, 3-model average, 3 validation months** (this version). Exam months locked
+   from May 2026 for every iteration.
