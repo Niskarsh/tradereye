@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
-import { gridDay, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR } from '../lib/ml/grid';
+import { CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
 import { roundTripCharges, sizeFor } from '../lib/setups/costs';
 import { TICK, onTick } from '../lib/study/mine';
 
@@ -60,6 +60,47 @@ test('grid: the long / short results match an independent replay of the bracket 
     }
   }
   assert.ok(checked > 500);
+});
+
+test('grid: the wide bracket and the ride to the close match an independent replay (after and before costs)', () => {
+  const H = hist();
+  const col = (c: string) => ML_COLS.indexOf(c) - 2; // rows carry [slot, ...] without sym / date
+  const iAdr = 1 + ML_KEYS.indexOf('adrPct');
+  let checked = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const { px, rnd } = walk(seed * 13 + 5);
+    const date = `2025-06-${String(seed + 2).padStart(2, '0')}`;
+    const day = session(date, (k) => px[k], rnd);
+    const rows = gridDay({ date, history: H, day, nifty: session(date, () => 20000), daily: daily() });
+    for (const r of rows) {
+      const k = r[0], close = day[k - 1].c, adr = (r[iAdr] / 100) * close;
+      assert.ok(Math.abs(adr - 6) < 1e-6, 'usual daily range = the 10-day average high - low');
+      const replay = (d: 1 | -1, stopAdr: number, targetAdr?: number) => {
+        const entry = close + d * TICK, stop = onTick(close - d * stopAdr * adr, (-d) as 1 | -1);
+        const tgt = targetAdr === undefined ? undefined : onTick(close + d * targetAdr * adr, d);
+        let sAt = -1, tAt = -1;
+        for (let s = k; s < LATE_END; s++) {
+          if (sAt < 0 && (d === 1 ? day[s].l <= stop : day[s].h >= stop)) sAt = s;
+          if (tgt !== undefined && tAt < 0 && (d === 1 ? day[s].h >= tgt + TICK : day[s].l <= tgt - TICK)) tAt = s;
+        }
+        const win = tgt !== undefined && tAt >= 0 && (sAt < 0 || tAt < sAt);
+        const exit = win ? tgt! : sAt >= 0 ? stop - d * TICK : day[LATE_END - 1].c - d * TICK;
+        const dist = (entry - stop) * d, qty = sizeFor(300, dist);
+        const g = ((exit - entry) * d) / dist;
+        return { g, net: g - roundTripCharges(qty, entry, exit, d) / (qty * dist) };
+      };
+      for (const d of [1, -1] as const) {
+        const s = d === 1 ? 'L' : 'S';
+        const w = replay(d, WIDE_STOP_ADR, WIDE_TARGET_ADR), c = replay(d, CLOSE_STOP_ADR);
+        assert.ok(Math.abs(r[col(`wb${s}`)] - w.net) < 0.002 && Math.abs(r[col(`wb${s}g`)] - w.g) < 0.002, `wide ${date} ${k} ${d}`);
+        assert.ok(Math.abs(r[col(`cc${s}`)] - c.net) < 0.002 && Math.abs(r[col(`cc${s}g`)] - c.g) < 0.002, `close ${date} ${k} ${d}`);
+        assert.ok(r[col(`wb${s}`)] < r[col(`wb${s}g`)] && r[col(`cc${s}`)] < r[col(`cc${s}g`)], 'costs always cost');
+        checked++;
+      }
+      assert.ok(Math.abs(r[col('ccRet')] - (day[LATE_END - 1].c / close - 1) * 100) < 1e-9, 'the plain move to 15:15');
+    }
+  }
+  assert.ok(checked > 300);
 });
 
 test('grid: no look-ahead: changing everything after a 10-min close never changes its facts', () => {

@@ -3,7 +3,8 @@ import { tenMinuteBars, type Bar, type Session } from '../live/enrich';
 import { istParts, SESSION_OPEN_MIN } from '../live/time';
 import { hasSuspectGap, nMinuteBars, pointOfControl } from '../copilot/features';
 import { Atr, Ema, Zone, barOf, median, toSlots, valueArea, type B10 } from '../setups/engine';
-import { follow, onTick } from '../study/mine';
+import { follow, onTick, TICK } from '../study/mine';
+import { roundTripCharges, sizeFor } from '../setups/costs';
 
 /**
  * Algo Lab, step 1: the dataset. For every stock in the universe, on every day, at every 10-minute close from 09:35
@@ -13,6 +14,10 @@ import { follow, onTick } from '../study/mine';
  * The trade (the label): entry 1 tick worse than the 10-minute close, stop 1 ATR away, target 1.5 ATR away, both on
  * the tick grid; the target fills only when traded through; stop and target in the same minute = stop; anything open
  * is closed at 15:00. Sized at ₹300 risk. (The same fill rules as the Reversal Study: lib/study/mine.ts follow().)
+ *
+ * Iteration 2 adds two wider trades (costs are ~0.13% of the position per round trip, so a tight stop pays a big cost
+ * tax in R): the wide bracket (stop ½ the usual daily range, target ¾ of it, out by 15:15) and the ride to the close
+ * (a safety stop ¾ of the usual daily range, no target, out at 15:15). Each also carries its result before costs.
  *
  * Facts are from the stock's point of view (up = positive), so one model can learn both sides.
  * Cross-sectional ranks (this stock vs every other stock at the same minute) are added in the Python step.
@@ -68,13 +73,46 @@ export const ML_FEATURES = [
   ['priceRs', 'Price (₹)'],
 ] as const;
 export const ML_KEYS = ML_FEATURES.map((f) => f[0]);
-/** what each row carries after the facts: the trade result long and short (R after charges / before charges) */
-export const ML_LABELS = ['netL', 'netS', 'rL', 'rS'] as const;
+/**
+ * what each row carries after the facts: the trade results, long and short (R after charges; ...g = before charges):
+ *   netL/netS/rL/rS        the tight bracket (stop 1 ATR, target 1.5 ATR, out by 15:00)
+ *   wbL/wbS/wbLg/wbSg      the wide bracket (stop ½ usual daily range, target ¾, out by 15:15)
+ *   ccL/ccS/ccLg/ccSg      the ride to the close (safety stop ¾ usual daily range, out at 15:15)
+ *   ccRet                  the plain move from this close to the 15:15 close (%; for the market-neutral ranking)
+ */
+export const ML_LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet'] as const;
 export const ML_COLS = ['sym', 'date', 'slot', ...ML_KEYS, ...ML_LABELS];
 export const ML_WIDTH = ML_COLS.length;
 
 export const STOP_ATR = 1, TARGET_ATR = 1.5;
+/** the wider trades, in units of the usual daily range (10-day average high - low) */
+export const WIDE_STOP_ADR = 0.5, WIDE_TARGET_ADR = 0.75, CLOSE_STOP_ADR = 0.75;
 const FIRST = 20, LAST = 330, END = 345;
+/** the wider trades are closed at 15:15 (the close of the 15:14 minute) */
+export const LATE_END = 360;
+
+/**
+ * One trade with the same cautious fills as the study (lib/study/mine.ts follow): entry 1 tick worse than the close,
+ * the stop fills 1 tick worse, the target only when traded through by a tick, stop and target in the same minute =
+ * stop, anything open closed at the close of minute end-1 (1 tick worse). Sized at `risk` rupees.
+ * Returns R after charges and before.
+ */
+export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, close: number, stopPx: number, target: number | undefined, end: number, risk: number): { net: number; r: number } {
+  const entry = close + d * TICK;
+  let stopAt = -1, targetAt = -1;
+  for (let s = k; s < end; s++) {
+    if (stopAt < 0 && (d === 1 ? day.l[s] <= stopPx : day.h[s] >= stopPx)) stopAt = s;
+    if (target !== undefined && targetAt < 0 && (d === 1 ? day.h[s] >= target + TICK : day.l[s] <= target - TICK)) targetAt = s;
+    if (stopAt >= 0 && (targetAt >= 0 || target === undefined)) break;
+  }
+  const win = target !== undefined && targetAt >= 0 && (stopAt < 0 || targetAt < stopAt);
+  const exit = win ? target! : stopAt >= 0 ? stopPx - d * TICK : day.c[end - 1] - d * TICK;
+  const dist = (entry - stopPx) * d;
+  if (!(dist > 0)) return { net: NaN, r: NaN };
+  const qty = sizeFor(risk, dist);
+  const r = ((exit - entry) * d) / dist;
+  return { net: Math.round((r - roundTripCharges(qty, entry, exit, d) / (qty * dist)) * 1000) / 1000, r: Math.round(r * 1000) / 1000 };
+}
 
 export interface GridInput { date: string; history: Session[]; day: Bar[]; nifty: Bar[]; daily: Candles; riskInr?: number; pocRows?: number }
 
@@ -82,7 +120,7 @@ export interface GridInput { date: string; history: Session[]; day: Bar[]; nifty
 export function gridDay(inp: GridInput): number[][] {
   const risk = inp.riskInr ?? 300, rows = inp.pocRows ?? 30;
   const day = toSlots(inp.day), nifty = toSlots(inp.nifty);
-  if (!day || !nifty || day.n < END || nifty.n < LAST) return [];
+  if (!day || !nifty || day.n < LATE_END || nifty.n < LAST) return [];
   const daily = inp.daily, nd = daily.c.length;
   if (nd < 12) return [];
   const hist = inp.history.filter((s) => s.date < inp.date && s.bars.length).slice(-20);
@@ -167,7 +205,11 @@ export function gridDay(inp: GridInput): number[][] {
     };
     const trade = (d: 1 | -1) => follow(day, k, d, price, onTick(price - d * STOP_ATR * atr, (-d) as 1 | -1), onTick(price + d * TARGET_ATR * atr, d), atr, risk);
     const lg = trade(1), sh = trade(-1);
-    out.push([k, ...ML_KEYS.map((f) => (Number.isFinite(x[f]) ? x[f] : NaN)), lg.net, sh.net, lg.r, sh.r]);
+    const wide = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk);
+    const toClose = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk);
+    const wl = wide(1), ws = wide(-1), cl = toClose(1), cs = toClose(-1);
+    out.push([k, ...ML_KEYS.map((f) => (Number.isFinite(x[f]) ? x[f] : NaN)), lg.net, sh.net, lg.r, sh.r,
+      wl.net, ws.net, wl.r, ws.r, cl.net, cs.net, cl.r, cs.r, pct(day.c[LATE_END - 1], price)]);
   }
   return out;
 }

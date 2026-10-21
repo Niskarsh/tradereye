@@ -49,6 +49,8 @@ export interface JobDeps {
   onlySymbols?: string[];
   /** Algo Lab: write the dataset here for the Python step that runs after this job (the run is then finished by it) */
   gridDir?: string;
+  /** Algo Lab: years of history for its dataset (the setups and the study keep `years`); Dhan keeps 5 years of 1-min data */
+  mlYears?: number;
 }
 
 class RateLimit {
@@ -104,13 +106,17 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const universe = symbols.map((symbol) => ({ symbol, securityId: master.get(symbol) })).filter((x): x is { symbol: string; securityId: string } => !!x.securityId);
   log(`universe: ${universe.length} stocks (${source})`);
 
-  // ---- the period: the last 2 years of finished sessions
+  // ---- the period: the last 2 years of finished sessions (the Algo Lab dataset goes further back: mlYears)
   const today = new Date(now() + IST).toISOString().slice(0, 10);
-  const niftyDaily = await dhanCall(() => deps.dhan.daily({ securityId: NIFTY500.securityId, segment: NIFTY500.segment, instrument: NIFTY500.instrument, from: addDays(today, -800), to: today }));
+  const years = deps.years ?? 2;
+  const span = deps.gridDir ? Math.max(years, Math.min(4.5, deps.mlYears ?? 4)) : years;
+  const niftyDaily = await dhanCall(() => deps.dhan.daily({ securityId: NIFTY500.securityId, segment: NIFTY500.segment, instrument: NIFTY500.instrument, from: addDays(today, -Math.round(365 * span) - 70), to: today }));
   const sessions = [...new Set(niftyDaily.t.map(dateOf))].sort();
   const to = sessions.at(-1);
   if (!to) throw new Error('Dhan returned no Nifty 500 daily candles.');
-  const from = addDays(to, -Math.round(365 * (deps.years ?? 2)));
+  const from = addDays(to, -Math.round(365 * years));
+  /** the first day of the Algo Lab dataset (= from when there is no Algo Lab) */
+  const fromAll = addDays(to, -Math.round(365 * span));
   const inPeriod = sessions.filter((d) => d >= from && d <= to);
   const mid = inPeriod[Math.floor(inPeriod.length / 2)] ?? to;
 
@@ -121,9 +127,9 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const dailyStocks: DailyStock[] = [];
   await pool(universe, deps.concurrency ?? 3, async (u, i) => {
     try {
-      const daily = await dhanCall(() => deps.dhan.daily({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: addDays(from, -1150), to: today }));
+      const daily = await dhanCall(() => deps.dhan.daily({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: addDays(fromAll, -1150), to: today }));
       await putJson(deps.store, dailyKey(u.symbol), { v: 1, symbol: u.symbol, securityId: u.securityId, savedAt: now(), c: daily }).catch(() => {});
-      const days = screenerDays(daily, screener, from, to);
+      const days = screenerDays(daily, screener, fromAll, to);
       if (days.length) plan.push({ ...u, days, daily });
       signals.push(...runSwing(u.symbol, daily, niftyClose, from, to, screener, params));
       // kept for the delivery strategies only if it was ever in the price range during the period
@@ -132,7 +138,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
     await status({ phase: 'Daily candles: which stocks passed your screener', done: i + 1, total: universe.length });
   });
   plan.sort((a, b) => a.symbol.localeCompare(b.symbol));
-  const stockDays = plan.reduce((a, p) => a + p.days.length, 0);
+  const stockDays = plan.reduce((a, p) => a + p.days.filter((d) => d >= from).length, 0);
   log(`screener: ${plan.length} stocks passed on ${stockDays} stock-days`);
 
   // ---- delivery strategies on the daily candles (D1 / D2 ranked across stocks at each month-end; D3 / D4 per stock)
@@ -152,7 +158,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
     await putJson(deps.store, key, { v: 1, symbol: ins.symbol, securityId: ins.securityId, month, complete, savedAt: now(), c }).catch(() => {});
     return c;
   };
-  const allMonths = monthsNeeded(inPeriod);
+  const allMonths = monthsNeeded(sessions.filter((d) => d >= fromAll && d <= to));
   const niftyByDate = new Map<string, Session>();
   for (const m of allMonths) {
     for (const s of toSessions(await loadMonth(NIFTY500, m))) niftyByDate.set(s.date, s);
@@ -180,13 +186,14 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
       const cut = dailyDates.findIndex((x) => x >= d);
       const end = cut < 0 ? dailyDates.length : cut;
       const daily: Candles = { t: p.daily.t.slice(0, end), o: p.daily.o.slice(0, end), h: p.daily.h.slice(0, end), l: p.daily.l.slice(0, end), c: p.daily.c.slice(0, end), v: p.daily.v.slice(0, end) };
+      // Algo Lab: every 10-min close of this stock-day, with what the trades taken there would have made (all years)
+      grid?.add(p.symbol, d, gridDay({ date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, riskInr: params.riskInr, pocRows: params.pocRows }));
+      if (d < from) continue; // the setups and the study: the last `years` only
       const x = first10Busy(sess, i);
       if (x !== undefined) { const a = busyByDate.get(d) ?? []; a.push({ symbol: p.symbol, x }); busyByDate.set(d, a); }
       signals.push(...runDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, params, simulate: true }));
       // the reversal study: every moment that could have been a reversal entry, labelled with what happened next
       moments.push(...mineDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, riskInr: params.riskInr, pocRows: params.pocRows }));
-      // Algo Lab: every 10-min close of this stock-day, with what a long and a short taken there would have made
-      grid?.add(p.symbol, d, gridDay({ date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, riskInr: params.riskInr, pocRows: params.pocRows }));
     }
     done++;
     await status({ phase: 'Testing the setups', done, total: plan.length });
@@ -203,7 +210,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const summary = buildSummary(signals, {
     runId, createdAt: now(), period: { from, to, mid },
     universe: { source, symbols: plan.length, stockDays },
-    params: { ...params, priceMin: screener.priceMin, priceMax: screener.priceMax, avgVolMin: screener.avgVolMin, years: deps.years ?? 2 },
+    params: { ...params, priceMin: screener.priceMin, priceMax: screener.priceMax, avgVolMin: screener.avgVolMin, years },
   });
   for (const c of CASES) await putJson(deps.store, signalsKey(runId, c.id), pack(signals.filter((s) => s.case === c.id)));
   await putJson(deps.store, summaryKey(runId), summary);
@@ -218,7 +225,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const item: RunIndexItem = { runId, createdAt: summary.createdAt, period: summary.period, signals: signals.length, symbols: plan.length };
   await putJson(deps.store, INDEX_KEY, [item, ...index.filter((x) => x.runId !== runId)].slice(0, 36));
   if (grid) {
-    grid.close({ runId, from, to, mid, riskInr: params.riskInr });
+    grid.close({ runId, from: fromAll, to, mid, riskInr: params.riskInr });
     log(`algo lab: ${grid.rows} rows written`);
     // the Python step trains the models next; scripts/ml-upload.ts finishes the run
     await putJson(deps.store, STATUS_KEY, { runId, state: 'running', phase: `Algo Lab: training the models on ${grid.rows.toLocaleString('en-IN')} moments (walk-forward)`, startedAt, updatedAt: now() } satisfies RunStatus);
