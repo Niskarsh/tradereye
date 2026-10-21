@@ -43,7 +43,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=9216
           ML_DIR: ml-data
       # Algo Lab: walk-forward machine learning on the dataset the backtest just wrote (never uploaded as data)
       - uses: actions/setup-python@v5

@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ML_COLS, ML_FEATURES, ML_LABELS, ML_WIDTH, STOP_ATR, TARGET_ATR } from './grid';
+import { CLOSE_STOP_ADR, ML_COLS, ML_FEATURES, ML_LABELS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from './grid';
 
 /**
  * Writes the Algo Lab dataset to disk during the GitHub job (never to S3: it is only read by the Python step that
@@ -35,8 +35,9 @@ export class GridWriter {
   close(meta: { runId: string; from: string; to: string; mid: string; riskInr: number }) {
     this.flush();
     writeFileSync(join(this.dir, 'grid.json'), JSON.stringify({
-      v: 1, ...meta, cols: ML_COLS, labels: ML_LABELS, features: ML_FEATURES.map(([k, l]) => ({ k, l })), width: ML_WIDTH, rows: this.rows,
+      v: 2, ...meta, cols: ML_COLS, labels: ML_LABELS, features: ML_FEATURES.map(([k, l]) => ({ k, l })), width: ML_WIDTH, rows: this.rows,
       symbols: [...this.symbols.keys()], dates: [...this.dates.keys()], stopAtr: STOP_ATR, targetAtr: TARGET_ATR,
+      wideStopAdr: WIDE_STOP_ADR, wideTargetAdr: WIDE_TARGET_ADR, closeStopAdr: CLOSE_STOP_ADR,
     }));
   }
 }

@@ -18,7 +18,11 @@ async function main() {
   if (existsSync(file)) {
     const ml = JSON.parse(readFileSync(file, 'utf8'));
     await putJson(store, mlKey(runId), ml);
-    message = `Algo Lab: ${ml.overall?.n ?? 0} out-of-sample trades, ${ml.overall?.netR > 0 ? '+' : ''}${ml.overall?.netR ?? 0}R each after costs`;
+    const best = (ml.strategies ?? []).find((s: { id: string }) => s.id === ml.best);
+    const r = (x: number) => `${x > 0 ? '+' : ''}${x}R`;
+    message = best
+      ? `Algo Lab iteration ${ml.iteration}: best is ${best.name}, ${r(best.dev.netR)} a trade on the earlier months, ${r(best.exam.netR)} on the exam months (after costs)`
+      : `Algo Lab: ${ml.overall?.n ?? 0} out-of-sample trades, ${r(ml.overall?.netR ?? 0)} each after costs`;
   } else message = 'Backtest done; the Algo Lab model step failed (see the GitHub run log)';
   await putJson(store, STATUS_KEY, { runId, state: 'done', startedAt: prev?.startedAt ?? Date.now(), updatedAt: Date.now(), finishedAt: Date.now(), message } satisfies RunStatus);
   console.log(message);
