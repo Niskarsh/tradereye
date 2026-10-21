@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
-import { CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
+import { BIG_NOTIONAL, LIMIT_WINDOW, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
 import { roundTripCharges, sizeFor } from '../lib/setups/costs';
 import { TICK, onTick } from '../lib/study/mine';
 
@@ -101,6 +101,44 @@ test('grid: the wide bracket and the ride to the close match an independent repl
     }
   }
   assert.ok(checked > 300);
+});
+
+test('grid: the cheaper executions (limit order at the close; ₹3 lakh positions) match an independent replay', () => {
+  const H = hist();
+  const col = (c: string) => ML_COLS.indexOf(c) - 2;
+  const iAdr = 1 + ML_KEYS.indexOf('adrPct');
+  let filled = 0, missed = 0, cheaper = 0, pairs = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const { px, rnd } = walk(seed * 17 + 1);
+    const date = `2025-07-${String(seed + 2).padStart(2, '0')}`;
+    const day = session(date, (k) => px[k], rnd);
+    for (const r of gridDay({ date, history: H, day, nifty: session(date, () => 20000), daily: daily() })) {
+      const k = r[0], close = day[k - 1].c, adr = (r[iAdr] / 100) * close;
+      for (const d of [1, -1] as const) {
+        let f = -1;
+        for (let s = k; s < k + LIMIT_WINDOW; s++) if (d === 1 ? day[s].l <= close - TICK : day[s].h >= close + TICK) { f = s; break; }
+        const S = d === 1 ? 'L' : 'S';
+        if (f < 0) { assert.ok(Number.isNaN(r[col(`wb${S}l`)]) && Number.isNaN(r[col(`wb${S}b`)]), 'never filled = no trade'); missed++; continue; }
+        filled++;
+        const stop = onTick(close - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), tgt = onTick(close + d * WIDE_TARGET_ADR * adr, d);
+        let sAt = -1, tAt = -1;
+        for (let s = f; s < LATE_END; s++) {
+          if (sAt < 0 && (d === 1 ? day[s].l <= stop : day[s].h >= stop)) sAt = s;
+          if (tAt < 0 && (d === 1 ? day[s].h >= tgt + TICK : day[s].l <= tgt - TICK)) tAt = s;
+        }
+        const win = tAt >= 0 && (sAt < 0 || tAt < sAt);
+        const exit = win ? tgt : sAt >= 0 ? stop - d * TICK : day[LATE_END - 1].c - d * TICK;
+        const dist = (close - stop) * d, g = ((exit - close) * d) / dist;
+        for (const [suf, qty] of [['l', sizeFor(300, dist)], ['b', Math.floor(BIG_NOTIONAL / close)]] as const) {
+          const net = g - roundTripCharges(qty, close, exit, d) / (qty * dist);
+          assert.ok(Math.abs(r[col(`wb${S}${suf}`)] - net) < 0.002, `${date} ${k} ${d} ${suf}: ${r[col(`wb${S}${suf}`)]} vs ${net}`);
+        }
+        pairs++; if (r[col(`wb${S}b`)] > r[col(`wb${S}l`)]) cheaper++;
+      }
+    }
+  }
+  assert.ok(filled > 200 && missed > 0, `some limit orders fill, some do not (${filled} / ${missed})`);
+  assert.equal(cheaper, pairs, 'the ₹3 lakh position always pays less in R');
 });
 
 test('grid: memory facts come only from earlier sessions and daily candles, and add up', () => {

@@ -44,5 +44,8 @@ written.
    −0.01R after costs, +0.04R before; was −0.20R). Signal real but small: rank correlation 0.04, positive in 30 of 41
    blind months (noise: 0.002). Still 41% leaning on Nifty's first 5 minutes. Ride to the close weakest (dropped);
    basket best signal (0.05) but 6 legs of charges, 4 of 16 months green.
-3. **Memory facts, with vs without Nifty, 3-model average, 3 validation months** (this version). Exam months locked
-   from May 2026 for every iteration.
+3. **Memory facts, with vs without Nifty, 3-model average, 3 validation months** (Oct 2026): without Nifty facts the
+   signal nearly doubled (0.040 → 0.079, positive 39 of 40 months) and memory facts lead; but still +0.04R before
+   costs, −0.00R after; earlier months +0.01R (14/27 green), exam −0.12R (1/4).
+4. **Stock facts only, first-come-first-served picks (a look-ahead fix), min 1,500 moments per rule, three executions
+   (market / limit at the close / limit with ~₹3 lakh positions)** (this version).

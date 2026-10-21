@@ -92,7 +92,15 @@ export const ML_KEYS = ML_FEATURES.map((f) => f[0]);
  *   ccL/ccS/ccLg/ccSg      the ride to the close (safety stop ¾ usual daily range, out at 15:15)
  *   ccRet                  the plain move from this close to the 15:15 close (%; for the market-neutral ranking)
  */
-export const ML_LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet'] as const;
+export const ML_LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
+  'wbLl', 'wbSl', 'wbLb', 'wbSb', 'ccLl', 'ccSl', 'ccLb', 'ccSb'] as const;
+/**
+ * (iteration 4) the same wide-bracket / ride-to-close trades executed more cheaply, R after charges (NaN = the limit
+ * order was never filled, so no trade):
+ *   ...l   a limit order at the 10-min close (filled only if price trades through it within 10 minutes), ₹300 risk
+ *   ...b   the same limit order with a ~₹3 lakh position (Dhan's brokerage is capped at ₹20 an order)
+ */
+export const LIMIT_WINDOW = 10, BIG_NOTIONAL = 300_000;
 export const ML_COLS = ['sym', 'date', 'slot', ...ML_KEYS, ...ML_LABELS];
 export const ML_WIDTH = ML_COLS.length;
 
@@ -109,10 +117,18 @@ export const LATE_END = 360;
  * stop, anything open closed at the close of minute end-1 (1 tick worse). Sized at `risk` rupees.
  * Returns R after charges and before.
  */
-export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, close: number, stopPx: number, target: number | undefined, end: number, risk: number): { net: number; r: number } {
-  const entry = close + d * TICK;
+export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, close: number, stopPx: number, target: number | undefined, end: number, risk: number,
+  ex: { limit?: boolean; notional?: number } = {}): { net: number; r: number } {
+  // a limit order rests at the close: filled (at the close) in the first minute that trades through it by a tick
+  let from = k;
+  if (ex.limit) {
+    from = -1;
+    for (let s = k; s < Math.min(end, k + LIMIT_WINDOW); s++) if (d === 1 ? day.l[s] <= close - TICK : day.h[s] >= close + TICK) { from = s; break; }
+    if (from < 0) return { net: NaN, r: NaN };
+  }
+  const entry = ex.limit ? close : close + d * TICK;
   let stopAt = -1, targetAt = -1;
-  for (let s = k; s < end; s++) {
+  for (let s = from; s < end; s++) {
     if (stopAt < 0 && (d === 1 ? day.l[s] <= stopPx : day.h[s] >= stopPx)) stopAt = s;
     if (target !== undefined && targetAt < 0 && (d === 1 ? day.h[s] >= target + TICK : day.l[s] <= target - TICK)) targetAt = s;
     if (stopAt >= 0 && (targetAt >= 0 || target === undefined)) break;
@@ -121,7 +137,7 @@ export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d:
   const exit = win ? target! : stopAt >= 0 ? stopPx - d * TICK : day.c[end - 1] - d * TICK;
   const dist = (entry - stopPx) * d;
   if (!(dist > 0)) return { net: NaN, r: NaN };
-  const qty = sizeFor(risk, dist);
+  const qty = ex.notional ? Math.max(1, Math.floor(ex.notional / entry)) : sizeFor(risk, dist);
   const r = ((exit - entry) * d) / dist;
   return { net: Math.round((r - roundTripCharges(qty, entry, exit, d) / (qty * dist)) * 1000) / 1000, r: Math.round(r * 1000) / 1000 };
 }
@@ -244,8 +260,15 @@ export function gridDay(inp: GridInput): number[][] {
     const wide = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk);
     const toClose = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk);
     const wl = wide(1), ws = wide(-1), cl = toClose(1), cs = toClose(-1);
+    const cheap = (d: 1 | -1, big: boolean) => {
+      const ex = { limit: true, notional: big ? BIG_NOTIONAL : undefined };
+      return [ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk, ex).net,
+        ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk, ex).net];
+    };
+    const [wLl, cLl] = cheap(1, false), [wSl, cSl] = cheap(-1, false), [wLb, cLb] = cheap(1, true), [wSb, cSb] = cheap(-1, true);
     out.push([k, ...ML_KEYS.map((f) => (Number.isFinite(x[f]) ? x[f] : NaN)), lg.net, sh.net, lg.r, sh.r,
-      wl.net, ws.net, wl.r, ws.r, cl.net, cs.net, cl.r, cs.r, pct(day.c[LATE_END - 1], price)]);
+      wl.net, ws.net, wl.r, ws.r, cl.net, cs.net, cl.r, cs.r, pct(day.c[LATE_END - 1], price),
+      wLl, wSl, wLb, wSb, cLl, cSl, cLb, cSb]);
   }
   return out;
 }
