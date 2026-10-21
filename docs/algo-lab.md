@@ -52,4 +52,7 @@ written.
    19/35 months; +0.06R before costs; signal 0.077. Shorts +0.03R, longs −0.03R; the first hour carries it. Limit
    orders were worse (the unfilled ones were the winners).
 5. **Four variants (control / shorts only / 09:35–10:55 only / basket), 30 training months, position sizes ₹300 risk /
-   ~₹1 lakh / ~₹3 lakh with market orders, breakdowns on earlier months only** (this version).
+   ~₹1 lakh / ~₹3 lakh with market orders, breakdowns on earlier months only** (Oct 2026): shorts only best, +0.03R
+   (t 1.9), exam +0.05R (4/6 green); ₹1 lakh positions +0.04R (t 2.5). Kept as branch `algo-iter-5`.
+6. **Shorts benchmark (B) vs shorts also at 09:25 (E, 2-tick entry there) vs control (A); every iteration preserved**
+   (this version). See docs/algo-iterations.md.

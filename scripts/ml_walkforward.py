@@ -24,13 +24,12 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 5
+ITERATION = 6
 CHANGES = [
-    'Four strategies side by side, each testing one fix: A = iteration 4 unchanged (the control); B = shorts only (in this universe a blind long starts ~0.06R behind a blind short, before costs); C = decisions 09:35–10:55 only (the model leans on overnight facts, and iteration 4\'s edge was in the first hour); D = the market-neutral basket.',
-    'Models learn from up to 30 months before each month (was 18): more market moods to learn from.',
-    'The cost table now compares position sizes with market orders: ₹300 risk, ~₹1 lakh and ~₹3 lakh positions (Dhan\'s ₹20 brokerage cap). Limit orders at the close are gone: in iteration 4 the orders that never filled were the winners.',
-    'The side and time-of-day breakdowns use the earlier months only, so the exam months never steer the next step.',
-    'Exam months still locked from May 2026. Four variants raise the odds of a lucky one: the bar is t ≥ 2 on the earlier months and not red on the exam.',
+    'Iteration 5\'s winner, B (shorts only, +0.03R, t 1.9; +0.04R with t 2.5 at ~₹1 lakh positions; exam green 4 of 6), is kept unchanged as the benchmark, beside A (both sides) as the control.',
+    'New E: shorts only, also allowed at 09:25 (the close of the first 10-min candle). 72% of B\'s trades were taken at 09:35, the earliest moment it was allowed, so the edge may start earlier. Entries at 09:25 are filled 2 ticks worse instead of 1 (the open is the costliest time to trade).',
+    'Dropped C (09:35–10:55 only: no better than A) and D (the basket: red for four iterations).',
+    'Every iteration is now preserved: its full results (every trade) and the exact code that made it, so we can always go back.',
 ]
 TRAIN_MONTHS = 30
 VAL_MONTHS = 3
@@ -53,17 +52,18 @@ MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 _WIDE = {'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'L1': 'wbL1', 'S1': 'wbS1', 'L3': 'wbL3', 'S3': 'wbS3', 'noMarket': True}
 _WDESC = 'stop ½ of its usual daily range away, target ¾ of it, out by 15:15, picked from the stock\'s own facts and habits (no Nifty)'
 STRATEGIES = [
-    {**_WIDE, 'id': 'wideStock', 'name': 'A. Wide bracket (control)', 'desc': f'Long or short one stock: {_WDESC}. The same as iteration 4.'},
-    {**_WIDE, 'id': 'wideShort', 'name': 'B. Wide bracket, shorts only', 'only': -1, 'desc': f'Short only: {_WDESC}.'},
-    {**_WIDE, 'id': 'wideMorning', 'name': 'C. Wide bracket, 09:35–10:55 only', 'lastSlot': 100, 'desc': f'Long or short, decided between 09:35 and 10:55 only: {_WDESC}.'},
-    {'id': 'neutralStock', 'name': 'D. Market-neutral basket', 'kind': 'neutral', 'L': 'ccL', 'S': 'ccS', 'Lg': 'ccLg', 'Sg': 'ccSg',
-     'L1': 'ccL1', 'S1': 'ccS1', 'L3': 'ccL3', 'S3': 'ccS3', 'noMarket': True,
-     'desc': 'At 09:45, 10:45 and 11:45: buy the 3 stocks the model rates best and short the 3 it rates worst, all held to 15:15 '
-             '(safety stop ¾ of the usual daily range). The market\'s direction cancels out; only the ranking can make money.'},
+    {**_WIDE, 'id': 'wideStock', 'name': 'A. Wide bracket (control)', 'firstSlot': 20, 'desc': f'Long or short one stock from 09:35: {_WDESC}. The same as iterations 4 and 5.'},
+    {**_WIDE, 'id': 'wideShort', 'name': 'B. Shorts only (iteration 5\'s best)', 'only': -1, 'firstSlot': 20, 'desc': f'Short only, from 09:35: {_WDESC}. The same as iteration 5.'},
+    {**_WIDE, 'id': 'wideShortEarly', 'name': 'E. Shorts only, from 09:25', 'only': -1, 'firstSlot': 10, 'desc': f'Short only, also allowed at 09:25 (filled 2 ticks worse there): {_WDESC}.'},
 ]
 COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
          ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
          ('l3', 'Market orders, ~₹3 lakh position', 'p3')]
+
+
+def r2(x):
+    x = float(x)
+    return round(x, 3) if np.isfinite(x) else None
 
 
 def log(*a):
@@ -138,6 +138,10 @@ def allowed(part, pl, ps, st):
         pl[:] = -np.inf
     if st.get('only') == 1:
         ps[:] = -np.inf
+    if st.get('firstSlot'):
+        early = part['slot'].values < st['firstSlot']
+        pl[early] = -np.inf
+        ps[early] = -np.inf
     if st.get('lastSlot'):
         late = part['slot'].values > st['lastSlot']
         pl[late] = -np.inf
@@ -415,12 +419,17 @@ def main(d):
             'recent': [{'day': x.day, 'sym': syms[int(x.sym)], 'time': f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}',
                         'side': 'LONG' if x.side == 1 else 'SHORT', 'pred': round(float(x.pred), 3), 'net': round(float(x.net), 2)}
                        for x in recent.itertuples()],
+            # every out-of-sample trade (kept with the iteration, so any later version can be compared trade by trade)
+            'tradeCols': ['day', 'sym', 'time', 'side', 'pred', 'net', 'gross', 'p1', 'p3'],
+            'trades': [[x.day, syms[int(x.sym)], f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}', int(x.side),
+                        round(float(x.pred), 3), r2(x.net), r2(x.gross), r2(x.p1), r2(x.p3)] for x in trades.itertuples()],
         })
         log(st['id'], 'overall', overall, 'dev', dev['netR'], 'exam', exam['netR'], 'ic', ic)
 
     best = max(out, key=lambda s: s['dev']['netR'] if s['dev']['n'] >= 100 else -9)
     result = {
         'v': 2, 'iteration': ITERATION, 'changes': CHANGES, 'runId': head['runId'], 'createdAt': int(time.time() * 1000),
+        'code': os.environ.get('GITHUB_SHA'),  # the exact code that made these results
         'period': {'from': head['from'], 'to': head['to']}, 'examFrom': exam_from,
         'rows': int(len(df)), 'stocks': len(syms), 'days': len(head['dates']),
         'setup': {'trainMonths': TRAIN_MONTHS, 'valMonths': VAL_MONTHS, 'examMonths': EXAM_MONTHS, 'maxPerDay': MAX_PER_DAY, 'maxPerSide': MAX_PER_SIDE,
