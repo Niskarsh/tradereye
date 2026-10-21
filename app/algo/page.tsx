@@ -17,6 +17,7 @@ interface Strat {
   baseline: { long: number; short: number; longGross: number; shortGross: number };
   overall: P & { maxDrawdownR: number; inrPerMonth: number }; dev: P; exam: P;
   ic: { mean: number | null; positive: number; months: number };
+  costs?: { id: string; name: string; fill: number; overall: S; months: [number, number]; dev: S; devMonths: [number, number]; exam: S; examMonths: [number, number] }[];
   bySide: { long: S; short: S }; byHour: (S & { hour: string })[]; months: Month[];
   importance: { f: string; label: string; share: number }[];
   liked: { side: string; f: string; label: string; z: number; taken: number; all: number }[];
@@ -128,7 +129,34 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
         {neutral && ` Baskets at ${ml.setup.neutralTimes.join(', ')}: ${ml.setup.neutralK} longs + ${ml.setup.neutralK} shorts, each stock once a day.`}
       </p>
 
-      <Card title="Month by month (every month traded blind)" sub="A real edge is green most months, not just one big month. Exam months are marked; the bar to trade and 'stood aside' were decided on the 2 months before each month.">
+      {s.costs && (
+        <Card title="The same trades, three ways of executing them" sub="Which trades are taken does not change; only how they are filled and what they cost. A limit order rests at the 10-min close and counts only if price trades through it within 10 minutes; if it never fills, there is no trade. ₹3 lakh positions risk far more than ₹300 per trade: compare R, not rupees.">
+          <div className="-mx-2 overflow-x-auto">
+            <table className="w-full min-w-[620px] text-xs">
+              <thead><tr className={HEAD}>
+                <th className="px-2 py-1.5 text-left">Execution</th><th className={TH}>Filled</th><th className={TH}>Trades</th><th className={TH}>R after costs</th><th className={TH}>t</th>
+                <th className={TH}>Months green</th><th className={TH}>Earlier months</th><th className={TH}>Exam</th>
+              </tr></thead>
+              <tbody>
+                {s.costs.map((c) => (
+                  <tr key={c.id} className="border-b border-line/60 font-mono tabular-nums">
+                    <td className="px-2 py-1.5 font-sans">{c.name}</td>
+                    <td className={TH}>{pct(c.fill)}</td>
+                    <td className={TH}>{c.overall.n}</td>
+                    <td className={`${TH} font-bold ${tone(c.overall.netR, c.overall.n > 0)}`}>{c.overall.n ? rr(c.overall.netR) : '–'}</td>
+                    <td className={TH}>{c.overall.n ? fx(c.overall.t) : '–'}</td>
+                    <td className={TH}>{c.months[0]} / {c.months[1]}</td>
+                    <td className={`${TH} ${tone(c.dev.netR, c.dev.n > 0)}`}>{c.dev.n ? `${rr(c.dev.netR)} · ${c.devMonths[0]}/${c.devMonths[1]}` : '–'}</td>
+                    <td className={`${TH} ${tone(c.exam.netR, c.exam.n > 0)}`}>{c.exam.n ? `${rr(c.exam.netR)} · ${c.examMonths[0]}/${c.examMonths[1]}` : '–'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      <Card title="Month by month (every month traded blind)" sub="A real edge is green most months, not just one big month. Exam months are marked; the bar to trade and 'stood aside' were decided on the months just before each month.">
         <div className="-mx-2 overflow-x-auto">
           <table className="w-full min-w-[620px] text-xs">
             <thead><tr className={HEAD}>

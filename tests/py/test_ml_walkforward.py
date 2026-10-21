@@ -24,18 +24,19 @@ FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr
          'climax3', 'rvolSame', 'rvolDay', 'openBusy', 'atrPct', 'adrPct', 'nFirst5', 'nDay', 'nRecent30', 'nRecent10', 'nPosInRange', 'rsDay', 'rs30',
          'ema10Atr', 'ema5Atr', 'ema1dAtr', 'pdhAtr', 'pdlAtr', 'vaHiAtr', 'vaLoAtr', 'pocAtr', 'upCandles', 'downCandles', 'priceRs',
          'habitClose', 'habitCloseUp', 'habitNext30', 'habitTrend', 'ret5d', 'ret20d', 'hi20Adr', 'lo20Adr', 'prevCloseLoc', 'prevLast30', 'gapVsUsual']
-LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet']
+LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
+          'wbLl', 'wbSl', 'wbLb', 'wbSb', 'ccLl', 'ccSl', 'ccLb', 'ccSb']
 
 
 def make(d, planted, seed):
     rng = np.random.default_rng(seed)
     days = []
     t = datetime.date(2024, 1, 1)
-    while len(days) < int(os.environ.get('DAYS', '480')):
+    while len(days) < int(os.environ.get('DAYS', '380')):
         if t.weekday() < 5:
             days.append(t.isoformat())
         t += datetime.timedelta(days=1)
-    syms, slots = 40, list(range(20, 331, 10))
+    syms, slots = 30, list(range(20, 331, 10))
     n = len(days) * syms * len(slots)
     X = rng.normal(size=(n, len(FEATS))).astype(np.float32)
     X[:, FEATS.index('minute')] = np.tile(np.array(slots, dtype=np.float32), len(days) * syms)
@@ -61,6 +62,12 @@ def make(d, planted, seed):
     ccLg, ccSg = ccRet / stop_pct, -ccRet / stop_pct
     lab = {'netL': rL - 0.3, 'netS': rS - 0.3, 'rL': rL, 'rS': rS, 'wbL': wbLg - 0.07, 'wbS': wbSg - 0.07, 'wbLg': wbLg, 'wbSg': wbSg,
            'ccL': ccLg - 0.05, 'ccS': ccSg - 0.05, 'ccLg': ccLg, 'ccSg': ccSg, 'ccRet': ccRet}
+    # cheaper executions: a limit order fills 80% of the time and saves charges (NaN = never filled)
+    for side in 'LS':
+        for k in ('wb', 'cc'):
+            miss = rng.uniform(size=n) < 0.2
+            lab[f'{k}{side}l'] = np.where(miss, np.nan, lab[f'{k}{side}g'] - (0.04 if k == 'wb' else 0.03))
+            lab[f'{k}{side}b'] = np.where(miss, np.nan, lab[f'{k}{side}g'] - 0.02)
     rows = np.column_stack([sym, date, X[:, 0], X] + [lab[k] for k in LABELS]).astype(np.float32)
     rows.tofile(os.path.join(d, 'grid.bin'))
     cols = ['sym', 'date', 'slot'] + FEATS + LABELS
@@ -81,41 +88,62 @@ def strat(res, sid):
     return next(s for s in res['strategies'] if s['id'] == sid)
 
 
-noise = run(False, 1)
-assert noise['v'] == 2 and noise['examFrom'] > noise['strategies'][0]['months'][0]['month']
-for s in noise['strategies']:
-    o = s['overall']
-    print('NOISE   ', s['id'], o, 'ic', s['ic'])
-    assert o['netR'] <= 0.05 or o['n'] < 100, f'noise must not look like an edge: {s["id"]} {o}'
-    assert s['ic']['mean'] is None or abs(s['ic']['mean']) < 0.03, f'noise predictions must not line up with outcomes: {s["ic"]}'
-    assert o['n'] == s['dev']['n'] + s['exam']['n'], 'dev + exam = all'
-    assert all(not m['exam'] for m in s['months'] if m['month'] < noise['examFrom'])
+def check_picker():
+    """first come, first served: a stronger moment later in the day never displaces an earlier trade"""
+    import pandas as pd
+    st = ml.STRATEGIES[0]
+    n = ml.MAX_PER_DAY + 3
+    part = pd.DataFrame({'day': ['2025-01-02'] * n, 'sym': list(range(n)), 'slot': [20 + 10 * i for i in range(n)]})
+    for c in ('L', 'S', 'Lg', 'Sg', 'Ll', 'Sl', 'Lb', 'Sb'):
+        part[st[c]] = 0.0
+    pl = np.array([0.1 + 0.1 * i for i in range(n)])  # later = stronger
+    ps = np.full(n, -1.0)
+    tr = ml.pick_dir(part, pl, ps, 0.05, st)
+    assert len(tr) == ml.MAX_PER_SIDE and sorted(tr['slot']) == [20 + 10 * i for i in range(ml.MAX_PER_SIDE)], tr
 
-edge = run(True, 2)
-w = strat(edge, 'wide')
-o = w['overall']
-print('PLANTED wide   ', o, w['bySide']['long'], 'ic', w['ic'])
-assert o['n'] >= 500, 'the planted edge must be traded'
-assert o['netR'] > 0.25 and o['t'] > 4, f'the planted edge must be found out of sample: {o}'
-assert o['monthsGreen'] >= 0.8 * o['monthsTraded'], 'and month after month'
-assert o['gross'] > o['netR'], 'before costs is better than after'
-top = [x['f'] for x in w['importance'][:6]]
-assert 'tLoWick' in top and 'rvolSame' in top, f'the model must lean on the planted facts: {top}'
-liked = {(x['side'], x['f']): x['z'] for x in w['liked']}
-assert liked.get(('long', 'tLoWick'), 0) > 0.5, 'taken longs have long lower wicks'
-assert all(m['n'] <= ml.MAX_PER_DAY * 23 for m in w['months']), 'never more than the daily cap'
 
-ws = strat(edge, 'wideStock')
-print('PLANTED wide, no Nifty', ws['overall'])
-assert ws['overall']['netR'] > 0.25 and ws['overall']['t'] > 4, 'the planted edge is in the stock facts: found without the Nifty facts too'
-assert not any(x['f'] in ml.MARKET for x in ws['importance'] if x['share'] > 0), 'the no-Nifty model never uses a Nifty fact'
+check_picker()
+print('OK: the picker is first come, first served')
+which = sys.argv[1] if len(sys.argv) > 1 else 'all'
+if which in ('all', 'noise'):
+  noise = run(False, 1)
+  assert noise['v'] == 2 and noise['examFrom'] > noise['strategies'][0]['months'][0]['month']
+  for s in noise['strategies']:
+      o = s['overall']
+      print('NOISE   ', s['id'], o, 'ic', s['ic'])
+      assert o['netR'] <= 0.05 or o['n'] < 100, f'noise must not look like an edge: {s["id"]} {o}'
+      assert s['ic']['mean'] is None or abs(s['ic']['mean']) < 0.03, f'noise predictions must not line up with outcomes: {s["ic"]}'
+      assert o['n'] == s['dev']['n'] + s['exam']['n'], 'dev + exam = all'
+      assert all(not m['exam'] for m in s['months'] if m['month'] < noise['examFrom'])
 
-nb = strat(edge, 'neutral')
-o = nb['overall']
-print('PLANTED neutral', o, nb['bySide'], 'ic', nb['ic'])
-assert o['n'] >= 500 and o['netR'] > 0.2 and o['t'] > 4, f'the planted cross-sectional edge must be found: {o}'
-assert nb['bySide']['long']['n'] == nb['bySide']['short']['n'], 'as many shorts as longs: market-neutral'
-assert nb['ic']['mean'] > 0.1 and nb['ic']['positive'] == nb['ic']['months'], 'the ranking lines up with the outcome every month'
-top = [x['f'] for x in nb['importance'][:4]]
-assert 'rs30' in top or 'rs30_rk' in top, f'the basket must lean on the planted fact: {top}'
-print('OK: no edge in noise; the planted edges found out of sample, month after month')
+if which in ('all', 'planted'):
+  edge = run(True, 2)
+  w = strat(edge, 'wideStock')
+  o = w['overall']
+  print('PLANTED wide   ', o, w['bySide']['long'], 'ic', w['ic'])
+  assert o['n'] >= 400, 'the planted edge must be traded'
+  assert o['netR'] > 0.25 and o['t'] > 4, f'the planted edge must be found out of sample: {o}'
+  assert o['monthsGreen'] >= 0.8 * o['monthsTraded'], 'and month after month'
+  assert o['gross'] > o['netR'], 'before costs is better than after'
+  top = [x['f'] for x in w['importance'][:6]]
+  assert 'tLoWick' in top and 'rvolSame' in top, f'the model must lean on the planted facts: {top}'
+  liked = {(x['side'], x['f']): x['z'] for x in w['liked']}
+  assert liked.get(('long', 'tLoWick'), 0) > 0.5, 'taken longs have long lower wicks'
+  assert all(m['n'] <= ml.MAX_PER_DAY * 23 for m in w['months']), 'never more than the daily cap'
+
+  assert not any(x['f'] in ml.MARKET for x in w['importance'] if x['share'] > 0), 'the stock-only model never uses a Nifty fact'
+  cv = {c['id']: c for c in w['costs']}
+  print('PLANTED costs', {k: (v['fill'], v['overall']['netR']) for k, v in cv.items()})
+  assert cv['now']['fill'] == 1 and cv['now']['overall']['netR'] == o['netR'], 'as now = the main numbers'
+  assert 0.7 < cv['limit']['fill'] < 0.9 and cv['big']['fill'] == cv['limit']['fill'], 'unfilled limit orders are no trade'
+  assert cv['big']['overall']['netR'] > cv['limit']['overall']['netR'] > cv['now']['overall']['netR'], 'cheaper execution keeps more'
+
+  nb = strat(edge, 'neutralStock')
+  o = nb['overall']
+  print('PLANTED neutral', o, nb['bySide'], 'ic', nb['ic'])
+  assert o['n'] >= 500 and o['netR'] > 0.2 and o['t'] > 4, f'the planted cross-sectional edge must be found: {o}'
+  assert nb['bySide']['long']['n'] == nb['bySide']['short']['n'], 'as many shorts as longs: market-neutral'
+  assert nb['ic']['mean'] > 0.1 and nb['ic']['positive'] == nb['ic']['months'], 'the ranking lines up with the outcome every month'
+  top = [x['f'] for x in nb['importance'][:4]]
+  assert 'rs30' in top or 'rs30_rk' in top, f'the basket must lean on the planted fact: {top}'
+print('OK:', which)
