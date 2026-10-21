@@ -24,14 +24,15 @@ interface Strat {
   recent: { day: string; sym: string; time: string; side: string; pred: number; net: number }[];
 }
 interface Ml {
-  v: 1 | 2; iteration: number; changes: string[]; runId: string; createdAt: number; period: { from: string; to: string }; examFrom: string;
+  v: 1 | 2; iteration: number; changes: string[]; runId: string; code?: string | null; createdAt: number; period: { from: string; to: string }; examFrom: string;
   rows: number; stocks: number; days: number;
   setup: { trainMonths: number; valMonths: number; examMonths: number; maxPerDay: number; maxPerSide: number; riskInr: number; neutralTimes: string[]; neutralK: number };
   baselineTight: { long: number; short: number };
   best: string; strategies: Strat[];
 }
 interface Line { id: string; name: string; n: number; netR: number; gross: number | null; t: number; monthsGreen: number; monthsTraded: number; dev: number | null; exam: number | null; ic: number | null }
-interface Head { runId: string; createdAt: number; iteration: number; lines: Line[] }
+interface Head { runId: string; createdAt: number; iteration: number; code?: string | null; lines: Line[] }
+const codeLink = (sha?: string | null) => (sha ? <a className="underline" href={`https://github.com/Niskarsh/tradereye/commit/${sha}`} target="_blank" rel="noreferrer">{sha.slice(0, 7)}</a> : null);
 
 const inr = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '–' : `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`);
 const fmtDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -71,7 +72,7 @@ const HEAD = 'border-b border-line text-[10px] font-black uppercase tracking-wid
 function History({ history }: { history: Head[] }) {
   if (!history.length) return null;
   return (
-    <Card title="Iterations so far" sub="Every run of the Algo Lab, newest first. Earlier months decide the next step; the exam months (the last 6) only confirm. If we try many things, one will look green by luck: a real edge stays green on both.">
+    <Card title="Iterations so far" sub="Every run of the Algo Lab, newest first. From iteration 5 on, each one is kept for good (its results, every trade, and its code version), so we can always go back. Earlier months decide the next step; the exam months (the last 6) only confirm. If we try many things, one will look green by luck: a real edge stays green on both.">
       <div className="-mx-2 overflow-x-auto">
         <table className="w-full min-w-[640px] text-xs">
           <thead><tr className={HEAD}>
@@ -83,7 +84,7 @@ function History({ history }: { history: Head[] }) {
             {history.flatMap((h) => h.lines.map((l, i) => (
               <tr key={`${h.runId}${l.id}`} className="border-b border-line/60 font-mono tabular-nums">
                 <td className="px-2 py-1.5 font-sans font-bold">{i === 0 ? h.iteration : ''}</td>
-                <td className="px-2 py-1.5 font-sans text-ink-3">{i === 0 ? new Date(h.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}</td>
+                <td className="px-2 py-1.5 font-sans text-ink-3">{i === 0 ? <>{new Date(h.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} {codeLink(h.code)}</> : ''}</td>
                 <td className="px-2 py-1.5 font-sans">{l.name}</td>
                 <td className={TH}>{l.n}</td>
                 <td className={`${TH} ${tone(l.gross)}`}>{rr(l.gross)}</td>
@@ -274,6 +275,7 @@ export default function AlgoPage() {
           <>
             <Card title={`Iteration ${v2.iteration}: what changed`} sub={`${fmtDate(v2.period.from)} – ${fmtDate(v2.period.to)} · ${v2.stocks} stocks · ${v2.rows.toLocaleString('en-IN')} moments (every 10-min close 09:35–14:45) · exam months from ${mon(v2.examFrom)}`}>
               <ul className="list-disc space-y-1 pl-4 text-xs text-ink-2">{v2.changes.map((c) => <li key={c}>{c}</li>)}</ul>
+              {v2.code && <p className="mt-1 text-[11px] text-ink-3">Code version {codeLink(v2.code)} (also tagged algo-iter-{v2.iteration}-{v2.runId} on GitHub).</p>}
               <p className="mt-2 text-[11px] text-ink-3">
                 Every trade: entry 1 tick worse than the 10-min close, stops fill 1 tick worse, targets only when traded through, Dhan&apos;s charges at ₹{v2.setup.riskInr} risk.
                 Each month: models trained on up to {v2.setup.trainMonths} months before it, the bar to trade set on the {v2.setup.valMonths} months just before (with models that never saw them), then the month traded blind.

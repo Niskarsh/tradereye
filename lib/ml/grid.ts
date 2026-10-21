@@ -7,8 +7,8 @@ import { follow, onTick, TICK } from '../study/mine';
 import { roundTripCharges, sizeFor } from '../setups/costs';
 
 /**
- * Algo Lab, step 1: the dataset. For every stock in the universe, on every day, at every 10-minute close from 09:35
- * to 14:45: ~47 facts known at that moment (only candles that closed by then), and what a trade taken right there
+ * Algo Lab, step 1: the dataset. For every stock in the universe, on every day, at every 10-minute close from 09:25
+ * (09:35 before iteration 6) to 14:45: ~47 facts known at that moment (only candles that closed by then), and what a trade taken right there
  * would have made, long and short, after Dhan's charges and slippage.
  *
  * The trade (the label): entry 1 tick worse than the 10-minute close, stop 1 ATR away, target 1.5 ATR away, both on
@@ -108,7 +108,11 @@ export const ML_WIDTH = ML_COLS.length;
 export const STOP_ATR = 1, TARGET_ATR = 1.5;
 /** the wider trades, in units of the usual daily range (10-day average high - low) */
 export const WIDE_STOP_ADR = 0.5, WIDE_TARGET_ADR = 0.75, CLOSE_STOP_ADR = 0.75;
-const FIRST = 20, LAST = 330, END = 345;
+/** (iteration 6) the first decision is the close of the first 10-min candle, 09:25 (was 09:35): 72% of iteration 5's
+ * shorts were taken at the earliest moment allowed. The open is the costliest time to trade, so an entry at 09:25 is
+ * filled OPEN_SLIP_TICKS worse than its close (2 ticks instead of 1). */
+const FIRST = 10, LAST = 330, END = 345;
+export const OPEN_SLIP_TICKS = 2;
 /** the wider trades are closed at 15:15 (the close of the 15:14 minute) */
 export const LATE_END = 360;
 
@@ -119,7 +123,7 @@ export const LATE_END = 360;
  * Returns R after charges and before.
  */
 export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, close: number, stopPx: number, target: number | undefined, end: number, risk: number,
-  ex: { limit?: boolean; notional?: number } = {}): { net: number; r: number } {
+  ex: { limit?: boolean; notional?: number; slip?: number } = {}): { net: number; r: number } {
   // a limit order rests at the close: filled (at the close) in the first minute that trades through it by a tick
   let from = k;
   if (ex.limit) {
@@ -127,7 +131,7 @@ export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d:
     for (let s = k; s < Math.min(end, k + LIMIT_WINDOW); s++) if (d === 1 ? day.l[s] <= close - TICK : day.h[s] >= close + TICK) { from = s; break; }
     if (from < 0) return { net: NaN, r: NaN };
   }
-  const entry = ex.limit ? close : close + d * TICK;
+  const entry = ex.limit ? close : close + d * TICK * (ex.slip ?? 1);
   let stopAt = -1, targetAt = -1;
   for (let s = from; s < end; s++) {
     if (stopAt < 0 && (d === 1 ? day.l[s] <= stopPx : day.h[s] >= stopPx)) stopAt = s;
@@ -238,7 +242,7 @@ export function gridDay(inp: GridInput): number[][] {
     const pct = (a: number, b: number) => (a / b - 1) * 100;
     const x: Record<string, number> = {
       minute: k, retOpenPct: pct(price, open), retOpenAdr: (price - open) / adr, gapPct, prevDayRet,
-      ret10Atr: (price - day.c[k - 11]) / atr, ret30Atr: (price - day.c[k - 31 >= 0 ? k - 31 : 0]) / atr, ret60Atr: k >= 61 ? (price - day.c[k - 61]) / atr : NaN,
+      ret10Atr: (price - (k >= 11 ? day.c[k - 11] : open)) / atr, ret30Atr: (price - day.c[k - 31 >= 0 ? k - 31 : 0]) / atr, ret60Atr: k >= 61 ? (price - day.c[k - 61]) / atr : NaN,
       distVwapAtr: (price - vwap) / atr, distHiAtr: (dayHi - price) / atr, distLoAtr: (price - dayLo) / atr,
       rangeAdr: (dayHi - dayLo) / adr, posInRange: dayHi > dayLo ? (price - dayLo) / (dayHi - dayLo) : 0.5,
       minSinceHi: k - 1 - hiSlot, minSinceLo: k - 1 - loSlot, testsHi: highZone.tests.length, testsLo: lowZone.tests.length,
@@ -247,7 +251,7 @@ export function gridDay(inp: GridInput): number[][] {
       volTrend: L >= 4 ? (tens[L - 1].v + tens[L - 2].v) / Math.max(1, tens[L - 3].v + tens[L - 4].v) : NaN,
       climax3: medV > 0 ? Math.max(...tens.slice(-3).map((b) => b.v)) / medV : NaN,
       rvolSame: cumV / sameAvg(k), rvolDay: cumV / fullAvg, openBusy, atrPct: (atr / price) * 100, adrPct: (adr / price) * 100,
-      nFirst5, nDay: pct(nNow, nOpen), nRecent30: pct(nNow, nifty.c[k - 31 >= 0 ? k - 31 : 0]), nRecent10: pct(nNow, nifty.c[k - 11]),
+      nFirst5, nDay: pct(nNow, nOpen), nRecent30: pct(nNow, nifty.c[k - 31 >= 0 ? k - 31 : 0]), nRecent10: pct(nNow, k >= 11 ? nifty.c[k - 11] : nOpen),
       nPosInRange: nHi > nLo ? (nNow - nLo) / (nHi - nLo) : 0.5,
       rsDay: pct(price, open) - pct(nNow, nOpen), rs30: pct(price, day.c[k - 31 >= 0 ? k - 31 : 0]) - pct(nNow, nifty.c[k - 31 >= 0 ? k - 31 : 0]),
       ema10Atr: e10 !== undefined ? (e10 - price) / atr : NaN, ema5Atr: e5 !== undefined ? (e5 - price) / atr : NaN, ema1dAtr: e1d !== undefined ? (e1d - price) / atr : NaN,
@@ -258,11 +262,12 @@ export function gridDay(inp: GridInput): number[][] {
     };
     const trade = (d: 1 | -1) => follow(day, k, d, price, onTick(price - d * STOP_ATR * atr, (-d) as 1 | -1), onTick(price + d * TARGET_ATR * atr, d), atr, risk);
     const lg = trade(1), sh = trade(-1);
-    const wide = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk);
-    const toClose = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk);
+    const slip = k < 20 ? OPEN_SLIP_TICKS : 1;
+    const wide = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk, { slip });
+    const toClose = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk, { slip });
     const wl = wide(1), ws = wide(-1), cl = toClose(1), cs = toClose(-1);
     const cheap = (d: 1 | -1, big: boolean) => {
-      const ex = { notional: big ? BIG_NOTIONAL : MID_NOTIONAL };
+      const ex = { notional: big ? BIG_NOTIONAL : MID_NOTIONAL, slip };
       return [ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk, ex).net,
         ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk, ex).net];
     };

@@ -14,6 +14,8 @@ import type { CaseId } from './cases';
  *   setups/runs/<runId>/moments-long|short.bin.gz  every possible reversal entry (so new rules can be tested later)
  *   setups/runs/<runId>/claude-rules.json.gz      the rules Claude wrote from year 1, with their year 1 / year 2 results
  *   setups/runs/<runId>/ml.json.gz          Algo Lab: walk-forward machine-learning results (out of sample)
+ *   setups/ml/iterations.json               Algo Lab: every iteration from 5 on (run, code version, headline), kept for good
+ *   setups/ml/iterations/<n>/<runId>.json.gz  Algo Lab: a full copy of that iteration's results, kept for good
  *   setups/candles/1m/<SYMBOL>/<YYYY-MM>.json.gz  one month of 1-minute candles (a finished month is never fetched again)
  *   setups/candles/daily/<SYMBOL>.json.gz   daily candles (fetched again on each run: one request per stock)
  */
@@ -49,6 +51,12 @@ export const momentsKey = (runId: string, dir: 1 | -1) => `setups/runs/${runId}/
 export const claudeRulesKey = (runId: string) => `setups/runs/${runId}/claude-rules.json.gz`;
 /** Algo Lab: the walk-forward model results of a run (scripts/ml_walkforward.py) */
 export const mlKey = (runId: string) => `setups/runs/${runId}/ml.json.gz`;
+/**
+ * Algo Lab iterations, kept for good (never pruned with the run index): the ledger of every iteration from 5 on (its
+ * run, its code version, its headline numbers) and a copy of each iteration's full results, so we can always go back.
+ */
+export const ML_LEDGER_KEY = 'setups/ml/iterations.json';
+export const mlIterKey = (iteration: number, runId: string) => `setups/ml/iterations/${iteration}/${runId}.json.gz`;
 export const monthKey = (symbol: string, month: string) => `setups/candles/1m/${symbol.toUpperCase()}/${month}.json.gz`;
 export const dailyKey = (symbol: string) => `setups/candles/daily/${symbol.toUpperCase()}.json.gz`;
 

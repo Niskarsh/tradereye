@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
-import { BIG_NOTIONAL, MID_NOTIONAL, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
+import { BIG_NOTIONAL, MID_NOTIONAL, OPEN_SLIP_TICKS, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
 import { roundTripCharges, sizeFor } from '../lib/setups/costs';
 import { TICK, onTick } from '../lib/study/mine';
 
@@ -22,11 +22,11 @@ function walk(seed: number) {
   return { px, rnd };
 }
 
-test('grid: a row at every 10-min close 09:35-14:45, each the right width', () => {
+test('grid: a row at every 10-min close 09:25-14:45, each the right width', () => {
   const { px, rnd } = walk(3);
   const rows = gridDay({ date: '2025-02-03', history: hist(), day: session('2025-02-03', (k) => px[k], rnd), nifty: session('2025-02-03', () => 20000), daily: daily() });
-  assert.equal(rows.length, 32);
-  assert.deepEqual(rows.map((r) => r[0]), Array.from({ length: 32 }, (_, i) => 20 + i * 10));
+  assert.equal(rows.length, 33);
+  assert.deepEqual(rows.map((r) => r[0]), Array.from({ length: 33 }, (_, i) => 10 + i * 10));
   assert.ok(rows.every((r) => r.length === ML_WIDTH - 2));
 });
 
@@ -76,7 +76,7 @@ test('grid: the wide bracket and the ride to the close match an independent repl
       const k = r[0], close = day[k - 1].c, adr = (r[iAdr] / 100) * close;
       assert.ok(Math.abs(adr - 6) < 1e-6, 'usual daily range = the 10-day average high - low');
       const replay = (d: 1 | -1, stopAdr: number, targetAdr?: number) => {
-        const entry = close + d * TICK, stop = onTick(close - d * stopAdr * adr, (-d) as 1 | -1);
+        const entry = close + d * TICK * (k < 20 ? OPEN_SLIP_TICKS : 1), stop = onTick(close - d * stopAdr * adr, (-d) as 1 | -1);
         const tgt = targetAdr === undefined ? undefined : onTick(close + d * targetAdr * adr, d);
         let sAt = -1, tAt = -1;
         for (let s = k; s < LATE_END; s++) {
@@ -116,7 +116,7 @@ test('grid: bigger positions (₹1 lakh / ₹3 lakh, market orders) match an ind
       const k = r[0], close = day[k - 1].c, adr = (r[iAdr] / 100) * close;
       for (const d of [1, -1] as const) {
         const S = d === 1 ? 'L' : 'S';
-        const entry = close + d * TICK, stop = onTick(close - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), tgt = onTick(close + d * WIDE_TARGET_ADR * adr, d);
+        const entry = close + d * TICK * (k < 20 ? OPEN_SLIP_TICKS : 1), stop = onTick(close - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), tgt = onTick(close + d * WIDE_TARGET_ADR * adr, d);
         let sAt = -1, tAt = -1;
         for (let s = k; s < LATE_END; s++) {
           if (sAt < 0 && (d === 1 ? day[s].l <= stop : day[s].h >= stop)) sAt = s;

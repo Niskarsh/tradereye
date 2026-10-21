@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write  # only to tag the code of each Algo Lab iteration (algo-iter-<n>-<run>), so it can always be gone back to
 
 jobs:
   backtest:
@@ -62,3 +62,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
+      # keep the exact code of this Algo Lab iteration for good: a tag algo-iter-<iteration>-<run id>
+      - name: Tag the code of this iteration
+        if: success()
+        run: |
+          N=$(python -c "import json;print(json.load(open('ml-data/ml.json'))['iteration'])")
+          git tag "algo-iter-$N-${RUN_ID}" "$GITHUB_SHA"
+          git push origin "algo-iter-$N-${RUN_ID}"
+        env:
+          RUN_ID: ${{ inputs.run_id }}

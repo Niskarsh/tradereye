@@ -36,7 +36,7 @@ def make(d, planted, seed):
         if t.weekday() < 5:
             days.append(t.isoformat())
         t += datetime.timedelta(days=1)
-    syms, slots = 30, list(range(20, 331, 10))
+    syms, slots = 30, list(range(10, 331, 10))
     n = len(days) * syms * len(slots)
     X = rng.normal(size=(n, len(FEATS))).astype(np.float32)
     X[:, FEATS.index('minute')] = np.tile(np.array(slots, dtype=np.float32), len(days) * syms)
@@ -137,18 +137,11 @@ if which in ('all', 'planted'):
   assert cv['l3']['overall']['netR'] > cv['l1']['overall']['netR'] > cv['now']['overall']['netR'], 'bigger positions keep more'
   sh = strat(edge, 'wideShort')
   assert sh['bySide']['long']['n'] == 0 and all(x['side'] == 'SHORT' for x in sh['recent']), 'shorts only'
-  mo = strat(edge, 'wideMorning')
-  assert mo['overall']['n'] > 0 and all(t['time'] <= '10:55' for t in mo['recent']), 'decisions up to 10:55 only'
-  assert all(h['hour'] <= '10:00' for h in mo['byHour']), 'no trade after 10:55'
-  print('PLANTED morning', mo['overall'])
-  assert mo['overall']['netR'] > 0.25, 'the planted edge is there in the morning too'
+  assert all(t['time'] >= '09:35' for t in w['recent']) and all(t[2] >= '09:35' for t in w['trades']), 'A never trades before 09:35'
+  assert len(w['trades']) == o['n'] and w['tradeCols'][5] == 'net', 'every trade is kept with the results'
+  assert abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up to the headline'
+  ea = strat(edge, 'wideShortEarly')
+  assert all(t[3] == -1 for t in ea['trades']), 'E: shorts only'
+  assert {s_['id'] for s_ in edge['strategies']} == {'wideStock', 'wideShort', 'wideShortEarly'}
 
-  nb = strat(edge, 'neutralStock')
-  o = nb['overall']
-  print('PLANTED neutral', o, nb['bySide'], 'ic', nb['ic'])
-  assert o['n'] >= 500 and o['netR'] > 0.2 and o['t'] > 4, f'the planted cross-sectional edge must be found: {o}'
-  assert nb['bySide']['long']['n'] == nb['bySide']['short']['n'], 'as many shorts as longs: market-neutral'
-  assert nb['ic']['mean'] > 0.1 and nb['ic']['positive'] == nb['ic']['months'], 'the ranking lines up with the outcome every month'
-  top = [x['f'] for x in nb['importance'][:4]]
-  assert 'rs30' in top or 'rs30_rk' in top, f'the basket must lean on the planted fact: {top}'
 print('OK:', which)
