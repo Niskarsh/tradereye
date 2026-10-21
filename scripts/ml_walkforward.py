@@ -24,15 +24,15 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 4
+ITERATION = 5
 CHANGES = [
-    'No Nifty facts in any strategy: without them iteration 3\'s signal nearly doubled (0.040 → 0.079, positive in 39 of 40 blind months). The wide bracket with Nifty facts is dropped; the basket is stock-only too.',
-    'Fixed a look-ahead in the trade picker: when more than the daily cap qualified, it kept the day\'s strongest, including later ones you could not know yet. Picks are now first come, first served, like live trading (numbers may dip a little from this alone).',
-    'Calmer models: every rule must hold on at least 1,500 past moments (was 400), so the most confident picks are not built on a few hundred cases.',
-    'Three ways to execute the same trades, side by side: as now (market orders, ₹300 risk); limit orders at the 10-min close (only if price trades through within 10 minutes, else no trade); limit orders with ~₹3 lakh positions (Dhan\'s ₹20 brokerage cap halves the charges).',
-    'Exam months still locked from May 2026.',
+    'Four strategies side by side, each testing one fix: A = iteration 4 unchanged (the control); B = shorts only (in this universe a blind long starts ~0.06R behind a blind short, before costs); C = decisions 09:35–10:55 only (the model leans on overnight facts, and iteration 4\'s edge was in the first hour); D = the market-neutral basket.',
+    'Models learn from up to 30 months before each month (was 18): more market moods to learn from.',
+    'The cost table now compares position sizes with market orders: ₹300 risk, ~₹1 lakh and ~₹3 lakh positions (Dhan\'s ₹20 brokerage cap). Limit orders at the close are gone: in iteration 4 the orders that never filled were the winners.',
+    'The side and time-of-day breakdowns use the earlier months only, so the exam months never steer the next step.',
+    'Exam months still locked from May 2026. Four variants raise the odds of a lucky one: the bar is t ≥ 2 on the earlier months and not red on the exam.',
 ]
-TRAIN_MONTHS = 18
+TRAIN_MONTHS = 30
 VAL_MONTHS = 3
 EXAM_FROM = '2026-05'  # locked: the same exam months for every iteration
 ENSEMBLE = 3
@@ -50,18 +50,20 @@ RISK = 300.0
 MIN_LEAF = 1500
 MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 
+_WIDE = {'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'L1': 'wbL1', 'S1': 'wbS1', 'L3': 'wbL3', 'S3': 'wbS3', 'noMarket': True}
+_WDESC = 'stop ½ of its usual daily range away, target ¾ of it, out by 15:15, picked from the stock\'s own facts and habits (no Nifty)'
 STRATEGIES = [
-    {'id': 'wideStock', 'name': 'Wide bracket (stock facts only)', 'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg',
-     'Ll': 'wbLl', 'Sl': 'wbSl', 'Lb': 'wbLb', 'Sb': 'wbSb', 'noMarket': True,
-     'desc': 'Long or short one stock: stop ½ of its usual daily range away, target ¾ of it, out by 15:15. The model picks the side and the moment from the stock\'s own facts and habits (no Nifty).'},
-    {'id': 'neutralStock', 'name': 'Market-neutral basket (stock facts only)', 'kind': 'neutral', 'L': 'ccL', 'S': 'ccS', 'Lg': 'ccLg', 'Sg': 'ccSg',
-     'Ll': 'ccLl', 'Sl': 'ccSl', 'Lb': 'ccLb', 'Sb': 'ccSb', 'noMarket': True,
+    {**_WIDE, 'id': 'wideStock', 'name': 'A. Wide bracket (control)', 'desc': f'Long or short one stock: {_WDESC}. The same as iteration 4.'},
+    {**_WIDE, 'id': 'wideShort', 'name': 'B. Wide bracket, shorts only', 'only': -1, 'desc': f'Short only: {_WDESC}.'},
+    {**_WIDE, 'id': 'wideMorning', 'name': 'C. Wide bracket, 09:35–10:55 only', 'lastSlot': 100, 'desc': f'Long or short, decided between 09:35 and 10:55 only: {_WDESC}.'},
+    {'id': 'neutralStock', 'name': 'D. Market-neutral basket', 'kind': 'neutral', 'L': 'ccL', 'S': 'ccS', 'Lg': 'ccLg', 'Sg': 'ccSg',
+     'L1': 'ccL1', 'S1': 'ccS1', 'L3': 'ccL3', 'S3': 'ccS3', 'noMarket': True,
      'desc': 'At 09:45, 10:45 and 11:45: buy the 3 stocks the model rates best and short the 3 it rates worst, all held to 15:15 '
              '(safety stop ¾ of the usual daily range). The market\'s direction cancels out; only the ranking can make money.'},
 ]
-COSTS = [('now', 'As now: market orders, ₹300 risk', 'net'),
-         ('limit', 'Limit order at the 10-min close, ₹300 risk', 'lim'),
-         ('big', 'Limit order, ~₹3 lakh position', 'big')]
+COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
+         ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
+         ('l3', 'Market orders, ~₹3 lakh position', 'p3')]
 
 
 def log(*a):
@@ -126,7 +128,21 @@ def fit(X, y, mask, seed, cols):
     return Ensemble(ms, cols)
 
 
-EMPTY = ['day', 'sym', 'slot', 'side', 'pred', 'net', 'gross', 'lim', 'big']
+EMPTY = ['day', 'sym', 'slot', 'side', 'pred', 'net', 'gross', 'p1', 'p3']
+
+
+def allowed(part, pl, ps, st):
+    """a strategy's limits: one side only, or decisions up to a time of day (not allowed = never picked)"""
+    pl, ps = pl.copy(), ps.copy()
+    if st.get('only') == -1:
+        pl[:] = -np.inf
+    if st.get('only') == 1:
+        ps[:] = -np.inf
+    if st.get('lastSlot'):
+        late = part['slot'].values > st['lastSlot']
+        pl[late] = -np.inf
+        ps[late] = -np.inf
+    return pl, ps
 
 
 def pick_dir(part, pl, ps, thr, st):
@@ -137,7 +153,7 @@ def pick_dir(part, pl, ps, thr, st):
     m = best > thr
     if not m.any():
         return pd.DataFrame(columns=EMPTY)
-    c = part.loc[m, ['day', 'sym', 'slot', st['L'], st['S'], st['Lg'], st['Sg'], st['Ll'], st['Sl'], st['Lb'], st['Sb']]].copy()
+    c = part.loc[m, ['day', 'sym', 'slot', st['L'], st['S'], st['Lg'], st['Sg'], st['L1'], st['S1'], st['L3'], st['S3']]].copy()
     c['pred'] = best[m]
     c['side'] = side[m]
     c = c.sort_values(['day', 'sym', 'slot']).drop_duplicates(['day', 'sym'], keep='first')
@@ -147,13 +163,13 @@ def pick_dir(part, pl, ps, thr, st):
     c = c[c.groupby('day', sort=False).cumcount() < MAX_PER_DAY]
     c['net'] = np.where(c['side'] == 1, c[st['L']], c[st['S']])
     c['gross'] = np.where(c['side'] == 1, c[st['Lg']], c[st['Sg']])
-    c['lim'] = np.where(c['side'] == 1, c[st['Ll']], c[st['Sl']])
-    c['big'] = np.where(c['side'] == 1, c[st['Lb']], c[st['Sb']])
+    c['p1'] = np.where(c['side'] == 1, c[st['L1']], c[st['S1']])
+    c['p3'] = np.where(c['side'] == 1, c[st['L3']], c[st['S3']])
     return c[EMPTY]
 
 
 def neutral_groups(part, pred):
-    c = part[['day', 'sym', 'slot', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccLl', 'ccSl', 'ccLb', 'ccSb']].copy()
+    c = part[['day', 'sym', 'slot', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccL1', 'ccS1', 'ccL3', 'ccS3']].copy()
     c['pred'] = pred
     return c[c['slot'].isin(NEUTRAL_SLOTS)]
 
@@ -184,9 +200,9 @@ def pick_neutral(c, thr):
             if hi['pred'].mean() - lo['pred'].mean() <= thr:
                 continue
             for r in hi.itertuples():
-                rows.append((day, r.sym, slot, 1, r.pred, r.ccL, r.ccLg, r.ccLl, r.ccLb))
+                rows.append((day, r.sym, slot, 1, r.pred, r.ccL, r.ccLg, r.ccL1, r.ccL3))
             for r in lo.itertuples():
-                rows.append((day, r.sym, slot, -1, r.pred, r.ccS, r.ccSg, r.ccSl, r.ccSb))
+                rows.append((day, r.sym, slot, -1, r.pred, r.ccS, r.ccSg, r.ccS1, r.ccS3))
             used.update(hi['sym'].tolist())
             used.update(lo['sym'].tolist())
     return pd.DataFrame(rows, columns=EMPTY)
@@ -262,14 +278,23 @@ def main(d):
         if fitm.sum() < 5000 or test.sum() == 0:
             continue
         vpart, tpart = df.loc[val], df.loc[test]
+        shared = {}
         for st in STRATEGIES:
             r = res[st['id']]
             if st['kind'] == 'dir':
                 cols = stock_cols if st.get('noMarket') else all_cols
-                ml, ms = fit(X, y[st['L']], fitm, ti, cols), fit(X, y[st['S']], fitm, ti + 500, cols)
-                vl, vs = ml.predict(X[val]), ms.predict(X[val])
-                tl, ts = ml.predict(X[test]), ms.predict(X[test])
-                cands = [float(q) for q in np.quantile(np.maximum(vl, vs), QUANTS) if q > 0]
+                # strategies with the same labels and facts share the same models (they differ only in which trades they may take)
+                mkey = (st['L'], st['S'], bool(st.get('noMarket')))
+                if mkey not in shared:
+                    ml, ms = fit(X, y[st['L']], fitm, ti, cols), fit(X, y[st['S']], fitm, ti + 500, cols)
+                    shared[mkey] = (ml, ms, ml.predict(X[val]), ms.predict(X[val]), ml.predict(X[test]), ms.predict(X[test]))
+                ml, ms, vl, vs, tl, ts = shared[mkey]
+                vl, vs = allowed(vpart, vl, vs, st)
+                tl_all, ts_all = tl, ts
+                tl, ts = allowed(tpart, tl, ts, st)
+                vb = np.maximum(vl, vs)
+                vb = vb[np.isfinite(vb)]
+                cands = [float(q) for q in np.quantile(vb, QUANTS) if q > 0] if len(vb) else []
                 best_thr, best_sum = None, -1e18
                 for thr in cands:
                     tr = pick_dir(vpart, vl, vs, thr, st)
@@ -279,7 +304,7 @@ def main(d):
                         best_thr, best_sum = thr, float(tr['net'].sum())
                 ok = best_thr is not None and best_sum > 0
                 tr = pick_dir(tpart, tl, ts, best_thr if ok else 1e18, st)
-                ics = [spearman(tl, tpart[st['L']].values), spearman(ts, tpart[st['S']].values)]
+                ics = [spearman(tl_all, tpart[st['L']].values), spearman(ts_all, tpart[st['S']].values)]
                 ics = [x for x in ics if x is not None]
                 ic = float(np.mean(ics)) if ics else None
                 add_gain(r['gain'], ml.models + ms.models, cols)
@@ -368,12 +393,13 @@ def main(d):
                                       'taken': round(float(part[f].median()), 3), 'all': round(med_all[f], 3)})
         liked.sort(key=lambda x: -abs(x['z']))
 
-        by_side = {name: stats(trades.loc[trades['side'] == s_, 'net'], trades.loc[trades['side'] == s_, 'gross']) for s_, name in ((1, 'long'), (-1, 'short'))}
+        # earlier months only: the exam months must never steer the next step
+        by_side = {name: stats(dev_t.loc[dev_t['side'] == s_, 'net'], dev_t.loc[dev_t['side'] == s_, 'gross']) for s_, name in ((1, 'long'), (-1, 'short'))}
         by_hour = []
-        if len(trades):
-            h = (555 + trades['slot'].astype(int)) // 60
+        if len(dev_t):
+            h = (555 + dev_t['slot'].astype(int)) // 60
             for hour in sorted(h.unique()):
-                s = stats(trades.loc[h == hour, 'net'], trades.loc[h == hour, 'gross'])
+                s = stats(dev_t.loc[h == hour, 'net'], dev_t.loc[h == hour, 'gross'])
                 s['hour'] = f'{int(hour):02d}:00'
                 by_hour.append(s)
         g = r['gain']

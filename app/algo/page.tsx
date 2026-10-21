@@ -130,7 +130,7 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
       </p>
 
       {s.costs && (
-        <Card title="The same trades, three ways of executing them" sub="Which trades are taken does not change; only how they are filled and what they cost. A limit order rests at the 10-min close and counts only if price trades through it within 10 minutes; if it never fills, there is no trade. ₹3 lakh positions risk far more than ₹300 per trade: compare R, not rupees.">
+        <Card title="The same trades at different position sizes" sub="Which trades are taken does not change; only how big they are. Dhan's brokerage is capped at ₹20 an order, so bigger positions pay less in charges per R. A bigger position risks far more than ₹300 per trade (about ₹1,800 at ₹1 lakh and ₹5,500 at ₹3 lakh with this stop): compare R, not rupees. (Iteration 4 showed limit orders at the close lose: the ones that never fill are the winners.)">
           <div className="-mx-2 overflow-x-auto">
             <table className="w-full min-w-[620px] text-xs">
               <thead><tr className={HEAD}>
@@ -183,7 +183,7 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="By side and time of day" sub="Out of sample. Where the trades made or lost money.">
+        <Card title="By side and time of day" sub="Earlier months only (the exam months never steer the next step). Where the trades made or lost money.">
           <table className="w-full text-xs">
             <thead><tr className={HEAD}><th className="px-2 py-1.5 text-left"></th><th className={TH}>Trades</th><th className={TH}>Before costs</th><th className={TH}>After costs</th><th className={TH}>t</th><th className={TH}>₹</th></tr></thead>
             <tbody>

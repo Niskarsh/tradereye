@@ -25,7 +25,7 @@ FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr
          'ema10Atr', 'ema5Atr', 'ema1dAtr', 'pdhAtr', 'pdlAtr', 'vaHiAtr', 'vaLoAtr', 'pocAtr', 'upCandles', 'downCandles', 'priceRs',
          'habitClose', 'habitCloseUp', 'habitNext30', 'habitTrend', 'ret5d', 'ret20d', 'hi20Adr', 'lo20Adr', 'prevCloseLoc', 'prevLast30', 'gapVsUsual']
 LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
-          'wbLl', 'wbSl', 'wbLb', 'wbSb', 'ccLl', 'ccSl', 'ccLb', 'ccSb']
+          'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3']
 
 
 def make(d, planted, seed):
@@ -62,12 +62,11 @@ def make(d, planted, seed):
     ccLg, ccSg = ccRet / stop_pct, -ccRet / stop_pct
     lab = {'netL': rL - 0.3, 'netS': rS - 0.3, 'rL': rL, 'rS': rS, 'wbL': wbLg - 0.07, 'wbS': wbSg - 0.07, 'wbLg': wbLg, 'wbSg': wbSg,
            'ccL': ccLg - 0.05, 'ccS': ccSg - 0.05, 'ccLg': ccLg, 'ccSg': ccSg, 'ccRet': ccRet}
-    # cheaper executions: a limit order fills 80% of the time and saves charges (NaN = never filled)
+    # bigger positions: smaller charges in R
     for side in 'LS':
         for k in ('wb', 'cc'):
-            miss = rng.uniform(size=n) < 0.2
-            lab[f'{k}{side}l'] = np.where(miss, np.nan, lab[f'{k}{side}g'] - (0.04 if k == 'wb' else 0.03))
-            lab[f'{k}{side}b'] = np.where(miss, np.nan, lab[f'{k}{side}g'] - 0.02)
+            lab[f'{k}{side}1'] = lab[f'{k}{side}g'] - (0.035 if k == 'wb' else 0.03)
+            lab[f'{k}{side}3'] = lab[f'{k}{side}g'] - 0.02
     rows = np.column_stack([sym, date, X[:, 0], X] + [lab[k] for k in LABELS]).astype(np.float32)
     rows.tofile(os.path.join(d, 'grid.bin'))
     cols = ['sym', 'date', 'slot'] + FEATS + LABELS
@@ -94,7 +93,7 @@ def check_picker():
     st = ml.STRATEGIES[0]
     n = ml.MAX_PER_DAY + 3
     part = pd.DataFrame({'day': ['2025-01-02'] * n, 'sym': list(range(n)), 'slot': [20 + 10 * i for i in range(n)]})
-    for c in ('L', 'S', 'Lg', 'Sg', 'Ll', 'Sl', 'Lb', 'Sb'):
+    for c in ('L', 'S', 'Lg', 'Sg', 'L1', 'S1', 'L3', 'S3'):
         part[st[c]] = 0.0
     pl = np.array([0.1 + 0.1 * i for i in range(n)])  # later = stronger
     ps = np.full(n, -1.0)
@@ -134,9 +133,15 @@ if which in ('all', 'planted'):
   assert not any(x['f'] in ml.MARKET for x in w['importance'] if x['share'] > 0), 'the stock-only model never uses a Nifty fact'
   cv = {c['id']: c for c in w['costs']}
   print('PLANTED costs', {k: (v['fill'], v['overall']['netR']) for k, v in cv.items()})
-  assert cv['now']['fill'] == 1 and cv['now']['overall']['netR'] == o['netR'], 'as now = the main numbers'
-  assert 0.7 < cv['limit']['fill'] < 0.9 and cv['big']['fill'] == cv['limit']['fill'], 'unfilled limit orders are no trade'
-  assert cv['big']['overall']['netR'] > cv['limit']['overall']['netR'] > cv['now']['overall']['netR'], 'cheaper execution keeps more'
+  assert all(v['fill'] == 1 for v in cv.values()) and cv['now']['overall']['netR'] == o['netR'], 'same trades, every size'
+  assert cv['l3']['overall']['netR'] > cv['l1']['overall']['netR'] > cv['now']['overall']['netR'], 'bigger positions keep more'
+  sh = strat(edge, 'wideShort')
+  assert sh['bySide']['long']['n'] == 0 and all(x['side'] == 'SHORT' for x in sh['recent']), 'shorts only'
+  mo = strat(edge, 'wideMorning')
+  assert mo['overall']['n'] > 0 and all(t['time'] <= '10:55' for t in mo['recent']), 'decisions up to 10:55 only'
+  assert all(h['hour'] <= '10:00' for h in mo['byHour']), 'no trade after 10:55'
+  print('PLANTED morning', mo['overall'])
+  assert mo['overall']['netR'] > 0.25, 'the planted edge is there in the morning too'
 
   nb = strat(edge, 'neutralStock')
   o = nb['overall']

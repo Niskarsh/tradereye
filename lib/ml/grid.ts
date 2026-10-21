@@ -93,14 +93,15 @@ export const ML_KEYS = ML_FEATURES.map((f) => f[0]);
  *   ccRet                  the plain move from this close to the 15:15 close (%; for the market-neutral ranking)
  */
 export const ML_LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
-  'wbLl', 'wbSl', 'wbLb', 'wbSb', 'ccLl', 'ccSl', 'ccLb', 'ccSb'] as const;
+  'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3'] as const;
 /**
- * (iteration 4) the same wide-bracket / ride-to-close trades executed more cheaply, R after charges (NaN = the limit
- * order was never filled, so no trade):
- *   ...l   a limit order at the 10-min close (filled only if price trades through it within 10 minutes), ₹300 risk
- *   ...b   the same limit order with a ~₹3 lakh position (Dhan's brokerage is capped at ₹20 an order)
+ * (iteration 5) the same wide-bracket / ride-to-close trades with bigger positions, market orders as before, R after
+ * charges (Dhan's brokerage is capped at ₹20 an order, so charges fall as a share of the trade):
+ *   ...1   a ~₹1 lakh position        ...3   a ~₹3 lakh position
+ * (Iteration 4 also tried limit orders at the 10-min close: worse than market orders, because the orders that never
+ * filled were the winners. `ride` keeps the limit option for tests.)
  */
-export const LIMIT_WINDOW = 10, BIG_NOTIONAL = 300_000;
+export const LIMIT_WINDOW = 10, MID_NOTIONAL = 100_000, BIG_NOTIONAL = 300_000;
 export const ML_COLS = ['sym', 'date', 'slot', ...ML_KEYS, ...ML_LABELS];
 export const ML_WIDTH = ML_COLS.length;
 
@@ -261,7 +262,7 @@ export function gridDay(inp: GridInput): number[][] {
     const toClose = (d: 1 | -1) => ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk);
     const wl = wide(1), ws = wide(-1), cl = toClose(1), cs = toClose(-1);
     const cheap = (d: 1 | -1, big: boolean) => {
-      const ex = { limit: true, notional: big ? BIG_NOTIONAL : undefined };
+      const ex = { notional: big ? BIG_NOTIONAL : MID_NOTIONAL };
       return [ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk, ex).net,
         ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk, ex).net];
     };

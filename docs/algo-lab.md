@@ -48,4 +48,8 @@ written.
    signal nearly doubled (0.040 → 0.079, positive 39 of 40 months) and memory facts lead; but still +0.04R before
    costs, −0.00R after; earlier months +0.01R (14/27 green), exam −0.12R (1/4).
 4. **Stock facts only, first-come-first-served picks (a look-ahead fix), min 1,500 moments per rule, three executions
-   (market / limit at the close / limit with ~₹3 lakh positions)** (this version).
+   (market / limit at the close / limit with ~₹3 lakh positions)** (Oct 2026): first green after costs, +0.02R (t 1.0),
+   19/35 months; +0.06R before costs; signal 0.077. Shorts +0.03R, longs −0.03R; the first hour carries it. Limit
+   orders were worse (the unfilled ones were the winners).
+5. **Four variants (control / shorts only / 09:35–10:55 only / basket), 30 training months, position sizes ₹300 risk /
+   ~₹1 lakh / ~₹3 lakh with market orders, breakdowns on earlier months only** (this version).
