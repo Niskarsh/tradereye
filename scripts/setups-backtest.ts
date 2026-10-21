@@ -37,6 +37,7 @@ async function main() {
     store, dhan: new DhanClient({ token }), fetchText,
     log: (m) => console.log(m),
     onlySymbols: only?.length ? only : undefined,
+    gridDir: process.env.ML_DIR || undefined,
   });
   console.log(`done in ${Math.round((Date.now() - t0) / 60000)} min: ${summary.universe.signals} signals, ${summary.universe.symbols} stocks, ${summary.period.from}..${summary.period.to}`);
 }

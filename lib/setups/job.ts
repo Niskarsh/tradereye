@@ -8,6 +8,8 @@ import { monthsNeeded, screenerDays, SCREENER, type ScreenerFilter } from './uni
 import { monthEndsOf, prepare, runMonthly, runSingle, runSwing, type DailyStock } from './swing';
 import { mineDay, type Moment } from '../study/mine';
 import { encodeMoments, gzipBytes } from '../study/moments';
+import { gridDay } from '../ml/grid';
+import { GridWriter } from '../ml/writer';
 import { analyze } from '../study/analyze';
 import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, momentsKey, monthKey, putJson, signalsKey, studyKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
 
@@ -45,6 +47,8 @@ export interface JobDeps {
   params?: Partial<Params>;
   /** limit the universe (tests / a quick trial run) */
   onlySymbols?: string[];
+  /** Algo Lab: write the dataset here for the Python step that runs after this job (the run is then finished by it) */
+  gridDir?: string;
 }
 
 class RateLimit {
@@ -158,6 +162,7 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   // ---- 4. replay
   let done = 0, skipped = 0;
   const moments: Moment[] = [];
+  const grid = deps.gridDir ? new GridWriter(deps.gridDir) : undefined;
   /** first-10-minute volume vs usual, per day and stock: the 20 busiest are "in play" that day */
   const busyByDate = new Map<string, { symbol: string; x: number }[]>();
   await pool(plan, deps.concurrency ?? 3, async (p) => {
@@ -180,6 +185,8 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
       signals.push(...runDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, params, simulate: true }));
       // the reversal study: every moment that could have been a reversal entry, labelled with what happened next
       moments.push(...mineDay({ symbol: p.symbol, date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, riskInr: params.riskInr, pocRows: params.pocRows }));
+      // Algo Lab: every 10-min close of this stock-day, with what a long and a short taken there would have made
+      grid?.add(p.symbol, d, gridDay({ date: d, history: sess.slice(Math.max(0, i - 20), i), day: sess[i].bars, nifty: n.bars, daily, riskInr: params.riskInr, pocRows: params.pocRows }));
     }
     done++;
     await status({ phase: 'Testing the setups', done, total: plan.length });
@@ -210,6 +217,13 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   const index = (await getJson<RunIndexItem[]>(deps.store, INDEX_KEY)) ?? [];
   const item: RunIndexItem = { runId, createdAt: summary.createdAt, period: summary.period, signals: signals.length, symbols: plan.length };
   await putJson(deps.store, INDEX_KEY, [item, ...index.filter((x) => x.runId !== runId)].slice(0, 36));
-  await putJson(deps.store, STATUS_KEY, { runId, state: 'done', startedAt, updatedAt: now(), finishedAt: now(), message: `${signals.length} past trades across ${plan.length} stocks` } satisfies RunStatus);
+  if (grid) {
+    grid.close({ runId, from, to, mid, riskInr: params.riskInr });
+    log(`algo lab: ${grid.rows} rows written`);
+    // the Python step trains the models next; scripts/ml-upload.ts finishes the run
+    await putJson(deps.store, STATUS_KEY, { runId, state: 'running', phase: `Algo Lab: training the models on ${grid.rows.toLocaleString('en-IN')} moments (walk-forward)`, startedAt, updatedAt: now() } satisfies RunStatus);
+  } else {
+    await putJson(deps.store, STATUS_KEY, { runId, state: 'done', startedAt, updatedAt: now(), finishedAt: now(), message: `${signals.length} past trades across ${plan.length} stocks` } satisfies RunStatus);
+  }
   return { summary, signals };
 }
