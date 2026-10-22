@@ -18,6 +18,8 @@ interface Strat {
   overall: P & { maxDrawdownR: number; inrPerMonth: number }; dev: P; exam: P & { pass?: boolean | null };
   ic: { mean: number | null; positive: number; months: number };
   daily?: { tradingDays: number; daysWithTrades: number; perTradedDay: number; maxPerDay: number; at0935: number; greenDays: number; worstDayR: number; bestDayR: number; worstWeekR: number; greenWeeks: number } | null;
+  money?: Money | null;
+  shadow?: P & { from?: string };
   costs?: { id: string; name: string; fill: number; overall: S; months: [number, number]; dev: S; devMonths: [number, number]; exam: S; examMonths: [number, number] }[];
   bySide: { long: S; short: S }; byHour: (S & { hour: string })[]; months: Month[];
   importance: { f: string; label: string; share: number }[];
@@ -31,10 +33,78 @@ interface Ml {
   baselineTight: { long: number; short: number };
   best: string; strategies: Strat[];
   locked?: string;
-  untouched?: { id: string; name: string; from?: string; to?: string; note?: string; overall: P; months?: (S & { month: string })[]; trainMonths?: [string, string]; valMonths?: [string, string] } | null;
+  untouched?: Untouched | Untouched[] | null;
+  shadowFrom?: string;
+  confirm?: Confirmed[];
   noise?: { strategy: string; draws: { draw: string; n: number; netR: number; t: number; devNetR: number; devT: number; devGreen: [number, number] }[]; devMin: number; devMax: number; devMean: number };
   management?: Mgmt[]; managementError?: string;
 }
+interface Untouched { id: string; name: string; from?: string; to?: string; note?: string; overall: P; months?: (S & { month: string })[]; trainMonths?: [string, string]; valMonths?: [string, string] }
+interface CPart { n: number; base: number; rule: number; diff: number; t: number; monthsGreenBase: number; monthsGreenRule: number; months: number; addRate: number }
+interface Confirmed { strategy: string; rule: string; label: string; decide: CPart; exam: { pass: boolean | null; n: number }; untouched: CPart | null; shadow: CPart | null; baseMismatch: number }
+interface Money { stopPct: number; position: number; margin: number; maxPerDay: number; tradesPerMonth: number; perTrade: number; perMonth: number; worstMonth: number; bestMonth: number; maxDrawdownR: number; capital: number; pct: number; bigger: { position: number; risk: number; netR: number; perMonth: number; capital: number; pct: number }[] }
+
+function UntouchedCard({ u }: { u: Untouched }) {
+  return (
+    <Card title={`Untouched test: ${u.name}`} sub={u.from ? `${mon(u.from)}–${mon(u.to!)}: months no iteration ever trained or decided on. The models learned from ${mon(u.trainMonths![0])}–${mon(u.trainMonths![1])} and the bar to trade was set on ${mon(u.valMonths![0])}–${mon(u.valMonths![1])} (no older data exists); every fact is still only what was known at that minute.` : u.note}>
+      <Tiles items={[
+        ['Trades', u.overall.n.toLocaleString('en-IN')],
+        ['R per trade after costs', rr(u.overall.netR), tone(u.overall.netR, u.overall.n > 0)],
+        ['How sure (t)', fx(u.overall.t)],
+        ['Months green', `${u.overall.monthsGreen} of ${u.overall.monthsTraded}`],
+      ]} />
+      {!!u.months?.length && <p className="mt-2 font-mono text-[11px] text-ink-2">{u.months.map((m) => `${mon(m.month)} ${m.n ? rr(m.netR) : '–'}`).join(' · ')}</p>}
+    </Card>
+  );
+}
+
+function ConfirmCard({ c }: { c: Confirmed }) {
+  const row = (name: string, p: CPart | null, note?: string) => (
+    <tr key={name} className="border-b border-line/60 font-mono tabular-nums">
+      <td className="px-2 py-1.5 font-sans">{name}</td>
+      {p ? <>
+        <td className={TH}>{p.n}</td><td className={`${TH} ${tone(p.base)}`}>{rr(p.base)}</td><td className={`${TH} font-bold ${tone(p.rule)}`}>{rr(p.rule)}</td>
+        <td className={`${TH} ${tone(p.diff)}`}>{rr(p.diff)}</td><td className={TH}>{fx(p.t)}</td><td className={TH}>{p.monthsGreenBase} → {p.monthsGreenRule} of {p.months}</td><td className={TH}>{pct(p.addRate)}</td>
+      </> : <td className="px-2 py-1.5 text-ink-3" colSpan={7}>{note ?? 'no trades yet'}</td>}
+    </tr>
+  );
+  return (
+    <Card title="Adding to winners: the rule fixed in advance" sub={`${c.label}. Picked in iteration 8; nothing is chosen here. "As now" replays the model's own results exactly (${c.baseMismatch} mismatches).`}>
+      <div className="-mx-2 overflow-x-auto">
+        <table className="w-full min-w-[640px] text-xs">
+          <thead><tr className={HEAD}><th className="px-2 py-1.5 text-left">Months</th><th className={TH}>Trades</th><th className={TH}>As now</th><th className={TH}>With adding</th><th className={TH}>Difference</th><th className={TH}>t</th><th className={TH}>Months green</th><th className={TH}>Added on</th></tr></thead>
+          <tbody>
+            {row('Untouched (Jan–Sep 2022): the one shot', c.untouched, 'no untouched trades')}
+            {row('Decide months', c.decide)}
+            {row('Shadow (new months)', c.shadow)}
+            <tr><td className="px-2 py-1.5 font-sans" colSpan={8}>Exam months: {c.exam.pass == null ? '–' : c.exam.pass ? 'Pass (adding did better and made money)' : 'Fail'}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function MoneyCard({ m }: { m: Money }) {
+  return (
+    <Card title="What it means in money" sub={`Decide months, after charges, at ₹300 risk a trade. The stop is about ${m.stopPct}% of the price, so ₹300 risk buys about ₹${m.position.toLocaleString('en-IN')} of stock: ₹${m.margin.toLocaleString('en-IN')} of margin at 5×, up to ${m.maxPerDay} at once. Capital = that margin for ${m.maxPerDay} trades + the deepest run of losses (${m.maxDrawdownR}R). Before income tax.`}>
+      <Tiles items={[
+        ['Per trade, average', inr(m.perTrade)],
+        ['Trades a month', String(m.tradesPerMonth)],
+        ['Per month, average', inr(m.perMonth), tone(m.perMonth)],
+        ['Capital it needs', `₹${m.capital.toLocaleString('en-IN')}`],
+        ['% a month on that capital', `${m.pct}%`, tone(m.pct)],
+        ['Worst month', inr(m.worstMonth), 'text-data-red-text'],
+        ['Best month', inr(m.bestMonth), 'text-data-green'],
+        ['Deepest run of losses', `−${m.maxDrawdownR}R (${inr(-m.maxDrawdownR * 300)})`],
+      ]} />
+      {!!m.bigger.length && (
+        <p className="mt-2 text-[11px] text-ink-2">Bigger positions (cheaper charges per R): {m.bigger.map((b) => `₹${(b.position / 1e5).toFixed(0)} lakh positions risk ~₹${b.risk.toLocaleString('en-IN')} a trade → ${inr(b.perMonth)} a month on ~₹${b.capital.toLocaleString('en-IN')} capital (${b.pct}%)`).join(' · ')}.</p>
+      )}
+    </Card>
+  );
+}
+
 interface MLine { id: string; family: string; label: string; n: number; netR: number; diff: number; t: number; hit: number; addRate: number }
 interface Mgmt { strategy: string; variantsTested: number; trades: number; baseChecked: number; baseMismatch: number; skippedNoData: number; half1: [string, string]; half2: [string, string]; nHalf1: number; nHalf2: number; stage1: MLine[]; picked: string[]; stage2: MLine[]; winner: string; winnerBeatsBase: boolean }
 
@@ -188,6 +258,16 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
         {neutral && ` Baskets at ${ml.setup.neutralTimes.join(', ')}: ${ml.setup.neutralK} longs + ${ml.setup.neutralK} shorts, each stock once a day.`}
       </p>
 
+      {s.money && <MoneyCard m={s.money} />}
+      {s.shadow && (
+        <Card title={`Shadow months (from ${mon(s.shadow.from ?? ml.shadowFrom ?? '2026-11')})`} sub="Months that did not exist when this code was written: the forward test. Never used for any decision. Re-run once a month to add the newest month.">
+          {s.shadow.n ? <Tiles items={[
+            ['Trades', String(s.shadow.n)], ['R per trade after costs', rr(s.shadow.netR), tone(s.shadow.netR)],
+            ['Months green', `${s.shadow.monthsGreen} of ${s.shadow.monthsTraded}`], ['₹ at ₹300 risk', inr(s.shadow.inr), tone(s.shadow.inr)],
+          ]} /> : <p className="text-xs text-ink-3">No shadow months yet: the first one is reported after it ends.</p>}
+        </Card>
+      )}
+      {ml.confirm?.filter((c) => c.strategy === s.id).map((c) => <ConfirmCard key={c.rule} c={c} />)}
       {mg && <Management m={mg} />}
       {ml.managementError && <p className="text-xs text-data-red-text">Trade management did not run: {ml.managementError}</p>}
 
@@ -359,19 +439,7 @@ export default function AlgoPage() {
                 At most one trade per stock a day, {v2.setup.maxPerSide} a side and {v2.setup.maxPerDay} a day. For reference, iteration 1&apos;s tight bracket taken blindly: {rr(v2.baselineTight.long)} long / {rr(v2.baselineTight.short)} short.
               </p>
             </Card>
-            {v2.untouched && (
-              <Card title={`Untouched test: ${v2.untouched.name}`} sub={v2.untouched.from ? `${mon(v2.untouched.from)}–${mon(v2.untouched.to!)}: months no iteration ever loaded, looked at once. The models learned from ${mon(v2.untouched.trainMonths![0])}–${mon(v2.untouched.trainMonths![1])} and the bar to trade was set on ${mon(v2.untouched.valMonths![0])}–${mon(v2.untouched.valMonths![1])} (no older data exists); every fact is still only what was known at that minute.` : v2.untouched.note}>
-                <Tiles items={[
-                  ['Trades', v2.untouched.overall.n.toLocaleString('en-IN')],
-                  ['R per trade after costs', rr(v2.untouched.overall.netR), tone(v2.untouched.overall.netR, v2.untouched.overall.n > 0)],
-                  ['How sure (t)', fx(v2.untouched.overall.t)],
-                  ['Months green', `${v2.untouched.overall.monthsGreen} of ${v2.untouched.overall.monthsTraded}`],
-                ]} />
-                {!!v2.untouched.months?.length && (
-                  <p className="mt-2 font-mono text-[11px] text-ink-2">{v2.untouched.months.map((m) => `${mon(m.month)} ${m.n ? rr(m.netR) : '–'}`).join(' · ')}</p>
-                )}
-              </Card>
-            )}
+            {(Array.isArray(v2.untouched) ? v2.untouched : v2.untouched ? [v2.untouched] : []).map((u) => <UntouchedCard key={u.id} u={u} />)}
             {v2.noise && v2.noise.draws.length > 1 && (
               <Card title="How much is luck in the training?" sub={`The locked strategy trained ${v2.noise.draws.length} times with different random draws (same data, same rules). The spread is the noise: differences smaller than this between iterations mean nothing.`}>
                 <p className="text-sm">Decide months: <b className="font-mono">{rr(v2.noise.devMin)} to {rr(v2.noise.devMax)}</b> a trade (average {rr(v2.noise.devMean)}).</p>

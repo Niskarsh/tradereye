@@ -158,3 +158,43 @@ test('manageAll: reads each trade day from S3, "as now" matches the model\'s res
   assert.equal(m.baseChecked, 22);
   assert.ok(m.stage1.length === variants().length && m.stage2.length >= 2 && m.winner);
 });
+
+import { confirmAll, CONFIRM } from '../lib/ml/manageRun';
+
+test('confirmAll: the fixed rule and "as now" on decide, exam, untouched and shadow trades; nothing chosen', async () => {
+  const mem = new Map<string, Uint8Array>();
+  const store = { get: async (k: string) => mem.get(k), put: async (k: string, b: Uint8Array) => { mem.set(k, b); } };
+  const daily: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] };
+  for (let i = 0; i < 15; i++) { daily.t.push(Date.parse(`2021-12-${String(i + 1).padStart(2, '0')}T00:00:00Z`) / 1000 - 19800); daily.o.push(300); daily.h.push(303); daily.l.push(297); daily.c.push(300); daily.v.push(1e6); }
+  await putJson(store, dailyKey('XYZ'), { v: 1, c: daily });
+  let s = 11;
+  const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+  const byMonth: Record<string, (string | number)[][]> = {};
+  for (const month of ['2022-03', '2025-01', '2026-06', '2026-12']) {
+    const c: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] };
+    byMonth[month] = [];
+    for (let dd = 2; dd <= 12; dd++) {
+      const date = `${month}-${String(dd).padStart(2, '0')}`;
+      let p = 300;
+      const start = c.t.length;
+      for (let k = 0; k < 375; k++) { const o = p; p = Math.round((p + (rnd() - 0.53) * 0.8) * 20) / 20; c.t.push(sec(date, '09:15') + k * 60); c.o.push(o); c.h.push(Math.max(o, p) + 0.05); c.l.push(Math.min(o, p) - 0.05); c.c.push(p); c.v.push(1000); }
+      const day = toSlots(c.t.slice(start).map((t, i) => ({ t, o: c.o[start + i], h: c.h[start + i], l: c.l[start + i], c: c.c[start + i], v: 1000 })))!;
+      const close = day.c[19];
+      const net = ride(day, 20, -1, close, onTick(close + 3, 1), onTick(close - 4.5, -1), LATE_END, 300).net;
+      byMonth[month].push([date, 'XYZ', '09:35', -1, 0.1, net, 0, 0, 0]);
+    }
+    await putJson(store, monthKey('XYZ', month), { v: 1, complete: true, c });
+  }
+  const cols = ['day', 'sym', 'time', 'side', 'pred', 'net', 'gross', 'p1', 'p3'];
+  const out = await confirmAll({
+    examFrom: '2026-05', shadowFrom: '2026-11',
+    strategies: [{ id: 'wideShort', name: 'B', targetAdr: 0.75, tradeCols: cols, trades: [...byMonth['2025-01'], ...byMonth['2026-06'], ...byMonth['2026-12']] }],
+    untouched: [{ id: 'wideShort', name: 'B', targetAdr: 0.75, tradeCols: cols, trades: byMonth['2022-03'] }],
+  }, store);
+  assert.equal(out.length, 1);
+  const c = out[0];
+  assert.equal(c.rule, CONFIRM.wideShort);
+  assert.equal(c.baseMismatch, 0, '"as now" replays the model\'s results exactly');
+  assert.equal(c.decide.n, 11); assert.equal(c.untouched?.n, 11); assert.equal(c.shadow?.n, 11); assert.equal(c.exam.n, 11);
+  assert.ok(Math.abs(c.decide.diff - (c.decide.rule - c.decide.base)) < 0.002);
+});

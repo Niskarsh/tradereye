@@ -72,3 +72,10 @@ written.
      the first). Stage 1 picks the best of each family on the first half of the decide months; stage 2 judges those and
      the best break-even combined with each add on the second half; a winner must beat "as now" with t ≥ 2 and gets one
      shot at the untouched months in the next iteration. Each add pays its own charges (about 0.1R at ₹300 risk).
+   Result: untouched F +0.15R (t 3.0, 9/9 green); noise +0.06 to +0.08R; break-even never helps; one add rule held for
+   B only (+0.06R on the second half, t 2.9).
+9. **Confirm, no search** (this version): F and B unchanged (G dropped); the untouched months for B and for B with the
+   add rule fixed in iteration 8 (`CONFIRM` in lib/ml/manageRun.ts, replayed on decide / exam / untouched / shadow
+   trades); shadow months from Nov 2026 (`SHADOW_FROM`), never used for any decision; a money card (₹ a month,
+   position, margin at 5×, capital incl. the deepest run of losses, % a month). After this the strategy is frozen as
+   v1; further research goes on separate strategies or new data.

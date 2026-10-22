@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { getChunk, putChunk } from '../lib/book/s3';
 import { INDEX_KEY, ML_LEDGER_KEY, STATUS_KEY, getJson, mlIterKey, mlKey, putJson, type RunIndexItem, type RunStatus } from '../lib/setups/store';
 import { ledgerEntry, type LedgerEntry, type MlResult } from '../lib/ml/ledger';
-import { manageAll } from '../lib/ml/manageRun';
+import { confirmAll } from '../lib/ml/manageRun';
 
 interface Shard { shard: string; seedOffset: number; locked?: string; strategies: { id: string; overall: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number }; dev: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number } }[] }
 
@@ -52,7 +52,8 @@ async function main() {
   if (existsSync(file_)) {
     const ml = JSON.parse(readFileSync(file_, 'utf8')) as MlResult & Shard & { examFrom: string; noise?: unknown; management?: unknown; managementError?: string };
     if (ml.locked) ml.noise = noiseOf(ml, dir);
-    try { ml.management = await manageAll(ml as never, store, (m) => console.log(m)); }
+    // iteration 9: no search; the add rule fixed in advance is replayed on every set of trades (see lib/ml/manageRun.ts CONFIRM)
+    try { (ml as { confirm?: unknown }).confirm = await confirmAll(ml as never, store, (m) => console.log(m)); }
     catch (e) { ml.managementError = (e as Error).message; console.error('management failed', e); }
     await putJson(store, mlKey(runId), ml);
     if (await file(ledger, ml)) changed = true;

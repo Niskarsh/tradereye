@@ -22,6 +22,7 @@ import ml_walkforward as ml  # noqa: E402
 ml.DECIDE_FROM = '2024-04'
 ml.TRAIN_MONTHS = 8
 ml.EXAM_MONTHS = 3  # the real exam (May 2026 on) is outside this small world: the last 3 months play it
+ml.SHADOW_FROM = '2025-06'  # and the very last month plays a shadow month
 
 FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr', 'ret30Atr', 'ret60Atr', 'distVwapAtr', 'distHiAtr', 'distLoAtr',
          'rangeAdr', 'posInRange', 'minSinceHi', 'minSinceLo', 'testsHi', 'testsLo', 'tBody', 'tUpWick', 'tLoWick', 'tRangeAtr', 'tVol', 'volTrend',
@@ -47,6 +48,7 @@ def make(d, planted, seed):
     X[:, FEATS.index('minute')] = np.tile(np.array(slots, dtype=np.float32), len(days) * syms)
     X[:, FEATS.index('tLoWick')] = rng.uniform(0, 1, n)
     X[:, FEATS.index('tUpWick')] = rng.uniform(0, 1, n)
+    X[:, FEATS.index('adrPct')] = rng.uniform(3, 5, n)  # a usual daily range of 3-5% of price, as in the real universe
     date = np.repeat(np.arange(len(days)), syms * len(slots))
     sym = np.repeat(np.tile(np.arange(syms), len(days)), len(slots))
     # the tight bracket (reference only): noise
@@ -119,12 +121,12 @@ if which in ('all', 'noise'):
       print('NOISE   ', s['id'], o, 'ic', s['ic'])
       assert o['netR'] <= 0.05 or o['n'] < 100, f'noise must not look like an edge: {s["id"]} {o}'
       assert s['ic']['mean'] is None or abs(s['ic']['mean']) < 0.03, f'noise predictions must not line up with outcomes: {s["ic"]}'
-      assert o['n'] == s['dev']['n'] + s['exam']['n'], 'dev + exam = all'
+      assert o['n'] == s['dev']['n'] + s['exam']['n'] + s['shadow']['n'], 'decide + exam + shadow = all'
       assert all(m['month'] >= ml.DECIDE_FROM for m in s['months']), 'the untouched months never enter the walk-forward'
       assert all(t[0] >= ml.DECIDE_FROM for t in s['trades'])
-  ut = noise['untouched']
-  print('NOISE untouched', ut and ut['overall'])
-  assert ut is None or ut['overall']['n'] < 100 or ut['overall']['netR'] <= 0.05, 'noise must not pass the untouched test'
+  for ut in noise['untouched']:
+      print('NOISE untouched', ut['id'], ut['overall'])
+      assert ut['overall']['n'] < 100 or ut['overall']['netR'] <= 0.05, 'noise must not pass the untouched test'
 
 if which in ('all', 'planted'):
   edge = run(True, 2)
@@ -144,16 +146,26 @@ if which in ('all', 'planted'):
   assert all(v['fill'] == 1 for v in cv.values()) and cv['now']['overall']['netR'] == o['netR'], 'same trades, every size'
   assert cv['l3']['overall']['netR'] > cv['l1']['overall']['netR'] > cv['now']['overall']['netR'], 'bigger positions keep more'
   assert len(w['trades']) == o['n'] and abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up'
-  for sid in ('wideShort', 'shortNear', 'shortFar'):
+  for sid in ('wideShort', 'shortNear'):
       st_ = strat(edge, sid)
       assert all(t[3] == -1 for t in st_['trades']) and all(t[2] >= '09:35' for t in st_['trades']), f'{sid}: shorts from 09:35'
-  assert {s_['id'] for s_ in edge['strategies']} == {'wideShort', 'shortNear', 'shortFar'} and edge['locked'] == 'shortNear'
+  assert {s_['id'] for s_ in edge['strategies']} == {'wideShort', 'shortNear'} and edge['locked'] == 'shortNear'
   assert edge['strategies'][1]['exam']['pass'] in (True, False, None)
   dl = w['daily']
   assert abs(dl['perTradedDay'] * dl['daysWithTrades'] - w['dev']['n']) < 1, 'your day = the decide months'
-  ut = edge['untouched']
-  print('PLANTED untouched', ut['overall'], ut['from'], ut['to'])
-  assert ut['id'] == 'shortNear' and ut['to'] < ml.DECIDE_FROM and all(t[0] < ml.DECIDE_FROM for t in ut['trades'])
-  assert ut['overall']['n'] >= 50 and ut['overall']['netR'] > 0.2, 'the planted edge is there in the untouched months too'
+  assert [u['id'] for u in edge['untouched']] == ['shortNear', 'wideShort'], 'both locked strategies get their one shot'
+  for ut in edge['untouched']:
+      print('PLANTED untouched', ut['id'], ut['overall'], ut['from'], ut['to'])
+      assert ut['to'] < ml.DECIDE_FROM and all(t[0] < ml.DECIDE_FROM for t in ut['trades'])
+      assert ut['overall']['n'] >= 50 and ut['overall']['netR'] > 0.2, 'the planted edge is there in the untouched months too'
+  sh = w['shadow']
+  print('PLANTED shadow', sh)
+  assert sh['n'] > 0 and sh['netR'] > 0.1 and all(m['shadow'] == (m['month'] >= ml.SHADOW_FROM) for m in w['months'])
+  assert not any(m['exam'] and m['shadow'] for m in w['months']), 'a shadow month is never an exam month'
+  assert w['dev']['n'] + w['exam']['n'] + sh['n'] == o['n'], 'decide + exam + shadow = all'
+  mo = w['money']
+  print('PLANTED money', mo)
+  assert mo['position'] > 0 and mo['margin'] * 5 == mo['position'] or abs(mo['margin'] * 5 - mo['position']) <= 5
+  assert mo['capital'] > mo['margin'] and mo['pct'] > 0 and len(mo['bigger']) == 2
 
 print('OK:', which)
