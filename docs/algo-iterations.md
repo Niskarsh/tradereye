@@ -26,6 +26,7 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 5 | **Shorts only** | **+0.03** | **1.9** | **25/40** | **+0.03** | **+0.05** | 0.085 | ₹1 lakh positions: +0.04R (t 2.5); ₹3 lakh: +0.06R (t 3.4) |
 | 6 | **Shorts only** (B, unchanged) | **+0.05** | **2.6** | **24/39** | **+0.04** | **+0.06** | 0.085 | Repeats; ₹1 lakh +0.06R (t 3.3), ₹3 lakh +0.07R (t 4.1); 09:25 entries no better (+0.04R) |
 | 7 | **F: shorts, target ½ range** | **+0.05** | **3.4** | **27/36** | **+0.05** | **+0.05** | 0.087 | Nearer target best on the decide months (B +0.03, G +0.04 there); locked for iteration 8 |
+| 7 (again) | F (same code, same data) | +0.06 | 3.7 | 26/37 | +0.06 | +0.07 | 0.087 | Run-to-run noise: B +0.03 → +0.06, F +0.05 → +0.06, G +0.04 → +0.05. B/F/G are within noise of each other; F had the best t both times |
 | 8 | (F locked; exam Pass/Fail only; untouched Jan–Sep 2022; noise check; trade management) | | | | | | | running |
 
 Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in

@@ -63,7 +63,7 @@ written.
      scripts/ml_walkforward.py): never in any walk-forward; the locked F is tested on it once, its models trained on the
      30 decide months after it and the bar set on the 3 after those;
    - every diagnostic is from the decide months; the exam is Pass / Fail on the page;
-   - noise check: F trained three times (main + seed2 + seed3, parallel GitHub jobs);
+   - noise check: F trained five times (main + seed2..seed5, parallel GitHub jobs);
    - trade management (lib/ml/manage.ts, run in the finish job by lib/ml/manageRun.ts on the 1-minute candles in S3):
      the same trades of B, F and G replayed with break-even stops (40/60/80% of the way to the target) and adding once
      or twice (momentum or pullback; at 40/60%; same or half size; one stop for the whole position placed where it

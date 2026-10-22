@@ -29,7 +29,7 @@ CHANGES = [
     'F (shorts, target ½ the usual daily range) is locked: best on the decide months in iteration 7 (+0.05R a trade, 23 of 31 months green). B and G stay for the trade-management tests; A is dropped.',
     'The exam months (May 2026 on) no longer steer anything: every diagnostic is from the decide months only, and the exam is shown as Pass / Fail.',
     'An untouched test: January–September 2022 was never loaded before. The locked F is tested on it once (models trained on the 30 months after it, the bar set on the 3 months after those).',
-    'Noise check: F is trained three times with different random draws, so every number has a "this much is luck" range.',
+    'Noise check: F is trained five times with different random draws (five machines at once), so every number has a "this much is luck" range. Iteration 7 ran twice on the same code and data: B moved +0.03R → +0.06R, F +0.05R → +0.06R.',
     'Trade management on the same trades (no new models): break-even stops, adding once and twice (when to add, how much, momentum or pullback, which stop budget, keep or extend the target), with room checks; picked on the first half of the decide months, combined and judged on the second half.',
 ]
 DECIDE_FROM = '2022-10'  # months before this are the untouched test: never in any walk-forward, diagnostic or decision
