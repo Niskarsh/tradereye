@@ -107,6 +107,21 @@ export class DhanClient {
     return Number.isFinite(p) && p > 0 ? p : undefined;
   }
 
+  /**
+   * Open / high / low / close and last price for up to 1000 instruments of one segment in one call (Market Quote API,
+   * 1 call a second). Keyed by securityId; instruments Dhan has no quote for are left out.
+   */
+  async ohlc(clientId: string, segment: string, securityIds: string[]): Promise<Map<string, { last: number; open: number; high: number; low: number; close: number }>> {
+    const raw = await this.req<any>('POST', '/marketfeed/ohlc', { [segment]: securityIds.map(Number) }, { 'client-id': clientId });
+    const out = new Map<string, { last: number; open: number; high: number; low: number; close: number }>();
+    const seg = raw?.data?.[segment] ?? {};
+    for (const [id, node] of Object.entries<any>(seg)) {
+      const o = node?.ohlc ?? {};
+      out.set(String(id), { last: Number(node?.last_price ?? 0), open: Number(o.open ?? 0), high: Number(o.high ?? 0), low: Number(o.low ?? 0), close: Number(o.close ?? 0) });
+    }
+    return out;
+  }
+
   /** Daily candles for [from, to) -- Dhan treats toDate as exclusive. Used for the official previous close. */
   async daily(p: { securityId: string; segment: string; instrument: string; from: string; to: string }): Promise<Candles> {
     const raw = await this.req<any>('POST', '/charts/historical', {
