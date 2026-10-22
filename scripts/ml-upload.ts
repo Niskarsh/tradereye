@@ -1,12 +1,28 @@
 /**
- * Algo Lab, step 3 (runs after the Python step, even if it failed): uploads ml-data/ml.json to S3, files it in the
- * iteration ledger (kept for good), and finishes the run's status. The backtest results are already saved by then, so
- * a failed model never loses them.
+ * Algo Lab, step 3 (runs after the model jobs, even if one failed): merges the main result (ml-data/ml.json) with the
+ * noise-check shards (ml-data/ml-seed*.json), runs the trade-management experiment on the trades (lib/ml/manageRun.ts),
+ * uploads it to S3, files it in the iteration ledger (kept for good), and finishes the run's status. The backtest
+ * results are already saved by then, so a failed model never loses them.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { getChunk, putChunk } from '../lib/book/s3';
 import { INDEX_KEY, ML_LEDGER_KEY, STATUS_KEY, getJson, mlIterKey, mlKey, putJson, type RunIndexItem, type RunStatus } from '../lib/setups/store';
 import { ledgerEntry, type LedgerEntry, type MlResult } from '../lib/ml/ledger';
+import { manageAll } from '../lib/ml/manageRun';
+
+interface Shard { shard: string; seedOffset: number; locked?: string; strategies: { id: string; overall: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number }; dev: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number } }[] }
+
+/** the locked strategy's numbers from each training draw: how much of a result is just luck in the training */
+function noiseOf(main: MlResult & Shard, dir: string) {
+  const files = existsSync(dir) ? readdirSync(dir).filter((f: string) => /^ml-seed\d+\.json$/.test(f)).sort() : [];
+  const shards: Shard[] = [main, ...files.map((f: string) => JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as Shard)];
+  const rows = shards.map((x) => {
+    const st = x.strategies.find((y) => y.id === main.locked);
+    return st ? { draw: x.shard === 'main' ? 'main' : x.shard, n: st.overall.n, netR: st.overall.netR, t: st.overall.t, devNetR: st.dev.netR, devT: st.dev.t, devGreen: [st.dev.monthsGreen ?? 0, st.dev.monthsTraded ?? 0] } : undefined;
+  }).filter((x): x is NonNullable<typeof x> => !!x);
+  const dv = rows.map((r) => r.devNetR);
+  return { strategy: main.locked, draws: rows, devMin: Math.min(...dv), devMax: Math.max(...dv), devMean: Math.round((dv.reduce((a, b) => a + b, 0) / Math.max(1, dv.length)) * 1000) / 1000 };
+}
 
 const store = { get: getChunk, put: putChunk };
 
@@ -34,13 +50,16 @@ async function main() {
   }
   let message: string;
   if (existsSync(file_)) {
-    const ml = JSON.parse(readFileSync(file_, 'utf8')) as MlResult;
+    const ml = JSON.parse(readFileSync(file_, 'utf8')) as MlResult & Shard & { examFrom: string; noise?: unknown; management?: unknown; managementError?: string };
+    if (ml.locked) ml.noise = noiseOf(ml, dir);
+    try { ml.management = await manageAll(ml as never, store, (m) => console.log(m)); }
+    catch (e) { ml.managementError = (e as Error).message; console.error('management failed', e); }
     await putJson(store, mlKey(runId), ml);
     if (await file(ledger, ml)) changed = true;
     const best = (ml.strategies ?? []).find((s) => s.id === ml.best);
     const r = (x: number) => `${x > 0 ? '+' : ''}${x}R`;
     message = best
-      ? `Algo Lab iteration ${ml.iteration}: best is ${best.name}, ${r(best.dev.netR)} a trade on the earlier months, ${r(best.exam.netR)} on the exam months (after costs)`
+      ? `Algo Lab iteration ${ml.iteration}: best on the decide months is ${best.name}, ${r(best.dev.netR)} a trade after costs`
       : `Algo Lab: done`;
   } else message = 'Backtest done; the Algo Lab model step failed (see the GitHub run log)';
   if (changed) await putJson(store, ML_LEDGER_KEY, ledger.sort((a, b) => a.iteration - b.iteration || a.createdAt - b.createdAt));

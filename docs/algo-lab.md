@@ -56,5 +56,19 @@ written.
    (t 1.9), exam +0.05R (4/6 green); ₹1 lakh positions +0.04R (t 2.5). Kept as branch `algo-iter-5`.
 6. **Shorts benchmark (B) vs shorts also at 09:25 (E, 2-tick entry there) vs control (A); every iteration preserved**
    (Oct 2026): B +0.05R (t 2.6), earlier +0.04R and exam +0.06R; E no better. Tag algo-iter-6-2026-10-22-01-21-gsti.
-7. **B vs nearer (½) / farther (1×) targets, 5-model average, "your day" view** (this version). See
-   docs/algo-iterations.md.
+7. **B vs nearer (½) / farther (1×) targets, 5-model average, "your day" view** (Oct 2026): F (½) best on the decide
+   months, +0.05R (t 3.4), 23/31 decide months green. Locked.
+8. **Clean data split + trade management** (this version):
+   - the dataset starts 1 Jan 2022 (`ML_FROM`); Jan–Sep 2022 is the untouched test (`DECIDE_FROM` in
+     scripts/ml_walkforward.py): never in any walk-forward; the locked F is tested on it once, its models trained on the
+     30 decide months after it and the bar set on the 3 after those;
+   - every diagnostic is from the decide months; the exam is Pass / Fail on the page;
+   - noise check: F trained five times (main + seed2..seed5, parallel GitHub jobs);
+   - trade management (lib/ml/manage.ts, run in the finish job by lib/ml/manageRun.ts on the 1-minute candles in S3):
+     the same trades of B, F and G replayed with break-even stops (40/60/80% of the way to the target) and adding once
+     or twice (momentum or pullback; at 40/60%; same or half size; one stop for the whole position placed where it
+     loses 1R / 0.5R / 0 of the first trade's risk, never loosened; target kept or moved to 1× / 1.5× the daily range;
+     only if the add can win 1× / 1.5× its own room and before 14:15; a second add halfway to the target or 0.5R past
+     the first). Stage 1 picks the best of each family on the first half of the decide months; stage 2 judges those and
+     the best break-even combined with each add on the second half; a winner must beat "as now" with t ≥ 2 and gets one
+     shot at the untouched months in the next iteration. Each add pays its own charges (about 0.1R at ₹300 risk).

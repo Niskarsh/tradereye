@@ -49,8 +49,9 @@ export interface JobDeps {
   onlySymbols?: string[];
   /** Algo Lab: write the dataset here for the Python step that runs after this job (the run is then finished by it) */
   gridDir?: string;
-  /** Algo Lab: years of history for its dataset (the setups and the study keep `years`); Dhan keeps 5 years of 1-min data */
-  mlYears?: number;
+  /** Algo Lab: the first day of its dataset (the setups and the study keep `years`). Default 2022-01-01: Jan-Sep 2022
+   * is the untouched test (scripts/ml_walkforward.py DECIDE_FROM), clear of the COVID years; Dhan keeps 5 years of 1-min data */
+  mlFrom?: string;
 }
 
 class RateLimit {
@@ -109,14 +110,15 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
   // ---- the period: the last 2 years of finished sessions (the Algo Lab dataset goes further back: mlYears)
   const today = new Date(now() + IST).toISOString().slice(0, 10);
   const years = deps.years ?? 2;
-  const span = deps.gridDir ? Math.max(years, Math.min(4.5, deps.mlYears ?? 4)) : years;
+  const mlFrom = deps.gridDir ? (deps.mlFrom ?? '2022-01-01') : undefined;
+  const span = Math.max(years, mlFrom ? (Date.parse(today) - Date.parse(mlFrom)) / (365 * DAY) : 0);
   const niftyDaily = await dhanCall(() => deps.dhan.daily({ securityId: NIFTY500.securityId, segment: NIFTY500.segment, instrument: NIFTY500.instrument, from: addDays(today, -Math.round(365 * span) - 70), to: today }));
   const sessions = [...new Set(niftyDaily.t.map(dateOf))].sort();
   const to = sessions.at(-1);
   if (!to) throw new Error('Dhan returned no Nifty 500 daily candles.');
   const from = addDays(to, -Math.round(365 * years));
   /** the first day of the Algo Lab dataset (= from when there is no Algo Lab) */
-  const fromAll = addDays(to, -Math.round(365 * span));
+  const fromAll = mlFrom && mlFrom < from ? mlFrom : from;
   const inPeriod = sessions.filter((d) => d >= from && d <= to);
   const mid = inPeriod[Math.floor(inPeriod.length / 2)] ?? to;
 

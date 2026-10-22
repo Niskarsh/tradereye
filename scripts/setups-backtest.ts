@@ -38,7 +38,7 @@ async function main() {
     log: (m) => console.log(m),
     onlySymbols: only?.length ? only : undefined,
     gridDir: process.env.ML_DIR || undefined,
-    mlYears: Number(process.env.ML_YEARS) || undefined,
+    mlFrom: process.env.ML_FROM || undefined,
   });
   console.log(`done in ${Math.round((Date.now() - t0) / 60000)} min: ${summary.universe.signals} signals, ${summary.universe.symbols} stocks, ${summary.period.from}..${summary.period.to}`);
 }

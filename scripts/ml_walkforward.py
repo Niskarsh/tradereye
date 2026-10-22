@@ -24,13 +24,18 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 7
+ITERATION = 8
 CHANGES = [
-    'B (shorts only) is kept unchanged as the benchmark: +0.05R a trade, t 2.6 in iteration 6, green on the earlier months and on the exam. A (both sides) stays the control. E (also at 09:25) was no better and is dropped.',
-    'Is the target right? Two new versions of B with the same stop (½ the usual daily range): F with a nearer target (½ the range) and G with a farther one (1× the range). A quick fade favours F; a full-day reversal favours G.',
-    'Steadier models: 5 averaged per decision (was 3). B\'s code did not change between iterations 5 and 6 yet it moved +0.03R → +0.05R: that run-to-run noise should shrink.',
-    'A "your day" view for each strategy: trades a day, how many fire at 09:35, the worst day and the worst week (in R): what paper-trading would feel like.',
+    'F (shorts, target ½ the usual daily range) is locked: best on the decide months in iteration 7 (+0.05R a trade, 23 of 31 months green). B and G stay for the trade-management tests; A is dropped.',
+    'The exam months (May 2026 on) no longer steer anything: every diagnostic is from the decide months only, and the exam is shown as Pass / Fail.',
+    'An untouched test: January–September 2022 was never loaded before. The locked F is tested on it once (models trained on the 30 months after it, the bar set on the 3 months after those).',
+    'Noise check: F is trained five times with different random draws (five machines at once), so every number has a "this much is luck" range. Iteration 7 ran twice on the same code and data: B moved +0.03R → +0.06R, F +0.05R → +0.06R.',
+    'Trade management on the same trades (no new models): break-even stops, adding once and twice (when to add, how much, momentum or pullback, which stop budget, keep or extend the target), with room checks; picked on the first half of the decide months, combined and judged on the second half.',
 ]
+DECIDE_FROM = '2022-10'  # months before this are the untouched test: never in any walk-forward, diagnostic or decision
+LOCKED = 'shortNear'     # the strategy locked for the untouched test and the noise check
+SHARD = 'main'           # 'main' (everything) or 'seed2' / 'seed3' (the locked strategy again, other random draws)
+SEED_OFF = 0
 TRAIN_MONTHS = 30
 VAL_MONTHS = 3
 EXAM_FROM = '2026-05'  # locked: the same exam months for every iteration
@@ -52,14 +57,14 @@ MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 _WIDE = {'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'L1': 'wbL1', 'S1': 'wbS1', 'L3': 'wbL3', 'S3': 'wbS3', 'noMarket': True}
 _WDESC = 'stop ½ of its usual daily range away, target ¾ of it, out by 15:15, picked from the stock\'s own facts and habits (no Nifty)'
 STRATEGIES = [
-    {**_WIDE, 'id': 'wideStock', 'name': 'A. Wide bracket (control)', 'firstSlot': 20, 'desc': f'Long or short one stock from 09:35: {_WDESC}. The same as iterations 4–6.'},
-    {**_WIDE, 'id': 'wideShort', 'name': 'B. Shorts only (the benchmark)', 'only': -1, 'firstSlot': 20, 'desc': f'Short only, from 09:35: {_WDESC}. The same as iterations 5 and 6.'},
-    {**_WIDE, 'id': 'shortNear', 'name': 'F. Shorts, nearer target (½ range)', 'only': -1, 'firstSlot': 20,
+    {**_WIDE, 'id': 'wideShort', 'name': 'B. Shorts, target ¾ range', 'only': -1, 'firstSlot': 20, 'targetAdr': 0.75,
+     'desc': f'Short only, from 09:35: {_WDESC}. The same as iterations 5–7.'},
+    {**_WIDE, 'id': 'shortNear', 'name': 'F. Shorts, target ½ range (locked)', 'only': -1, 'firstSlot': 20, 'targetAdr': 0.5,
      'S': 'nbS', 'Sg': 'nbSg', 'S1': 'nbS1', 'S3': 'nbS3',
-     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target ½ of it (B: ¾), out by 15:15.'},
-    {**_WIDE, 'id': 'shortFar', 'name': 'G. Shorts, farther target (1× range)', 'only': -1, 'firstSlot': 20,
+     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target ½ of it, out by 15:15. Locked after iteration 7.'},
+    {**_WIDE, 'id': 'shortFar', 'name': 'G. Shorts, target 1× range', 'only': -1, 'firstSlot': 20, 'targetAdr': 1.0,
      'S': 'fbS', 'Sg': 'fbSg', 'S1': 'fbS1', 'S3': 'fbS3',
-     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target 1× of it (B: ¾), out by 15:15.'},
+     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target 1× of it, out by 15:15.'},
 ]
 COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
          ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
@@ -127,9 +132,9 @@ class Ensemble:
 def fit(X, y, mask, seed, cols):
     ms = []
     for e in range(ENSEMBLE):
-        idx = sub(mask, seed * 10 + e)
+        idx = sub(mask, seed * 10 + e + 7919 * SEED_OFF)
         ok = idx[np.isfinite(y[idx])]
-        ms.append(model(7 + e).fit(X[np.ix_(ok, cols)], y[ok]))
+        ms.append(model(7 + e + 100 * SEED_OFF).fit(X[np.ix_(ok, cols)], y[ok]))
     return Ensemble(ms, cols)
 
 
@@ -266,14 +271,16 @@ def main(d):
     df = add_ranks(df)
     feats = [f['k'] for f in head['features']] + [c + '_rk' for c in RANKED]
     X = df[feats].values.astype(np.float32)
-    months = sorted(df['month'].unique())
+    months_all = sorted(df['month'].unique())
+    held = [m for m in months_all if m < DECIDE_FROM]  # the untouched test: never in the walk-forward
+    months = [m for m in months_all if m >= DECIDE_FROM]
     first_test = MIN_TRAIN_MONTHS + VAL_MONTHS
     if len(months) < first_test + 1:
         raise SystemExit('not enough months for walk-forward')
     exam_from = EXAM_FROM if EXAM_FROM in months[first_test:] else months[max(first_test, len(months) - EXAM_MONTHS)]
     all_cols = np.arange(len(feats))
     stock_cols = np.array([i for i, f in enumerate(feats) if f not in MARKET])
-    mi = df['month'].map({m: i for i, m in enumerate(months)}).values
+    mi = df['month'].map({m: i for i, m in enumerate(months)}).fillna(-1).astype(int).values  # -1 = untouched
     # learn on results clipped to [-3, 3] (gaps and data errors must not steer the model); trades are scored on the real result
     y = {c: df[c].clip(-3, 3).values.astype(np.float32) for c in ('wbL', 'wbS', 'ccL', 'ccS', 'nbS', 'fbS') if c in df.columns}
 
@@ -327,7 +334,8 @@ def main(d):
                 ics = [spearman(tl_all, tpart[st['L']].values) if ml else None, spearman(ts_all, tpart[st['S']].values) if ms else None]
                 ics = [x for x in ics if x is not None]
                 ic = float(np.mean(ics)) if ics else None
-                add_gain(r['gain'], (ml.models if ml else []) + (ms.models if ms else []), cols)
+                if months[ti] < exam_from:  # what the model leans on: decide months only
+                    add_gain(r['gain'], (ml.models if ml else []) + (ms.models if ms else []), cols)
             else:
                 ncols = stock_cols if st.get('noMarket') else all_cols
                 mn = fit(X, y['excess'], fitm, ti + 900, ncols)
@@ -353,7 +361,7 @@ def main(d):
                       'ic': None if ic is None else round(ic, 4), 'exam': months[ti] >= exam_from,
                       'baseL': round(float(np.nanmean(tpart[st['L']])), 3), 'baseS': round(float(np.nanmean(tpart[st['S']])), 3)})
             r['months'].append(s)
-            if ic is not None:
+            if ic is not None and months[ti] < exam_from:  # the signal headline: decide months only
                 r['ic'].append(ic)
         log(months[ti], ' | '.join(f"{k}: {v['months'][-1]['n']} @ {v['months'][-1]['netR']}" for k, v in res.items() if v['months']),
             f'{time.time() - t0:.0f}s')
@@ -361,9 +369,11 @@ def main(d):
     labels = {f['k']: f['l'] for f in head['features']}
     for c in RANKED:
         labels[c + '_rk'] = f"Rank vs other stocks: {labels.get(c, c)} (0 = lowest, 1 = highest)"
-    mean_all = {f: float(df[f].mean()) for f in feats}
-    sd_all = {f: float(df[f].std()) for f in feats}
-    med_all = {f: float(df[f].median()) for f in feats}
+    # every diagnostic compares against the decide months only (never the exam, never the untouched test)
+    ref = df.loc[(mi >= 0) & (df['month'].values < exam_from)]
+    mean_all = {f: float(ref[f].mean()) for f in feats}
+    sd_all = {f: float(ref[f].std()) for f in feats}
+    med_all = {f: float(ref[f].median()) for f in feats}
     key = pd.MultiIndex.from_arrays([df['day'].values, df['sym'].values, df['slot'].values])
     syms = head['symbols']
 
@@ -381,6 +391,7 @@ def main(d):
         exam_t = trades[trades['month'] >= exam_from] if len(trades) else trades
         dev = period_stats(dev_t, [m for m in mo if not m['exam']])
         exam = period_stats(exam_t, [m for m in mo if m['exam']])
+        exam['pass'] = None if exam['n'] < 30 else bool(exam['netR'] > 0)
         # the same trades executed three ways (a limit order that never filled = no trade)
         costs = []
         for cid, cname, col in COSTS:
@@ -395,14 +406,14 @@ def main(d):
                           'exam': stats(ev[col].astype(float)) if len(ev) else stats([]), 'examMonths': green(ev)})
         # "your day": what trading it by hand would feel like (all tested months, after costs at ₹300 risk)
         daily = None
-        if len(trades):
-            tday = trades.groupby('day')['net'].agg(['sum', 'size'])
-            wk = pd.to_datetime(trades['day']).dt.strftime('%G-W%V')
-            tweek = trades.groupby(wk.values)['net'].sum()
-            test_days = int(df.loc[df['month'].isin([m['month'] for m in mo]), 'day'].nunique())
+        if len(dev_t):  # decide months only
+            tday = dev_t.groupby('day')['net'].agg(['sum', 'size'])
+            wk = pd.to_datetime(dev_t['day']).dt.strftime('%G-W%V')
+            tweek = dev_t.groupby(wk.values)['net'].sum()
+            test_days = int(ref.loc[ref['month'].isin([m['month'] for m in mo if not m['exam']]), 'day'].nunique())
             daily = {'tradingDays': test_days, 'daysWithTrades': int(len(tday)),
                      'perTradedDay': round(float(tday['size'].mean()), 2), 'maxPerDay': int(tday['size'].max()),
-                     'at0935': round(float((trades['slot'].astype(int) == 20).mean()), 3),
+                     'at0935': round(float((dev_t['slot'].astype(int) == 20).mean()), 3),
                      'greenDays': round(float((tday['sum'] > 0).mean()), 3),
                      'worstDayR': round(float(tday['sum'].min()), 2), 'bestDayR': round(float(tday['sum'].max()), 2),
                      'worstWeekR': round(float(tweek.min()), 2), 'greenWeeks': round(float((tweek > 0).mean()), 3)}
@@ -410,9 +421,9 @@ def main(d):
         ic = {'mean': round(float(ics.mean()), 4) if len(ics) else None, 'positive': int((ics > 0).sum()), 'months': int(len(ics))}
 
         liked = []
-        if len(trades):
+        if len(dev_t):  # decide months only
             for side, name in ((1, 'long'), (-1, 'short')):
-                sel = trades[trades['side'] == side]
+                sel = dev_t[dev_t['side'] == side]
                 if len(sel) < 30:
                     continue
                 part = df.loc[key.isin(pd.MultiIndex.from_arrays([sel['day'].values, sel['sym'].values.astype(np.int32), sel['slot'].values.astype(np.int32)]))]
@@ -441,8 +452,9 @@ def main(d):
         recent = trades.tail(40)
         out.append({
             'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'desc': st['desc'],
-            'baseline': {'long': round(float(np.nanmean(df[st['L']])), 3), 'short': round(float(np.nanmean(df[st['S']])), 3),
-                         'longGross': round(float(np.nanmean(df[st['Lg']])), 3), 'shortGross': round(float(np.nanmean(df[st['Sg']])), 3)},
+            'baseline': {'long': round(float(np.nanmean(ref[st['L']])), 3), 'short': round(float(np.nanmean(ref[st['S']])), 3),
+                         'longGross': round(float(np.nanmean(ref[st['Lg']])), 3), 'shortGross': round(float(np.nanmean(ref[st['Sg']])), 3)},
+            'targetAdr': st.get('targetAdr'),
             'overall': overall, 'dev': dev, 'exam': exam, 'ic': ic, 'costs': costs, 'daily': daily, 'bySide': by_side, 'byHour': by_hour, 'months': mo,
             'importance': top, 'liked': liked[:20],
             'recent': [{'day': x.day, 'sym': syms[int(x.sym)], 'time': f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}',
@@ -456,6 +468,7 @@ def main(d):
         log(st['id'], 'overall', overall, 'dev', dev['netR'], 'exam', exam['netR'], 'ic', ic)
 
     best = max(out, key=lambda s: s['dev']['netR'] if s['dev']['n'] >= 100 else -9)
+    untouched = untouched_test(df, X, y, mi, months, held, stock_cols, syms) if SHARD == 'main' and held else None
     result = {
         'v': 2, 'iteration': ITERATION, 'changes': CHANGES, 'runId': head['runId'], 'createdAt': int(time.time() * 1000),
         'code': os.environ.get('GITHUB_SHA'),  # the exact code that made these results
@@ -464,12 +477,59 @@ def main(d):
         'setup': {'trainMonths': TRAIN_MONTHS, 'valMonths': VAL_MONTHS, 'examMonths': EXAM_MONTHS, 'maxPerDay': MAX_PER_DAY, 'maxPerSide': MAX_PER_SIDE,
                   'riskInr': RISK, 'wideStopAdr': head.get('wideStopAdr'), 'wideTargetAdr': head.get('wideTargetAdr'), 'closeStopAdr': head.get('closeStopAdr'),
                   'neutralTimes': [f'{(555 + s) // 60:02d}:{(555 + s) % 60:02d}' for s in NEUTRAL_SLOTS], 'neutralK': NEUTRAL_K},
-        'baselineTight': {'long': round(float(np.nanmean(df['netL'])), 3), 'short': round(float(np.nanmean(df['netS'])), 3)},
-        'best': best['id'], 'overall': best['overall'],
+        'baselineTight': {'long': round(float(np.nanmean(ref['netL'])), 3), 'short': round(float(np.nanmean(ref['netS'])), 3)},
+        'best': best['id'], 'locked': LOCKED, 'overall': best['overall'], 'shard': SHARD, 'seedOffset': SEED_OFF,
+        'decideFrom': DECIDE_FROM, 'untouched': untouched,
         'strategies': out,
     }
-    json.dump(result, open(os.path.join(d, 'ml.json'), 'w'))
+    json.dump(result, open(os.path.join(d, 'ml.json' if SHARD == 'main' else f'ml-{SHARD}.json'), 'w'))
+
+
+def untouched_test(df, X, y, mi, months, held, cols, syms):
+    """The locked strategy, once, on months never used before. No earlier data exists, so its models learn from the
+    TRAIN_MONTHS decide months right after the untouched months, and the bar is set on the VAL_MONTHS after those (the
+    walk-forward recipe, mirrored). Every fact is still only what was known at that minute of that day."""
+    st = next(s_ for s_ in STRATEGIES if s_['id'] == LOCKED)
+    if len(months) < TRAIN_MONTHS + VAL_MONTHS:
+        return None
+    fitm = (mi >= 0) & (mi < TRAIN_MONTHS)
+    val = (mi >= TRAIN_MONTHS) & (mi < TRAIN_MONTHS + VAL_MONTHS)
+    hold = mi == -1
+    m_ = fit(X, y[st['S']], fitm, 4242, cols)
+    vpart, hpart = df.loc[val], df.loc[hold]
+    vs, hs = m_.predict(X[val]), m_.predict(X[hold])
+    vl, hl = np.full(len(vs), -np.inf), np.full(len(hs), -np.inf)
+    vl, vs = allowed(vpart, vl, vs, st)
+    hl_, hs_ = allowed(hpart, hl, hs, st)
+    vb = vs[np.isfinite(vs)]
+    best_thr, best_sum = None, -1e18
+    for thr in ([float(q) for q in np.quantile(vb, QUANTS) if q > 0] if len(vb) else []):
+        tr = pick_dir(vpart, vl, vs, thr, st)
+        if len(tr) >= 10 * VAL_MONTHS and tr['net'].sum() > best_sum:
+            best_thr, best_sum = thr, float(tr['net'].sum())
+    if best_thr is None:
+        return {'id': st['id'], 'name': st['name'], 'months': held, 'note': 'no bar was profitable on the months used to set it', 'overall': stats([])}
+    tr = pick_dir(hpart, hl_, hs_, best_thr, st)
+    tr = tr.assign(month=tr['day'].str.slice(0, 7))
+    mstats = []
+    for m in held:
+        x = tr[tr['month'] == m]
+        s_ = stats(x['net'], x['gross'])
+        s_['month'] = m
+        mstats.append(s_)
+    o = period_stats(tr, mstats)
+    log('untouched', st['id'], o)
+    return {'id': st['id'], 'name': st['name'], 'from': held[0], 'to': held[-1], 'thr': round(best_thr, 4), 'overall': o, 'months': mstats,
+            'trainMonths': [months[0], months[TRAIN_MONTHS - 1]], 'valMonths': [months[TRAIN_MONTHS], months[TRAIN_MONTHS + VAL_MONTHS - 1]],
+            'tradeCols': ['day', 'sym', 'time', 'side', 'pred', 'net', 'gross', 'p1', 'p3'],
+            'trades': [[x.day, syms[int(x.sym)], f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}', int(x.side),
+                        round(float(x.pred), 3), r2(x.net), r2(x.gross), r2(x.p1), r2(x.p3)] for x in tr.itertuples()]}
 
 
 if __name__ == '__main__':
+    # python scripts/ml_walkforward.py <dir> [main | seed2 | seed3]
+    SHARD = sys.argv[2] if len(sys.argv) > 2 else 'main'
+    if SHARD != 'main':
+        SEED_OFF = int(SHARD.replace('seed', '') or 0)
+        STRATEGIES = [s_ for s_ in STRATEGIES if s_['id'] == LOCKED]
     main(sys.argv[1] if len(sys.argv) > 1 else 'ml-data')
