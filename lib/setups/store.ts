@@ -63,7 +63,9 @@ export const dailyKey = (symbol: string) => `setups/candles/daily/${symbol.toUpp
 export const RUN_ID = /^[0-9A-Za-z-]{6,40}$/;
 
 /** A run whose status has not moved for this long is treated as dead (the job was cancelled or timed out). */
-export const STALE_MS = 150 * 60_000; // the Algo Lab model step can run for an hour without a status update
+/** the Algo Lab model step updates nothing while it trains (iteration 7: 2.5 hours), so only the job's own 5-hour limit
+ * (.github/workflows/setups-backtest.yml timeout-minutes) can tell a dead run from a slow one */
+export const STALE_MS = 320 * 60_000;
 export function isActive(s: RunStatus | undefined, now = Date.now()): boolean {
   return !!s && (s.state === 'queued' || s.state === 'running') && now - s.updatedAt < STALE_MS;
 }
