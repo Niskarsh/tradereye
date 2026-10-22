@@ -1,0 +1,83 @@
+# Algo Live: trains the model that trades this month (scripts/ml_live.py) from the dataset of the last finished
+# backtest run (its "grid" artifact), checks the exported trees reproduce sklearn, and saves it to S3 for the live
+# engine (algo-live/model.json.gz; every model is also kept under algo-live/models/).
+#
+# When: once at the start of each month after a backtest Re-run (the backtest workflow keeps the dataset 7 days), or
+# by hand from the Actions tab. The repo is public: the log prints progress only (results show as annotations).
+name: Algo Live model
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Backtest run (GitHub run id) whose dataset to use; empty = the latest one that still has it
+        required: false
+        type: string
+      month:
+        description: Month to trade (YYYY-MM); empty = this month
+        required: false
+        type: string
+  push:
+    branches: [fix-claude-algo-live]
+    paths: [scripts/ml_live.py, .github/workflows/algo-live-model.yml]
+
+concurrency:
+  group: algo-live-model
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read  # to read the dataset artifact of the backtest run
+
+jobs:
+  model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the dataset
+        id: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+        run: |
+          if [ -n "$SOURCE_RUN" ]; then echo "run=$SOURCE_RUN" >> "$GITHUB_OUTPUT"; exit 0; fi
+          for r in $(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/setups-backtest.yml/runs?status=success&per_page=10" --jq '.workflow_runs[].id'); do
+            n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$r/artifacts" --jq '[.artifacts[] | select(.name=="grid" and .expired==false)] | length')
+            if [ "$n" = "1" ]; then echo "run=$r" >> "$GITHUB_OUTPUT"; echo "dataset from run $r"; exit 0; fi
+          done
+          echo "No backtest run still has its dataset: press Re-run on My Setups first." && exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: grid
+          path: ml-data
+          run-id: ${{ steps.src.outputs.run }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet numpy pandas scikit-learn
+      - name: Train this month's model and export it
+        run: python scripts/ml_live.py ml-data "${{ inputs.month }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The live engine scores it exactly as sklearn did
+        run: |
+          set +e
+          npx --yes tsx@4 scripts/ml-live-check.ts ml-data/live-model.json > check.txt 2>&1
+          code=$?
+          cat check.txt
+          if [ $code -ne 0 ]; then echo "::error title=Live engine check crashed::$(tail -c 1200 check.txt | tr '\n' ' ')"; exit 1; fi
+      - name: Save it to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+          BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          gzip -9 -k ml-data/live-model.json
+          M=$(python3 -c "import json;print(json.load(open('ml-data/live-model.json'))['month'])")
+          aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/algo-live/models/$M-$GITHUB_RUN_ID.json.gz" --only-show-errors
+          aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/algo-live/model.json.gz" --only-show-errors
+          python3 -c "import json;m=json.load(open('ml-data/live-model.json'));print('::notice title=Algo Live model::month', m['month'], '| learned', m['train'], '| bar set on', m['val'], '|', 'STAND ASIDE' if m['standAside'] else 'trading', '| bar', m['threshold'], '| validation', m['valTrades'], 'trades in', m['valDays'], 'days,', m['valR'], 'R a trade | sklearn parity', m['parity']['worst'], '| data to', m['dataTo'])"

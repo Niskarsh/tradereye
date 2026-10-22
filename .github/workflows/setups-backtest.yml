@@ -49,12 +49,13 @@ jobs:
           AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
           NODE_OPTIONS: --max-old-space-size=9216
           ML_DIR: ml-data
-      # the Algo Lab dataset, handed to the model jobs (never uploaded anywhere else; deleted after a day)
+      # the Algo Lab dataset, handed to the model jobs and to the Algo Live model workflow (never uploaded anywhere else;
+      # deleted after 7 days)
       - uses: actions/upload-artifact@v4
         with:
           name: grid
           path: ml-data/grid.*
-          retention-days: 1
+          retention-days: 7
           compression-level: 1
 
   models:
