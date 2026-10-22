@@ -17,6 +17,7 @@ interface Strat {
   baseline: { long: number; short: number; longGross: number; shortGross: number };
   overall: P & { maxDrawdownR: number; inrPerMonth: number }; dev: P; exam: P;
   ic: { mean: number | null; positive: number; months: number };
+  daily?: { tradingDays: number; daysWithTrades: number; perTradedDay: number; maxPerDay: number; at0935: number; greenDays: number; worstDayR: number; bestDayR: number; worstWeekR: number; greenWeeks: number } | null;
   costs?: { id: string; name: string; fill: number; overall: S; months: [number, number]; dev: S; devMonths: [number, number]; exam: S; examMonths: [number, number] }[];
   bySide: { long: S; short: S }; byHour: (S & { hour: string })[]; months: Month[];
   importance: { f: string; label: string; share: number }[];
@@ -129,6 +130,21 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
         ({rr(s.baseline.longGross)} / {rr(s.baseline.shortGross)} before): that is what the model has to beat.
         {neutral && ` Baskets at ${ml.setup.neutralTimes.join(', ')}: ${ml.setup.neutralK} longs + ${ml.setup.neutralK} shorts, each stock once a day.`}
       </p>
+
+      {s.daily && (
+        <Card title="Your day, if you traded it by hand" sub="All tested months, after costs at ₹300 risk. What paper-trading this would feel like.">
+          <Tiles items={[
+            ['Days with a trade', `${s.daily.daysWithTrades} of ${s.daily.tradingDays} (${pct(s.daily.daysWithTrades / Math.max(1, s.daily.tradingDays))})`],
+            ['Trades on those days', `${s.daily.perTradedDay} avg · ${s.daily.maxPerDay} max`],
+            ['Fired at 09:35', pct(s.daily.at0935)],
+            ['Green days', pct(s.daily.greenDays)],
+            ['Worst day', `${s.daily.worstDayR}R (${inr(s.daily.worstDayR * 300)})`, 'text-data-red-text'],
+            ['Best day', `+${s.daily.bestDayR}R (${inr(s.daily.bestDayR * 300)})`, 'text-data-green'],
+            ['Worst week', `${s.daily.worstWeekR}R (${inr(s.daily.worstWeekR * 300)})`, 'text-data-red-text'],
+            ['Green weeks', pct(s.daily.greenWeeks)],
+          ]} />
+        </Card>
+      )}
 
       {s.costs && (
         <Card title="The same trades at different position sizes" sub="Which trades are taken does not change; only how big they are. Dhan's brokerage is capped at ₹20 an order, so bigger positions pay less in charges per R. A bigger position risks far more than ₹300 per trade (about ₹1,800 at ₹1 lakh and ₹5,500 at ₹3 lakh with this stop): compare R, not rupees. (Iteration 4 showed limit orders at the close lose: the ones that never fill are the winners.)">

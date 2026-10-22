@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
-import { BIG_NOTIONAL, MID_NOTIONAL, OPEN_SLIP_TICKS, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
+import { BIG_NOTIONAL, MID_NOTIONAL, NEAR_TARGET_ADR, FAR_TARGET_ADR, OPEN_SLIP_TICKS, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
 import { roundTripCharges, sizeFor } from '../lib/setups/costs';
 import { TICK, onTick } from '../lib/study/mine';
 
@@ -131,6 +131,37 @@ test('grid: bigger positions (₹1 lakh / ₹3 lakh, market orders) match an ind
           assert.ok(Math.abs(r[col(`wb${S}${suf}`)] - net) < 0.002, `${date} ${k} ${d} ${suf}`);
         }
         assert.ok(r[col(`wb${S}3`)] >= r[col(`wb${S}1`)] - 1e-9 && r[col(`wb${S}1`)] > r[col(`wb${S}`)], 'bigger position, smaller charges in R');
+        n++;
+      }
+    }
+  }
+  assert.ok(n > 300);
+});
+
+test('grid: the short with a nearer / farther target matches an independent replay', () => {
+  const H = hist();
+  const col = (c: string) => ML_COLS.indexOf(c) - 2;
+  const iAdr = 1 + ML_KEYS.indexOf('adrPct');
+  let n = 0;
+  for (let seed = 1; seed <= 8; seed++) {
+    const { px, rnd } = walk(seed * 29 + 3);
+    const date = `2025-08-${String(seed + 3).padStart(2, '0')}`;
+    const day = session(date, (k) => px[k], rnd);
+    for (const r of gridDay({ date, history: H, day, nifty: session(date, () => 20000), daily: daily() })) {
+      const k = r[0], close = day[k - 1].c, adr = (r[iAdr] / 100) * close;
+      for (const [pre, tAdr] of [['nb', NEAR_TARGET_ADR], ['fb', FAR_TARGET_ADR]] as const) {
+        const entry = close - TICK * (k < 20 ? OPEN_SLIP_TICKS : 1), stop = onTick(close + WIDE_STOP_ADR * adr, 1), tgt = onTick(close - tAdr * adr, -1);
+        let sAt = -1, tAt = -1;
+        for (let s = k; s < LATE_END; s++) {
+          if (sAt < 0 && day[s].h >= stop) sAt = s;
+          if (tAt < 0 && day[s].l <= tgt - TICK) tAt = s;
+        }
+        const win = tAt >= 0 && (sAt < 0 || tAt < sAt);
+        const exit = win ? tgt : sAt >= 0 ? stop + TICK : day[LATE_END - 1].c + TICK;
+        const dist = stop - entry, g = (entry - exit) / dist;
+        const net = (qty: number) => g - roundTripCharges(qty, entry, exit, -1) / (qty * dist);
+        assert.ok(Math.abs(r[col(`${pre}Sg`)] - g) < 0.002 && Math.abs(r[col(`${pre}S`)] - net(sizeFor(300, dist))) < 0.002, `${pre} ${date} ${k}`);
+        assert.ok(Math.abs(r[col(`${pre}S1`)] - net(Math.floor(MID_NOTIONAL / entry))) < 0.002 && Math.abs(r[col(`${pre}S3`)] - net(Math.floor(BIG_NOTIONAL / entry))) < 0.002);
         n++;
       }
     }

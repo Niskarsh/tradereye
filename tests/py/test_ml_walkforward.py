@@ -25,7 +25,8 @@ FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr
          'ema10Atr', 'ema5Atr', 'ema1dAtr', 'pdhAtr', 'pdlAtr', 'vaHiAtr', 'vaLoAtr', 'pocAtr', 'upCandles', 'downCandles', 'priceRs',
          'habitClose', 'habitCloseUp', 'habitNext30', 'habitTrend', 'ret5d', 'ret20d', 'hi20Adr', 'lo20Adr', 'prevCloseLoc', 'prevLast30', 'gapVsUsual']
 LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
-          'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3']
+          'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3',
+          'nbS', 'nbSg', 'nbS1', 'nbS3', 'fbS', 'fbSg', 'fbS1', 'fbS3']
 
 
 def make(d, planted, seed):
@@ -67,6 +68,10 @@ def make(d, planted, seed):
         for k in ('wb', 'cc'):
             lab[f'{k}{side}1'] = lab[f'{k}{side}g'] - (0.035 if k == 'wb' else 0.03)
             lab[f'{k}{side}3'] = lab[f'{k}{side}g'] - 0.02
+    # the short with a nearer / farther target: its own coin flips (noise)
+    for pre, win, gain in (('nb', 0.5, 1.0), ('fb', 0.3, 2.0)):
+        g_ = np.where(rng.uniform(size=n) < win, gain, -1.0)
+        lab[f'{pre}Sg'], lab[f'{pre}S'], lab[f'{pre}S1'], lab[f'{pre}S3'] = g_, g_ - 0.07, g_ - 0.035, g_ - 0.02
     rows = np.column_stack([sym, date, X[:, 0], X] + [lab[k] for k in LABELS]).astype(np.float32)
     rows.tofile(os.path.join(d, 'grid.bin'))
     cols = ['sym', 'date', 'slot'] + FEATS + LABELS
@@ -140,8 +145,12 @@ if which in ('all', 'planted'):
   assert all(t['time'] >= '09:35' for t in w['recent']) and all(t[2] >= '09:35' for t in w['trades']), 'A never trades before 09:35'
   assert len(w['trades']) == o['n'] and w['tradeCols'][5] == 'net', 'every trade is kept with the results'
   assert abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up to the headline'
-  ea = strat(edge, 'wideShortEarly')
-  assert all(t[3] == -1 for t in ea['trades']), 'E: shorts only'
-  assert {s_['id'] for s_ in edge['strategies']} == {'wideStock', 'wideShort', 'wideShortEarly'}
+  for sid in ('wideShort', 'shortNear', 'shortFar'):
+      assert all(t[3] == -1 for t in strat(edge, sid)['trades']), f'{sid}: shorts only'
+  assert {s_['id'] for s_ in edge['strategies']} == {'wideStock', 'wideShort', 'shortNear', 'shortFar'}
+  dl = w['daily']
+  assert dl['daysWithTrades'] <= dl['tradingDays'] and dl['maxPerDay'] <= ml.MAX_PER_DAY and dl['worstDayR'] <= dl['bestDayR']
+  assert abs(dl['perTradedDay'] * dl['daysWithTrades'] - o['n']) < 1, 'trades a day x days = all trades'
+  print('PLANTED your day', dl)
 
 print('OK:', which)

@@ -55,4 +55,6 @@ written.
    ~₹1 lakh / ~₹3 lakh with market orders, breakdowns on earlier months only** (Oct 2026): shorts only best, +0.03R
    (t 1.9), exam +0.05R (4/6 green); ₹1 lakh positions +0.04R (t 2.5). Kept as branch `algo-iter-5`.
 6. **Shorts benchmark (B) vs shorts also at 09:25 (E, 2-tick entry there) vs control (A); every iteration preserved**
-   (this version). See docs/algo-iterations.md.
+   (Oct 2026): B +0.05R (t 2.6), earlier +0.04R and exam +0.06R; E no better. Tag algo-iter-6-2026-10-22-01-21-gsti.
+7. **B vs nearer (½) / farther (1×) targets, 5-model average, "your day" view** (this version). See
+   docs/algo-iterations.md.

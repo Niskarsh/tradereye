@@ -19,7 +19,8 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 3 | Wide, no Nifty facts | −0.00 | −0.1 | 15/31 | +0.01 | −0.12 | 0.079 | Nifty facts were noise; memory facts lead |
 | 4 | Wide, stock facts only | +0.02 | 1.0 | 19/35 | +0.02 | −0.05 | 0.077 | First green; shorts carry it; limit orders lose |
 | 5 | **Shorts only** | **+0.03** | **1.9** | **25/40** | **+0.03** | **+0.05** | 0.085 | ₹1 lakh positions: +0.04R (t 2.5); ₹3 lakh: +0.06R (t 3.4) |
-| 6 | (shorts also at 09:25) | | | | | | | running |
+| 6 | **Shorts only** (B, unchanged) | **+0.05** | **2.6** | **24/39** | **+0.04** | **+0.06** | 0.085 | Repeats; ₹1 lakh +0.06R (t 3.3), ₹3 lakh +0.07R (t 4.1); 09:25 entries no better (+0.04R) |
+| 7 | (B vs nearer / farther target, 5-model average) | | | | | | | running |
 
-Iteration 5's shorts: mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
+Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
 the first 20 minutes and are already 1.6 ATR below it.
