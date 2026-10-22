@@ -63,7 +63,12 @@ jobs:
         with:
           node-version: 22
       - name: The live engine scores it exactly as sklearn did
-        run: npx --yes tsx@4 scripts/ml-live-check.ts ml-data/live-model.json
+        run: |
+          set +e
+          npx --yes tsx@4 scripts/ml-live-check.ts ml-data/live-model.json > check.txt 2>&1
+          code=$?
+          cat check.txt
+          if [ $code -ne 0 ]; then echo "::error title=Live engine check crashed::$(tail -c 1200 check.txt | tr '\n' ' ')"; exit 1; fi
       - name: Save it to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
