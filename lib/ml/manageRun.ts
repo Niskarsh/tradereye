@@ -88,3 +88,110 @@ export async function manageAll(ml: { examFrom: string; strategies: Strat[] }, s
   }
   return out;
 }
+
+/* ---- iteration 9: confirm one rule fixed in advance (no search) -------------------------------------------- */
+
+/** the add rule iteration 8 picked for B on the second half of its decide months, fixed before iteration 9 ran */
+export const CONFIRM: Record<string, string> = { wideShort: 'a1-p0.4-x1-b1-tx1.5-r1' };
+
+type Trade = (string | number | null)[];
+interface Part { n: number; base: number; rule: number; diff: number; t: number; monthsGreenBase: number; monthsGreenRule: number; months: number; addRate: number }
+export interface Confirmed { strategy: string; rule: string; label: string; decide: Part; exam: { pass: boolean | null; n: number }; untouched: Part | null; shadow: Part | null; baseMismatch: number; skippedNoData: number }
+
+async function loadDays(store: Store, items: { sym: string; date: string }[]) {
+  const need = new Map<string, Set<string>>();
+  for (const { sym, date } of items) {
+    const key = `${sym}|${date.slice(0, 7)}`;
+    if (!need.has(key)) need.set(key, new Set());
+    need.get(key)!.add(date);
+  }
+  const days = new Map<string, NonNullable<ReturnType<typeof toSlots>>>();
+  const dailies = new Map<string, Candles>();
+  const keys = [...need.keys()];
+  let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (next < keys.length) {
+      const key = keys[next++];
+      const [sym, month] = key.split('|');
+      const m = await getJson<{ c: Candles }>(store, monthKey(sym, month)).catch(() => undefined);
+      for (const s of m ? toSessions(m.c) : []) {
+        if (!need.get(key)!.has(s.date)) continue;
+        const sl = toSlots(s.bars);
+        if (sl) { sl.bars = []; days.set(`${sym}|${s.date}`, sl); }
+      }
+      if (!dailies.has(sym)) { const dl = await getJson<{ c: Candles }>(store, dailyKey(sym)).catch(() => undefined); if (dl?.c) dailies.set(sym, dl.c); }
+    }
+  }));
+  return { days, dailies };
+}
+
+function part(rows: { month: string; base: number; rule: number; added: boolean }[]): Part | null {
+  const n = rows.length;
+  if (!n) return null;
+  const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
+  const d = rows.map((r) => r.rule - r.base), md = mean(d);
+  const sd = Math.sqrt(d.reduce((s, x) => s + (x - md) ** 2, 0) / Math.max(1, n - 1));
+  const byMonth = new Map<string, { b: number; r: number }>();
+  for (const r of rows) { const m = byMonth.get(r.month) ?? { b: 0, r: 0 }; m.b += r.base; m.r += r.rule; byMonth.set(r.month, m); }
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  return {
+    n, base: r3(mean(rows.map((r) => r.base))), rule: r3(mean(rows.map((r) => r.rule))), diff: r3(md), t: sd > 0 ? Math.round((md / (sd / Math.sqrt(n))) * 100) / 100 : 0,
+    monthsGreenBase: [...byMonth.values()].filter((m) => m.b > 0).length, monthsGreenRule: [...byMonth.values()].filter((m) => m.r > 0).length, months: byMonth.size,
+    addRate: r3(rows.filter((r) => r.added).length / n),
+  };
+}
+
+/**
+ * Replays the fixed rule (and "as now") on every trade of the strategy: decide months, exam months (Pass / Fail only),
+ * the untouched months (that strategy's untouched trades) and the shadow months. Nothing is chosen here.
+ */
+export async function confirmAll(ml: { examFrom: string; shadowFrom?: string; strategies: Strat[]; untouched?: (Strat & { trades?: Trade[] })[] }, store: Store, log: (m: string) => void = () => {}): Promise<Confirmed[]> {
+  const shadowFrom = ml.shadowFrom ?? '9999-99';
+  const jobs: { st: Strat; rule: Variant; sets: Record<'decide' | 'exam' | 'untouched' | 'shadow', Trade[]>; cols: string[] }[] = [];
+  const all = variants();
+  for (const st of ml.strategies) {
+    const ruleId = CONFIRM[st.id];
+    const rule = all.find((v) => v.id === ruleId);
+    if (!rule || !st.trades?.length || !st.targetAdr) continue;
+    const cols = st.tradeCols ?? [];
+    const iDay = cols.indexOf('day');
+    const m = (t: Trade) => String(t[iDay]).slice(0, 7);
+    const un = (ml.untouched ?? []).find((u) => u.id === st.id);
+    jobs.push({ st, rule, cols, sets: {
+      decide: st.trades.filter((t) => m(t) < ml.examFrom),
+      exam: st.trades.filter((t) => m(t) >= ml.examFrom && m(t) < shadowFrom),
+      shadow: st.trades.filter((t) => m(t) >= shadowFrom),
+      untouched: un?.trades ?? [],
+    } });
+  }
+  const items = jobs.flatMap((j) => Object.values(j.sets).flat().map((t) => ({ sym: String(t[j.cols.indexOf('sym')]), date: String(t[j.cols.indexOf('day')]) })));
+  const { days, dailies } = await loadDays(store, items);
+  const out: Confirmed[] = [];
+  for (const { st, rule, sets, cols } of jobs) {
+    const [iDay, iSym, iTime, iNet] = ['day', 'sym', 'time', 'net'].map((c) => cols.indexOf(c));
+    let mismatch = 0, skipped = 0;
+    const replay = (list: Trade[]) => list.flatMap((t) => {
+      const date = String(t[iDay]), sym = String(t[iSym]), [hh, mm] = String(t[iTime]).split(':').map(Number);
+      const k = hh * 60 + mm - 555;
+      const day = days.get(`${sym}|${date}`), daily = dailies.get(sym);
+      const before = daily ? daily.t.map(dateOf).filter((x) => x < date).length : 0;
+      if (!day || !daily || before < 10) { skipped++; return []; }
+      let adr = 0;
+      for (let i = before - 10; i < before; i++) adr += daily.h[i] - daily.l[i];
+      const tr: ManagedTrade = { day, k, close: day.c[k - 1], adr: adr / 10, targetAdr: st.targetAdr! };
+      const base = manage(tr, { id: 'base', family: 'base', label: '' }), r = manage(tr, rule);
+      if (Math.abs(base.net - Number(t[iNet])) > 0.002) mismatch++;
+      return [{ month: date.slice(0, 7), base: base.net, rule: r.net, added: r.adds > 0 }];
+    });
+    const decide = part(replay(sets.decide));
+    const exam = part(replay(sets.exam));
+    const res: Confirmed = {
+      strategy: st.id, rule: rule.id, label: rule.label, decide: decide!,
+      exam: { pass: exam && exam.n >= 30 ? exam.rule > exam.base && exam.rule > 0 : null, n: exam?.n ?? 0 },
+      untouched: part(replay(sets.untouched)), shadow: part(replay(sets.shadow)), baseMismatch: mismatch, skippedNoData: skipped,
+    };
+    log(`confirm ${st.id} ${rule.id}: decide ${decide?.base}→${decide?.rule}, untouched ${res.untouched?.base}→${res.untouched?.rule} (t ${res.untouched?.t}), mismatches ${mismatch}`);
+    out.push(res);
+  }
+  return out;
+}

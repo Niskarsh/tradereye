@@ -27,7 +27,8 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 6 | **Shorts only** (B, unchanged) | **+0.05** | **2.6** | **24/39** | **+0.04** | **+0.06** | 0.085 | Repeats; ₹1 lakh +0.06R (t 3.3), ₹3 lakh +0.07R (t 4.1); 09:25 entries no better (+0.04R) |
 | 7 | **F: shorts, target ½ range** | **+0.05** | **3.4** | **27/36** | **+0.05** | **+0.05** | 0.087 | Nearer target best on the decide months (B +0.03, G +0.04 there); locked for iteration 8 |
 | 7 (again) | F (same code, same data) | +0.06 | 3.7 | 26/37 | +0.06 | +0.07 | 0.087 | Run-to-run noise: B +0.03 → +0.06, F +0.05 → +0.06, G +0.04 → +0.05. B/F/G are within noise of each other; F had the best t both times |
-| 8 | (F locked; exam Pass/Fail only; untouched Jan–Sep 2022; noise check; trade management) | | | | | | | running |
+| 8 | **F locked** | — | 3.4 | 19/30 | **+0.06** | Pass | 0.088 | **Untouched Jan–Sep 2022: +0.15R, t 3.0, 9/9 months green.** Noise (5 draws): +0.06 to +0.08R. Break-even never helps; adding (pullback after 40%, same size, 1R budget, target 1.5×) held only for B: +0.12R vs +0.06R on the second half (t 2.9) |
+| 9 | (F and B unchanged; B + that add rule gets its one shot on the untouched months; shadow months from Nov 2026; money card) | | | | | | | running |
 
 Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
 the first 20 minutes and are already 1.6 ATR below it.

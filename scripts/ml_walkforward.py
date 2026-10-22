@@ -24,16 +24,18 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 8
+ITERATION = 9
 CHANGES = [
-    'F (shorts, target ½ the usual daily range) is locked: best on the decide months in iteration 7 (+0.05R a trade, 23 of 31 months green). B and G stay for the trade-management tests; A is dropped.',
-    'The exam months (May 2026 on) no longer steer anything: every diagnostic is from the decide months only, and the exam is shown as Pass / Fail.',
-    'An untouched test: January–September 2022 was never loaded before. The locked F is tested on it once (models trained on the 30 months after it, the bar set on the 3 months after those).',
-    'Noise check: F is trained five times with different random draws (five machines at once), so every number has a "this much is luck" range. Iteration 7 ran twice on the same code and data: B moved +0.03R → +0.06R, F +0.05R → +0.06R.',
-    'Trade management on the same trades (no new models): break-even stops, adding once and twice (when to add, how much, momentum or pullback, which stop budget, keep or extend the target), with room checks; picked on the first half of the decide months, combined and judged on the second half.',
+    'No new search: iteration 9 confirms. F (locked) and B are run unchanged; G is dropped (weakest in iteration 8).',
+    'One shot on the untouched months (Jan–Sep 2022) for B as it is and for B with iteration 8\'s winning add rule (add once on a pullback after 40% of the way, same size, one stop risking 1R on all, target 1.5× the daily range), fixed before this run. F\'s untouched result is repeated beside it.',
+    'Shadow months: from November 2026, every month that did not exist when this code was written is reported apart (never used for any decision): the forward test builds up with each monthly Re-run.',
+    'A money card: rupees a month, position size, margin at 5×, the capital a bad stretch needs, and % a month on that capital.',
 ]
 DECIDE_FROM = '2022-10'  # months before this are the untouched test: never in any walk-forward, diagnostic or decision
-LOCKED = 'shortNear'     # the strategy locked for the untouched test and the noise check
+LOCKED = 'shortNear'     # the strategy locked for the noise check
+UNTOUCHED = ['shortNear', 'wideShort']  # tested once on the untouched months
+SHADOW_FROM = '2026-11'  # months from here did not exist when iterations 1-9 were written: the forward test
+MARGIN = 5               # Dhan's intraday leverage
 SHARD = 'main'           # 'main' (everything) or 'seed2' / 'seed3' (the locked strategy again, other random draws)
 SEED_OFF = 0
 TRAIN_MONTHS = 30
@@ -62,9 +64,6 @@ STRATEGIES = [
     {**_WIDE, 'id': 'shortNear', 'name': 'F. Shorts, target ½ range (locked)', 'only': -1, 'firstSlot': 20, 'targetAdr': 0.5,
      'S': 'nbS', 'Sg': 'nbSg', 'S1': 'nbS1', 'S3': 'nbS3',
      'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target ½ of it, out by 15:15. Locked after iteration 7.'},
-    {**_WIDE, 'id': 'shortFar', 'name': 'G. Shorts, target 1× range', 'only': -1, 'firstSlot': 20, 'targetAdr': 1.0,
-     'S': 'fbS', 'Sg': 'fbSg', 'S1': 'fbS1', 'S3': 'fbS3',
-     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target 1× of it, out by 15:15.'},
 ]
 COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
          ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
@@ -358,7 +357,7 @@ def main(d):
             s = stats(tr['net'], tr['gross'])
             s.update({'month': months[ti], 'thr': None if best_thr is None else round(best_thr, 4),
                       'note': '' if ok else f'stood aside (not profitable on the {VAL_MONTHS} months before)',
-                      'ic': None if ic is None else round(ic, 4), 'exam': months[ti] >= exam_from,
+                      'ic': None if ic is None else round(ic, 4), 'exam': exam_from <= months[ti] < SHADOW_FROM, 'shadow': months[ti] >= SHADOW_FROM,
                       'baseL': round(float(np.nanmean(tpart[st['L']])), 3), 'baseS': round(float(np.nanmean(tpart[st['S']])), 3)})
             r['months'].append(s)
             if ic is not None and months[ti] < exam_from:  # the signal headline: decide months only
@@ -388,16 +387,19 @@ def main(d):
         overall['maxDrawdownR'] = round(float((np.maximum.accumulate(np.concatenate([[0], eq])) - np.concatenate([[0], eq])).max()), 2)
         overall['inrPerMonth'] = round(overall['inr'] / max(1, len(mo)))
         dev_t = trades[trades['month'] < exam_from] if len(trades) else trades
-        exam_t = trades[trades['month'] >= exam_from] if len(trades) else trades
-        dev = period_stats(dev_t, [m for m in mo if not m['exam']])
+        exam_t = trades[(trades['month'] >= exam_from) & (trades['month'] < SHADOW_FROM)] if len(trades) else trades
+        shadow_t = trades[trades['month'] >= SHADOW_FROM] if len(trades) else trades
+        dev = period_stats(dev_t, [m for m in mo if not m['exam'] and not m['shadow']])
         exam = period_stats(exam_t, [m for m in mo if m['exam']])
+        shadow = period_stats(shadow_t, [m for m in mo if m['shadow']])
+        shadow['from'] = SHADOW_FROM
         exam['pass'] = None if exam['n'] < 30 else bool(exam['netR'] > 0)
         # the same trades executed three ways (a limit order that never filled = no trade)
         costs = []
         for cid, cname, col in COSTS:
             v = trades[np.isfinite(trades[col].astype(float))] if len(trades) else trades
             dv = v[v['month'] < exam_from] if len(v) else v
-            ev = v[v['month'] >= exam_from] if len(v) else v
+            ev = v[(v['month'] >= exam_from) & (v['month'] < SHADOW_FROM)] if len(v) else v
             def green(x):
                 return [int(sum(1 for _, g_ in x.groupby('month') if g_[col].astype(float).sum() > 0)), int(x['month'].nunique())] if len(x) else [0, 0]
             costs.append({'id': cid, 'name': cname, 'fill': round(len(v) / len(trades), 3) if len(trades) else 0,
@@ -410,7 +412,7 @@ def main(d):
             tday = dev_t.groupby('day')['net'].agg(['sum', 'size'])
             wk = pd.to_datetime(dev_t['day']).dt.strftime('%G-W%V')
             tweek = dev_t.groupby(wk.values)['net'].sum()
-            test_days = int(ref.loc[ref['month'].isin([m['month'] for m in mo if not m['exam']]), 'day'].nunique())
+            test_days = int(ref.loc[ref['month'].isin([m['month'] for m in mo if not m['exam'] and not m['shadow']]), 'day'].nunique())
             daily = {'tradingDays': test_days, 'daysWithTrades': int(len(tday)),
                      'perTradedDay': round(float(tday['size'].mean()), 2), 'maxPerDay': int(tday['size'].max()),
                      'at0935': round(float((dev_t['slot'].astype(int) == 20).mean()), 3),
@@ -455,7 +457,7 @@ def main(d):
             'baseline': {'long': round(float(np.nanmean(ref[st['L']])), 3), 'short': round(float(np.nanmean(ref[st['S']])), 3),
                          'longGross': round(float(np.nanmean(ref[st['Lg']])), 3), 'shortGross': round(float(np.nanmean(ref[st['Sg']])), 3)},
             'targetAdr': st.get('targetAdr'),
-            'overall': overall, 'dev': dev, 'exam': exam, 'ic': ic, 'costs': costs, 'daily': daily, 'bySide': by_side, 'byHour': by_hour, 'months': mo,
+            'overall': overall, 'dev': dev, 'exam': exam, 'shadow': shadow, 'money': money_of(dev_t, dev, costs, ref, st), 'ic': ic, 'costs': costs, 'daily': daily, 'bySide': by_side, 'byHour': by_hour, 'months': mo,
             'importance': top, 'liked': liked[:20],
             'recent': [{'day': x.day, 'sym': syms[int(x.sym)], 'time': f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}',
                         'side': 'LONG' if x.side == 1 else 'SHORT', 'pred': round(float(x.pred), 3), 'net': round(float(x.net), 2)}
@@ -468,7 +470,7 @@ def main(d):
         log(st['id'], 'overall', overall, 'dev', dev['netR'], 'exam', exam['netR'], 'ic', ic)
 
     best = max(out, key=lambda s: s['dev']['netR'] if s['dev']['n'] >= 100 else -9)
-    untouched = untouched_test(df, X, y, mi, months, held, stock_cols, syms) if SHARD == 'main' and held else None
+    untouched = [u for u in (untouched_test(df, X, y, mi, months, held, stock_cols, syms, sid) for sid in UNTOUCHED) if u] if SHARD == 'main' and held else []
     result = {
         'v': 2, 'iteration': ITERATION, 'changes': CHANGES, 'runId': head['runId'], 'createdAt': int(time.time() * 1000),
         'code': os.environ.get('GITHUB_SHA'),  # the exact code that made these results
@@ -479,18 +481,47 @@ def main(d):
                   'neutralTimes': [f'{(555 + s) // 60:02d}:{(555 + s) % 60:02d}' for s in NEUTRAL_SLOTS], 'neutralK': NEUTRAL_K},
         'baselineTight': {'long': round(float(np.nanmean(ref['netL'])), 3), 'short': round(float(np.nanmean(ref['netS'])), 3)},
         'best': best['id'], 'locked': LOCKED, 'overall': best['overall'], 'shard': SHARD, 'seedOffset': SEED_OFF,
-        'decideFrom': DECIDE_FROM, 'untouched': untouched,
+        'decideFrom': DECIDE_FROM, 'shadowFrom': SHADOW_FROM, 'untouched': untouched,
         'strategies': out,
     }
     json.dump(result, open(os.path.join(d, 'ml.json' if SHARD == 'main' else f'ml-{SHARD}.json'), 'w'))
 
 
-def untouched_test(df, X, y, mi, months, held, cols, syms):
+def money_of(dev_t, dev, costs, ref, st):
+    """what the decide months mean in rupees: the position a ₹300 risk buys (the stop is ½ the usual daily range), its
+    margin at 5×, the most trades open at once, and the capital that also survives the worst run of losses"""
+    if not len(dev_t) or not dev['monthsTotal']:
+        return None
+    key = pd.MultiIndex.from_arrays([ref['day'].values, ref['sym'].values, ref['slot'].values])
+    taken = ref.loc[key.isin(pd.MultiIndex.from_arrays([dev_t['day'].values, dev_t['sym'].values.astype(np.int32), dev_t['slot'].values.astype(np.int32)]))]
+    stop_pct = float(taken['adrPct'].median()) * 0.5 if len(taken) else float('nan')
+    pos = RISK / (stop_pct / 100)
+    eq = np.concatenate([[0], dev_t['net'].astype(float).cumsum().values])
+    max_dd = float((np.maximum.accumulate(eq) - eq).max())
+    per_day = int(dev_t.groupby('day').size().max())
+    months_n = dev['monthsTotal']
+    per_month = dev['inr'] / months_n
+    capital = pos / MARGIN * per_day + max_dd * RISK
+    by_m = dev_t.groupby('month')['net'].sum() * RISK
+    sizes = []
+    for cid, notional in (('l1', 100_000), ('l3', 300_000)):
+        c = next((x for x in costs if x['id'] == cid), None)
+        if c and c['dev']['n']:
+            risk = notional * stop_pct / 100
+            pm = c['dev']['netR'] * risk * dev['n'] / months_n
+            cap = notional / MARGIN * per_day + max_dd * risk
+            sizes.append({'position': notional, 'risk': round(risk), 'netR': c['dev']['netR'], 'perMonth': round(pm), 'capital': round(cap), 'pct': round(100 * pm / cap, 1)})
+    return {'stopPct': round(stop_pct, 2), 'position': round(pos), 'margin': round(pos / MARGIN), 'maxPerDay': per_day, 'tradesPerMonth': round(dev['n'] / months_n, 1),
+            'perTrade': round(dev['netR'] * RISK), 'perMonth': round(per_month), 'worstMonth': round(float(by_m.min())), 'bestMonth': round(float(by_m.max())),
+            'maxDrawdownR': round(max_dd, 1), 'capital': round(capital), 'pct': round(100 * per_month / capital, 1), 'bigger': sizes}
+
+
+def untouched_test(df, X, y, mi, months, held, cols, syms, sid):
     """The locked strategy, once, on months never used before. No earlier data exists, so its models learn from the
     TRAIN_MONTHS decide months right after the untouched months, and the bar is set on the VAL_MONTHS after those (the
     walk-forward recipe, mirrored). Every fact is still only what was known at that minute of that day."""
-    st = next(s_ for s_ in STRATEGIES if s_['id'] == LOCKED)
-    if len(months) < TRAIN_MONTHS + VAL_MONTHS:
+    st = next((s_ for s_ in STRATEGIES if s_['id'] == sid), None)
+    if st is None or len(months) < TRAIN_MONTHS + VAL_MONTHS:
         return None
     fitm = (mi >= 0) & (mi < TRAIN_MONTHS)
     val = (mi >= TRAIN_MONTHS) & (mi < TRAIN_MONTHS + VAL_MONTHS)
@@ -519,7 +550,7 @@ def untouched_test(df, X, y, mi, months, held, cols, syms):
         mstats.append(s_)
     o = period_stats(tr, mstats)
     log('untouched', st['id'], o)
-    return {'id': st['id'], 'name': st['name'], 'from': held[0], 'to': held[-1], 'thr': round(best_thr, 4), 'overall': o, 'months': mstats,
+    return {'id': st['id'], 'name': st['name'], 'targetAdr': st.get('targetAdr'), 'from': held[0], 'to': held[-1], 'thr': round(best_thr, 4), 'overall': o, 'months': mstats,
             'trainMonths': [months[0], months[TRAIN_MONTHS - 1]], 'valMonths': [months[TRAIN_MONTHS], months[TRAIN_MONTHS + VAL_MONTHS - 1]],
             'tradeCols': ['day', 'sym', 'time', 'side', 'pred', 'net', 'gross', 'p1', 'p3'],
             'trades': [[x.day, syms[int(x.sym)], f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}', int(x.side),
