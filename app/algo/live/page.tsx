@@ -20,7 +20,7 @@ interface Order { symbol: string; slot: number; pred: number; price: number; adr
 interface Item { symbol: string; securityId: string; prevClose: number; avgVol: number }
 interface State { date: string; list: Item[]; listAt?: number; candidates?: number; vetoes: string[]; armed: boolean; ticks: Record<string, Tick>; orders: Order[]; log: { at: number; msg: string }[] }
 interface ModelInfo { month: string; train: [string, string]; val: [string, string]; threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number; createdAt: number; trees: number; parityWorst: number | null; rules: { firstSlot: number; lastSlot: number; cap: number; riskInr: number } }
-interface Snap { now: number; date: string; state: State; record: string[]; model: ModelInfo | null; scaler: boolean }
+interface Snap { now: number; date: string; state: State; record: string[]; model: ModelInfo | null; scaler: boolean; settings?: { riskInr: number } }
 interface Pos { symbol: string; netQty: number; realized: number; unrealized: number }
 
 const SLOTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -100,6 +100,8 @@ export default function AlgoLivePage() {
     }
   }, [today.sec, st, model, token, stale, runTick]);
 
+  const risk = snap?.settings?.riskInr ?? 300;
+  const [riskDraft, setRiskDraft] = useState('');
   const control = async (b: Record<string, unknown>) => { try { await api('/api/algo-live/control', b); await refresh(); } catch (e) { setErr((e as Error).message); } };
   const scalerCall = useCallback(async (action: 'ping' | 'status' | 'squareoff') => {
     setBusy(action); setErr('');
@@ -131,7 +133,7 @@ export default function AlgoLivePage() {
       <div className="page-shell pt-6 space-y-4">
         <header className="border-b border-line pb-3">
           <h1 className="text-2xl font-black tracking-tighter">Algo Live</h1>
-          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">F · short · 09:35–10:55 · first 2 a day · stop and target ½ the usual daily range · ₹300 risk · out by 15:15</p>
+          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">F · short · 09:35–10:55 · first 2 a day · stop and target ½ the usual daily range · ₹{risk} risk · out by 15:15</p>
         </header>
         {err && <p className="rounded-lg border border-data-red/50 bg-data-red/10 px-3 py-2 text-xs text-data-red-text">{err}</p>}
         {!token && <p className="text-xs text-brand-accent">Log in on the Dhan login tab first: this page needs your Dhan token.</p>}
@@ -170,6 +172,13 @@ export default function AlgoLivePage() {
               <button onClick={() => control({ armed: !st?.armed })} className={`rounded-xl border-2 px-4 py-2 text-sm font-black ${st?.armed ? 'border-data-green bg-data-green/15 text-data-green' : 'border-line-strong text-ink-2'}`}>
                 {st?.armed ? 'ARMED · click to disarm' : 'NOT ARMED · click to arm'}
               </button>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span>Risk a trade: <b className="font-mono">₹{risk}</b></span>
+                <input type="number" min={50} max={5000} step={50} value={riskDraft} placeholder={String(risk)} onChange={(e) => setRiskDraft(e.target.value)}
+                  className="w-24 rounded-lg border border-line bg-brand-bg px-2 py-1 font-mono" />
+                <button className={btn} disabled={!riskDraft || Number(riskDraft) === risk} onClick={async () => { await control({ riskInr: Number(riskDraft) }); setRiskDraft(''); }}>Set</button>
+                <span className="text-[11px] text-ink-3">Kept from day to day; used from the next order (orders already sent keep their size). The stop is about 2.4% away, so ₹{risk} risk ≈ ₹{(Math.round(risk / 0.024 / 100) * 100).toLocaleString('en-IN')} of stock a trade. trading-scaler refuses any position above ₹75,000 (BOT_MAX_NOTIONAL), so above about ₹1,500 risk raise that too.</span>
+              </div>
             </Card>
 
             <Card title="3 · The closes" sub={`Each runs ${AFTER} seconds after its 10-minute candle closes while this page is open (an order goes only within 4 minutes of its close). 09:25 is the shortlist to veto from.`}>

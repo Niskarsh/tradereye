@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { errorResponse, guard } from '@/lib/live/guard';
 import {
-  counts, istNow, loadModel, loadState, MAX_LATE_MIN, note, orderFor, pick, reconcile, saveState, scoreAt, SHORTLIST_SLOT, slotTime, toScaler,
+  counts, istNow, loadModel, loadSettings, loadState, MAX_LATE_MIN, note, orderFor, pick, reconcile, saveState, scoreAt, SHORTLIST_SLOT, slotTime, toScaler,
   type OrderRec, type TickLog,
 } from '@/lib/algoLive/engine';
 import { scaler, ScalerError, type ScalerStatus } from '@/lib/algoLive/scaler';
@@ -53,7 +53,8 @@ export async function POST(req: Request) {
     note(s, `${slotTime(k)}: ${msg}${res.missing.length ? ` (no data for ${res.missing.length})` : ''}`);
 
     if (trading && picks.length && s.armed && !model.standAside && late <= MAX_LATE_MIN) {
-      const recs: OrderRec[] = picks.map((x) => ({ ...orderFor(model, x, now.date, k, s.list.find((l) => l.symbol === x.symbol)!.securityId), sentAt: Date.now(), status: 'SENDING' }));
+      const { riskInr } = await loadSettings(liveStore);
+      const recs: OrderRec[] = picks.map((x) => ({ ...orderFor(model, x, now.date, k, s.list.find((l) => l.symbol === x.symbol)!.securityId, riskInr), risk: riskInr, sentAt: Date.now(), status: 'SENDING' }));
       s.orders.push(...recs);
       await saveState(liveStore, s); // written before sending: a second tab never sends the same stock again
       try {
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
         for (const o of recs) {
           const p = r.placed.find((x) => x.correlationId === o.correlationId);
           o.orderId = p?.orderId; o.status = p?.error ? 'REJECTED' : (p?.orderStatus ?? 'UNKNOWN'); o.error = p?.error;
-          note(s, `${o.symbol}: short ${o.qty} at market, stop ${o.stop}, target ${o.target} -> ${o.status}${o.error ? ` (${o.error})` : ''}`);
+          note(s, `${o.symbol}: short ${o.qty} (₹${o.risk} risk) at market, stop ${o.stop}, target ${o.target} -> ${o.status}${o.error ? ` (${o.error})` : ''}`);
         }
       } catch (e) {
         // unknown whether Dhan got it: trading-scaler refuses the same order id twice, and the next status read settles it

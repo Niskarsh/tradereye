@@ -107,6 +107,9 @@ test('algo live: the order is the backtest\'s short: stop and target ½ the usua
   assert.ok(o.stop > 301.35 && o.target < 301.35 && o.qty > 0);
   assert.equal(o.correlationId, 'te-20250407-MM');
   assert.ok(o.correlationId.length <= 30);
+  const big = orderFor(tiny, { symbol: 'M&M', pred: 0.2, price: 301.35, adr: 11.7, above: true }, '2025-04-07', 20, '2031', 900);
+  assert.equal(big.qty, sizeFor(900, big.stop - (301.35 - TICK)), 'the risk set on the page sizes the order');
+  assert.equal(big.stop, o.stop);
 });
 
 test('algo live: the day list uses the backtest screener (previous close ₹250-340, 10-day volume > 5 lakh)', () => {
