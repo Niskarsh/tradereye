@@ -17,7 +17,7 @@ export interface LiveModel {
   parity?: { rows: (number | null)[][]; pred: number[]; days: string[]; syms: string[]; slots: number[]; worst: number };
 }
 
-export const MODEL_KEY = 'algo-live/model.json.gz';
+export const MODEL_KEY = 'setups/live/model.json.gz';
 
 function walk(t: Tree, x: ArrayLike<number>): number {
   let i = 0;

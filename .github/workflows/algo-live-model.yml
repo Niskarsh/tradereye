@@ -1,6 +1,6 @@
 # Algo Live: trains the model that trades this month (scripts/ml_live.py) from the dataset of the last finished
 # backtest run (its "grid" artifact), checks the exported trees reproduce sklearn, and saves it to S3 for the live
-# engine (algo-live/model.json.gz; every model is also kept under algo-live/models/).
+# engine (setups/live/model.json.gz; every model is also kept under setups/live/models/).
 #
 # When: once at the start of each month after a backtest Re-run (the backtest workflow keeps the dataset 7 days), or
 # by hand from the Actions tab. The repo is public: the log prints progress only (results show as annotations).
@@ -78,6 +78,6 @@ jobs:
         run: |
           gzip -9 -k ml-data/live-model.json
           M=$(python3 -c "import json;print(json.load(open('ml-data/live-model.json'))['month'])")
-          aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/algo-live/models/$M-$GITHUB_RUN_ID.json.gz" --only-show-errors
-          aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/algo-live/model.json.gz" --only-show-errors
+          aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/setups/live/models/$M-$GITHUB_RUN_ID.json.gz" --only-show-errors
+          aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/setups/live/model.json.gz" --only-show-errors
           python3 -c "import json;m=json.load(open('ml-data/live-model.json'));print('::notice title=Algo Live model::month', m['month'], '| learned', m['train'], '| bar set on', m['val'], '|', 'STAND ASIDE' if m['standAside'] else 'trading', '| bar', m['threshold'], '| validation', m['valTrades'], 'trades in', m['valDays'], 'days,', m['valR'], 'R a trade | sklearn parity', m['parity']['worst'], '| data to', m['dataTo'])"
