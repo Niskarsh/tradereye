@@ -59,6 +59,11 @@ jobs:
       - run: pip install --quiet numpy pandas scikit-learn
       - name: Train this month's model and export it
         run: python scripts/ml_live.py ml-data "${{ inputs.month }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The live engine scores it exactly as sklearn did
+        run: npx --yes tsx@4 scripts/ml-live-check.ts ml-data/live-model.json
       - name: Save it to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -70,4 +75,4 @@ jobs:
           M=$(python3 -c "import json;print(json.load(open('ml-data/live-model.json'))['month'])")
           aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/algo-live/models/$M-$GITHUB_RUN_ID.json.gz" --only-show-errors
           aws s3 cp ml-data/live-model.json.gz "s3://$BUCKET/algo-live/model.json.gz" --only-show-errors
-          python3 -c "import json;m=json.load(open('ml-data/live-model.json'));print('saved: month',m['month'],'train',m['train'],'bar months',m['val'],'stand aside' if m['standAside'] else 'trading', 'bar', m['threshold'], 'validation', m['valTrades'], 'trades', m['valR'], 'R', 'parity', m['parity']['worst'])"
+          python3 -c "import json;m=json.load(open('ml-data/live-model.json'));print('::notice title=Algo Live model::month', m['month'], '| learned', m['train'], '| bar set on', m['val'], '|', 'STAND ASIDE' if m['standAside'] else 'trading', '| bar', m['threshold'], '| validation', m['valTrades'], 'trades in', m['valDays'], 'days,', m['valR'], 'R a trade | sklearn parity', m['parity']['worst'], '| data to', m['dataTo'])"
