@@ -24,17 +24,17 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 6
+ITERATION = 7
 CHANGES = [
-    'Iteration 5\'s winner, B (shorts only, +0.03R, t 1.9; +0.04R with t 2.5 at ~₹1 lakh positions; exam green 4 of 6), is kept unchanged as the benchmark, beside A (both sides) as the control.',
-    'New E: shorts only, also allowed at 09:25 (the close of the first 10-min candle). 72% of B\'s trades were taken at 09:35, the earliest moment it was allowed, so the edge may start earlier. Entries at 09:25 are filled 2 ticks worse instead of 1 (the open is the costliest time to trade).',
-    'Dropped C (09:35–10:55 only: no better than A) and D (the basket: red for four iterations).',
-    'Every iteration is now preserved: its full results (every trade) and the exact code that made it, so we can always go back.',
+    'B (shorts only) is kept unchanged as the benchmark: +0.05R a trade, t 2.6 in iteration 6, green on the earlier months and on the exam. A (both sides) stays the control. E (also at 09:25) was no better and is dropped.',
+    'Is the target right? Two new versions of B with the same stop (½ the usual daily range): F with a nearer target (½ the range) and G with a farther one (1× the range). A quick fade favours F; a full-day reversal favours G.',
+    'Steadier models: 5 averaged per decision (was 3). B\'s code did not change between iterations 5 and 6 yet it moved +0.03R → +0.05R: that run-to-run noise should shrink.',
+    'A "your day" view for each strategy: trades a day, how many fire at 09:35, the worst day and the worst week (in R): what paper-trading would feel like.',
 ]
 TRAIN_MONTHS = 30
 VAL_MONTHS = 3
 EXAM_FROM = '2026-05'  # locked: the same exam months for every iteration
-ENSEMBLE = 3
+ENSEMBLE = 5
 MARKET = ['nFirst5', 'nDay', 'nRecent30', 'nRecent10', 'nPosInRange']
 MIN_TRAIN_MONTHS = 6
 EXAM_MONTHS = 6
@@ -52,9 +52,14 @@ MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 _WIDE = {'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'L1': 'wbL1', 'S1': 'wbS1', 'L3': 'wbL3', 'S3': 'wbS3', 'noMarket': True}
 _WDESC = 'stop ½ of its usual daily range away, target ¾ of it, out by 15:15, picked from the stock\'s own facts and habits (no Nifty)'
 STRATEGIES = [
-    {**_WIDE, 'id': 'wideStock', 'name': 'A. Wide bracket (control)', 'firstSlot': 20, 'desc': f'Long or short one stock from 09:35: {_WDESC}. The same as iterations 4 and 5.'},
-    {**_WIDE, 'id': 'wideShort', 'name': 'B. Shorts only (iteration 5\'s best)', 'only': -1, 'firstSlot': 20, 'desc': f'Short only, from 09:35: {_WDESC}. The same as iteration 5.'},
-    {**_WIDE, 'id': 'wideShortEarly', 'name': 'E. Shorts only, from 09:25', 'only': -1, 'firstSlot': 10, 'desc': f'Short only, also allowed at 09:25 (filled 2 ticks worse there): {_WDESC}.'},
+    {**_WIDE, 'id': 'wideStock', 'name': 'A. Wide bracket (control)', 'firstSlot': 20, 'desc': f'Long or short one stock from 09:35: {_WDESC}. The same as iterations 4–6.'},
+    {**_WIDE, 'id': 'wideShort', 'name': 'B. Shorts only (the benchmark)', 'only': -1, 'firstSlot': 20, 'desc': f'Short only, from 09:35: {_WDESC}. The same as iterations 5 and 6.'},
+    {**_WIDE, 'id': 'shortNear', 'name': 'F. Shorts, nearer target (½ range)', 'only': -1, 'firstSlot': 20,
+     'S': 'nbS', 'Sg': 'nbSg', 'S1': 'nbS1', 'S3': 'nbS3',
+     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target ½ of it (B: ¾), out by 15:15.'},
+    {**_WIDE, 'id': 'shortFar', 'name': 'G. Shorts, farther target (1× range)', 'only': -1, 'firstSlot': 20,
+     'S': 'fbS', 'Sg': 'fbSg', 'S1': 'fbS1', 'S3': 'fbS3',
+     'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target 1× of it (B: ¾), out by 15:15.'},
 ]
 COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
          ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
@@ -270,7 +275,7 @@ def main(d):
     stock_cols = np.array([i for i, f in enumerate(feats) if f not in MARKET])
     mi = df['month'].map({m: i for i, m in enumerate(months)}).values
     # learn on results clipped to [-3, 3] (gaps and data errors must not steer the model); trades are scored on the real result
-    y = {c: df[c].clip(-3, 3).values.astype(np.float32) for c in ('wbL', 'wbS', 'ccL', 'ccS')}
+    y = {c: df[c].clip(-3, 3).values.astype(np.float32) for c in ('wbL', 'wbS', 'ccL', 'ccS', 'nbS', 'fbS') if c in df.columns}
 
     res = {st['id']: {'trades': [], 'months': [], 'gain': np.zeros(len(feats)), 'ic': []} for st in STRATEGIES}
     y['excess'] = df['excess'].clip(-3, 3).values.astype(np.float32)
@@ -287,12 +292,23 @@ def main(d):
             r = res[st['id']]
             if st['kind'] == 'dir':
                 cols = stock_cols if st.get('noMarket') else all_cols
-                # strategies with the same labels and facts share the same models (they differ only in which trades they may take)
-                mkey = (st['L'], st['S'], bool(st.get('noMarket')))
-                if mkey not in shared:
-                    ml, ms = fit(X, y[st['L']], fitm, ti, cols), fit(X, y[st['S']], fitm, ti + 500, cols)
-                    shared[mkey] = (ml, ms, ml.predict(X[val]), ms.predict(X[val]), ml.predict(X[test]), ms.predict(X[test]))
-                ml, ms, vl, vs, tl, ts = shared[mkey]
+                # strategies predicting the same result from the same facts share one model (they differ only in which trades
+                # they may take); a shorts-only strategy needs no long model
+                def side_model(lab, seed):
+                    key = (lab, bool(st.get('noMarket')))
+                    if key not in shared:
+                        m_ = fit(X, y[lab], fitm, seed, cols)
+                        shared[key] = (m_, m_.predict(X[val]), m_.predict(X[test]))
+                    return shared[key]
+                nv, nt = int(val.sum()), int(test.sum())
+                if st.get('only') == -1:
+                    ml, vl, tl = None, np.full(nv, -np.inf), np.full(nt, -np.inf)
+                else:
+                    ml, vl, tl = side_model(st['L'], ti)
+                if st.get('only') == 1:
+                    ms, vs, ts = None, np.full(nv, -np.inf), np.full(nt, -np.inf)
+                else:
+                    ms, vs, ts = side_model(st['S'], ti + 500)
                 vl, vs = allowed(vpart, vl, vs, st)
                 tl_all, ts_all = tl, ts
                 tl, ts = allowed(tpart, tl, ts, st)
@@ -308,10 +324,10 @@ def main(d):
                         best_thr, best_sum = thr, float(tr['net'].sum())
                 ok = best_thr is not None and best_sum > 0
                 tr = pick_dir(tpart, tl, ts, best_thr if ok else 1e18, st)
-                ics = [spearman(tl_all, tpart[st['L']].values), spearman(ts_all, tpart[st['S']].values)]
+                ics = [spearman(tl_all, tpart[st['L']].values) if ml else None, spearman(ts_all, tpart[st['S']].values) if ms else None]
                 ics = [x for x in ics if x is not None]
                 ic = float(np.mean(ics)) if ics else None
-                add_gain(r['gain'], ml.models + ms.models, cols)
+                add_gain(r['gain'], (ml.models if ml else []) + (ms.models if ms else []), cols)
             else:
                 ncols = stock_cols if st.get('noMarket') else all_cols
                 mn = fit(X, y['excess'], fitm, ti + 900, ncols)
@@ -377,6 +393,19 @@ def main(d):
                           'overall': stats(v[col].astype(float)) if len(v) else stats([]), 'months': green(v),
                           'dev': stats(dv[col].astype(float)) if len(dv) else stats([]), 'devMonths': green(dv),
                           'exam': stats(ev[col].astype(float)) if len(ev) else stats([]), 'examMonths': green(ev)})
+        # "your day": what trading it by hand would feel like (all tested months, after costs at ₹300 risk)
+        daily = None
+        if len(trades):
+            tday = trades.groupby('day')['net'].agg(['sum', 'size'])
+            wk = pd.to_datetime(trades['day']).dt.strftime('%G-W%V')
+            tweek = trades.groupby(wk.values)['net'].sum()
+            test_days = int(df.loc[df['month'].isin([m['month'] for m in mo]), 'day'].nunique())
+            daily = {'tradingDays': test_days, 'daysWithTrades': int(len(tday)),
+                     'perTradedDay': round(float(tday['size'].mean()), 2), 'maxPerDay': int(tday['size'].max()),
+                     'at0935': round(float((trades['slot'].astype(int) == 20).mean()), 3),
+                     'greenDays': round(float((tday['sum'] > 0).mean()), 3),
+                     'worstDayR': round(float(tday['sum'].min()), 2), 'bestDayR': round(float(tday['sum'].max()), 2),
+                     'worstWeekR': round(float(tweek.min()), 2), 'greenWeeks': round(float((tweek > 0).mean()), 3)}
         ics = np.array(r['ic'])
         ic = {'mean': round(float(ics.mean()), 4) if len(ics) else None, 'positive': int((ics > 0).sum()), 'months': int(len(ics))}
 
@@ -414,7 +443,7 @@ def main(d):
             'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'desc': st['desc'],
             'baseline': {'long': round(float(np.nanmean(df[st['L']])), 3), 'short': round(float(np.nanmean(df[st['S']])), 3),
                          'longGross': round(float(np.nanmean(df[st['Lg']])), 3), 'shortGross': round(float(np.nanmean(df[st['Sg']])), 3)},
-            'overall': overall, 'dev': dev, 'exam': exam, 'ic': ic, 'costs': costs, 'bySide': by_side, 'byHour': by_hour, 'months': mo,
+            'overall': overall, 'dev': dev, 'exam': exam, 'ic': ic, 'costs': costs, 'daily': daily, 'bySide': by_side, 'byHour': by_hour, 'months': mo,
             'importance': top, 'liked': liked[:20],
             'recent': [{'day': x.day, 'sym': syms[int(x.sym)], 'time': f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}',
                         'side': 'LONG' if x.side == 1 else 'SHORT', 'pred': round(float(x.pred), 3), 'net': round(float(x.net), 2)}

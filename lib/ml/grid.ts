@@ -93,7 +93,14 @@ export const ML_KEYS = ML_FEATURES.map((f) => f[0]);
  *   ccRet                  the plain move from this close to the 15:15 close (%; for the market-neutral ranking)
  */
 export const ML_LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
-  'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3'] as const;
+  'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3',
+  'nbS', 'nbSg', 'nbS1', 'nbS3', 'fbS', 'fbSg', 'fbS1', 'fbS3'] as const;
+/**
+ * (iteration 7) the short with the same stop (½ the usual daily range) but a different target, out by 15:15:
+ *   nbS...  a nearer target (½ the usual daily range)       fbS...  a farther target (1× the usual daily range)
+ * each after charges at ₹300 risk, before charges (g), at ~₹1 lakh (1) and ~₹3 lakh (3) positions.
+ */
+export const NEAR_TARGET_ADR = 0.5, FAR_TARGET_ADR = 1;
 /**
  * (iteration 5) the same wide-bracket / ride-to-close trades with bigger positions, market orders as before, R after
  * charges (Dhan's brokerage is capped at ₹20 an order, so charges fall as a share of the trade):
@@ -271,10 +278,16 @@ export function gridDay(inp: GridInput): number[][] {
       return [ride(day, k, d, price, onTick(price - d * WIDE_STOP_ADR * adr, (-d) as 1 | -1), onTick(price + d * WIDE_TARGET_ADR * adr, d), LATE_END, risk, ex).net,
         ride(day, k, d, price, onTick(price - d * CLOSE_STOP_ADR * adr, (-d) as 1 | -1), undefined, LATE_END, risk, ex).net];
     };
+    const shortTo = (targetAdr: number) => {
+      const stop = onTick(price + WIDE_STOP_ADR * adr, 1), tgt = onTick(price - targetAdr * adr, -1);
+      const a = ride(day, k, -1, price, stop, tgt, LATE_END, risk, { slip });
+      return [a.net, a.r, ride(day, k, -1, price, stop, tgt, LATE_END, risk, { slip, notional: MID_NOTIONAL }).net,
+        ride(day, k, -1, price, stop, tgt, LATE_END, risk, { slip, notional: BIG_NOTIONAL }).net];
+    };
     const [wLl, cLl] = cheap(1, false), [wSl, cSl] = cheap(-1, false), [wLb, cLb] = cheap(1, true), [wSb, cSb] = cheap(-1, true);
     out.push([k, ...ML_KEYS.map((f) => (Number.isFinite(x[f]) ? x[f] : NaN)), lg.net, sh.net, lg.r, sh.r,
       wl.net, ws.net, wl.r, ws.r, cl.net, cs.net, cl.r, cs.r, pct(day.c[LATE_END - 1], price),
-      wLl, wSl, wLb, wSb, cLl, cSl, cLb, cSb]);
+      wLl, wSl, wLb, wSb, cLl, cSl, cLb, cSb, ...shortTo(NEAR_TARGET_ADR), ...shortTo(FAR_TARGET_ADR)]);
   }
   return out;
 }
