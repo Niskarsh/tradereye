@@ -13,5 +13,8 @@ p.rows.forEach((row, i) => {
   const x = Float32Array.from(row.map((v) => (v === null ? NaN : v)));
   worst = Math.max(worst, Math.abs(predictVector(m, x) - p.pred[i]));
 });
-console.log(`live engine vs sklearn on ${p.rows.length} rows: worst difference ${worst}`);
-if (!(worst < 1e-5)) { console.error('the live engine does not reproduce the model'); process.exit(1); }
+const msg = `live engine vs sklearn on ${p.rows.length} rows: worst difference ${worst} (python's own walk: ${p.worst}; ${m.models.length} models, ${m.features.length} facts)`;
+console.log(msg);
+// GitHub shows these as annotations on the run (the log itself may not be readable)
+if (!(worst < 1e-5)) { console.log(`::error title=Live engine parity::${msg}`); process.exit(1); }
+console.log(`::notice title=Live engine parity::${msg}`);

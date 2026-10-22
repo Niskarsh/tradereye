@@ -101,6 +101,7 @@ def main(d, month=None):
     for j, r in enumerate(pick):
         worst = max(worst, abs(predict_exported(models, X[r, cols].astype(np.float64)) - float(sk[j])))
     ml.log('parity: exported trees vs sklearn, worst difference', worst)
+    print(f'::notice title=Python parity::exported trees vs sklearn on {len(pick)} rows: worst {worst}; bar {thr} ({"trade" if ok else "stand aside"})', flush=True)
     if worst > 1e-4:
         raise SystemExit('the exported trees do not reproduce sklearn')
     out = {
