@@ -38,6 +38,57 @@ interface Ml {
   confirm?: Confirmed[];
   noise?: { strategy: string; draws: { draw: string; n: number; netR: number; t: number; devNetR: number; devT: number; devGreen: [number, number] }[]; devMin: number; devMax: number; devMean: number };
   management?: Mgmt[]; managementError?: string;
+  noiseAll?: Noise[];
+  capChoice?: { id: string | null; name: string | null; rule: { netR: number; t: number }; order: string[]; tried: { id: string; name: string; netR: number; t: number; n: number; ok: boolean }[] } | null;
+}
+interface Noise { strategy: string; draws: { draw: string; devNetR: number; devT: number }[]; devMin: number; devMax: number; devMean: number }
+
+/** iteration 10: F's versions side by side (same models, different daily caps / entry window), the rule fixed in advance, and the placebo */
+function CapCard({ ml }: { ml: Ml }) {
+  const order = ['shortNear', 'f1055', 'fCap3', 'fCap2', 'fStrict'];
+  const rows = order.map((id) => ml.strategies.find((x) => x.id === id)).filter((x): x is Strat => !!x);
+  if (rows.length < 3) return null;
+  const un = Array.isArray(ml.untouched) ? ml.untouched : ml.untouched ? [ml.untouched] : [];
+  const pb = ml.strategies.find((x) => x.id === 'placebo');
+  const c = ml.capChoice;
+  const inr = (x: number) => `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`;
+  return (
+    <Card title="How many trades a day?" sub="The same models and the same predictions; only which trades are taken differs (all but the first stop new entries at 10:55). Decide months, after costs, at ₹300 risk.">
+      <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-xs"><thead><tr className={HEAD}>
+        <th className="px-2 py-1.5 text-left">Version</th><th className={TH}>Trades / month</th><th className={TH}>Per day (max)</th><th className={TH}>R / trade</th><th className={TH}>t</th><th className={TH}>Months green</th>
+        <th className={TH}>Worst day</th><th className={TH}>Worst week</th><th className={TH}>Deepest run</th><th className={TH}>₹ / month</th><th className={TH}>Capital</th><th className={TH}>% / month</th><th className={TH}>5 draws</th><th className={TH}>Untouched</th><th className={TH}>Exam</th>
+      </tr></thead><tbody>
+        {rows.map((s) => {
+          const nz = ml.noiseAll?.find((x) => x.strategy === s.id), u = un.find((x) => x.id === s.id), m = s.money, d = s.daily;
+          return (
+            <tr key={s.id} className={`border-b border-line/60 font-mono tabular-nums ${c?.id === s.id ? 'bg-data-green/10' : ''}`}>
+              <td className="px-2 py-1.5 font-sans">{s.name}</td>
+              <td className={TH}>{m ? m.tradesPerMonth : '–'}</td><td className={TH}>{d ? `${d.perTradedDay} (${d.maxPerDay})` : '–'}</td>
+              <td className={`${TH} font-bold ${tone(s.dev.netR, s.dev.n > 0)}`}>{rr(s.dev.netR)}</td><td className={TH}>{fx(s.dev.t)}</td><td className={TH}>{s.dev.monthsGreen}/{s.dev.monthsTraded}</td>
+              <td className={TH}>{d ? rr(d.worstDayR) : '–'}</td><td className={TH}>{d ? rr(d.worstWeekR) : '–'}</td><td className={TH}>{m ? `−${m.maxDrawdownR}R` : '–'}</td>
+              <td className={`${TH} ${tone(m?.perMonth ?? 0)}`}>{m ? inr(m.perMonth) : '–'}</td><td className={TH}>{m ? `₹${m.capital.toLocaleString('en-IN')}` : '–'}</td><td className={TH}>{m ? `${m.pct}%` : '–'}</td>
+              <td className={TH}>{nz ? `${rr(nz.devMin)} to ${rr(nz.devMax)}` : '–'}</td>
+              <td className={TH}>{u && u.overall.n ? `${rr(u.overall.netR)} (t ${fx(u.overall.t)}, ${u.overall.n})` : '–'}</td><td className={TH}>{passText(examPass(s.exam))}</td>
+            </tr>
+          );
+        })}
+      </tbody></table></div>
+      {c && (
+        <p className="mt-2 text-sm">
+          Rule fixed before this run: the smallest daily risk ({c.order.map((id) => ml.strategies.find((x) => x.id === id)?.name ?? id).join(' → ')}) that keeps at least {rr(c.rule.netR)} a trade with t of at least {c.rule.t}.{' '}
+          {c.id ? <b className="text-data-green">Pick: {c.name}.</b> : <b className="text-brand-accent">No capped version passes: keep F to 10:55 as it is, with a daily loss stop.</b>}
+          <span className="block text-[11px] text-ink-3">{c.tried.map((x) => `${x.name}: ${rr(x.netR)}, t ${fx(x.t)} ${x.ok ? '✓' : '✗'}`).join(' · ')}</span>
+        </p>
+      )}
+      {pb && (
+        <p className="mt-2 text-[11px] text-ink-2">
+          Placebo (models trained on shuffled outcomes, traded on the real ones): {pb.dev.n} trades, <b className={tone(pb.dev.netR, pb.dev.n > 0)}>{pb.dev.n ? rr(pb.dev.netR) : '–'}</b> a trade (t {fx(pb.dev.t)}), signal {pb.ic.mean ?? '–'}.{' '}
+          {pb.dev.n >= 100 && pb.dev.t >= 2 && pb.dev.netR > 0 ? <b className="text-data-red-text">It shows an edge: something leaks. Do not trust this run.</b> : 'No edge, as it should be: the pipeline does not invent one.'}
+        </p>
+      )}
+      <p className="mt-1 text-[11px] text-ink-3">Untouched months: F was already shown them in iterations 8 and 9, so this is a second look, not a clean test. 5 draws: the same version trained five times; differences between versions smaller than this spread are luck.</p>
+    </Card>
+  );
 }
 interface Untouched { id: string; name: string; from?: string; to?: string; note?: string; overall: P; months?: (S & { month: string })[]; trainMonths?: [string, string]; valMonths?: [string, string] }
 interface CPart { n: number; base: number; rule: number; diff: number; t: number; monthsGreenBase: number; monthsGreenRule: number; months: number; addRate: number }
@@ -439,13 +490,14 @@ export default function AlgoPage() {
                 At most one trade per stock a day, {v2.setup.maxPerSide} a side and {v2.setup.maxPerDay} a day. For reference, iteration 1&apos;s tight bracket taken blindly: {rr(v2.baselineTight.long)} long / {rr(v2.baselineTight.short)} short.
               </p>
             </Card>
-            {(Array.isArray(v2.untouched) ? v2.untouched : v2.untouched ? [v2.untouched] : []).map((u) => <UntouchedCard key={u.id} u={u} />)}
+            {(Array.isArray(v2.untouched) ? v2.untouched : v2.untouched ? [v2.untouched] : []).filter((u) => !['f1055', 'fCap3', 'fCap2', 'fStrict'].includes(u.id)).map((u) => <UntouchedCard key={u.id} u={u} />)}
             {v2.noise && v2.noise.draws.length > 1 && (
               <Card title="How much is luck in the training?" sub={`The locked strategy trained ${v2.noise.draws.length} times with different random draws (same data, same rules). The spread is the noise: differences smaller than this between iterations mean nothing.`}>
                 <p className="text-sm">Decide months: <b className="font-mono">{rr(v2.noise.devMin)} to {rr(v2.noise.devMax)}</b> a trade (average {rr(v2.noise.devMean)}).</p>
                 <p className="mt-1 font-mono text-[11px] text-ink-2">{v2.noise.draws.map((d) => `${d.draw}: ${rr(d.devNetR)} (t ${fx(d.devT)}, ${d.devGreen[0]}/${d.devGreen[1]} green)`).join(' · ')}</p>
               </Card>
             )}
+            <CapCard ml={v2} />
             <div className="flex flex-wrap gap-2">
               {v2.strategies.map((x) => (
                 <button key={x.id} onClick={() => setPick(x.id)}

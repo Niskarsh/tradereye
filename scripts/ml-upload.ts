@@ -13,15 +13,15 @@ import { confirmAll } from '../lib/ml/manageRun';
 interface Shard { shard: string; seedOffset: number; locked?: string; strategies: { id: string; overall: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number }; dev: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number } }[] }
 
 /** the locked strategy's numbers from each training draw: how much of a result is just luck in the training */
-function noiseOf(main: MlResult & Shard, dir: string) {
+function noiseOf(main: MlResult & Shard, dir: string, id = main.locked) {
   const files = existsSync(dir) ? readdirSync(dir).filter((f: string) => /^ml-seed\d+\.json$/.test(f)).sort() : [];
   const shards: Shard[] = [main, ...files.map((f: string) => JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as Shard)];
   const rows = shards.map((x) => {
-    const st = x.strategies.find((y) => y.id === main.locked);
+    const st = x.strategies.find((y) => y.id === id);
     return st ? { draw: x.shard === 'main' ? 'main' : x.shard, n: st.overall.n, netR: st.overall.netR, t: st.overall.t, devNetR: st.dev.netR, devT: st.dev.t, devGreen: [st.dev.monthsGreen ?? 0, st.dev.monthsTraded ?? 0] } : undefined;
   }).filter((x): x is NonNullable<typeof x> => !!x);
   const dv = rows.map((r) => r.devNetR);
-  return { strategy: main.locked, draws: rows, devMin: Math.min(...dv), devMax: Math.max(...dv), devMean: Math.round((dv.reduce((a, b) => a + b, 0) / Math.max(1, dv.length)) * 1000) / 1000 };
+  return { strategy: id, draws: rows, devMin: Math.min(...dv), devMax: Math.max(...dv), devMean: Math.round((dv.reduce((a, b) => a + b, 0) / Math.max(1, dv.length)) * 1000) / 1000 };
 }
 
 const store = { get: getChunk, put: putChunk };
@@ -52,7 +52,9 @@ async function main() {
   if (existsSync(file_)) {
     const ml = JSON.parse(readFileSync(file_, 'utf8')) as MlResult & Shard & { examFrom: string; noise?: unknown; management?: unknown; managementError?: string };
     if (ml.locked) ml.noise = noiseOf(ml, dir);
-    // iteration 9: no search; the add rule fixed in advance is replayed on every set of trades (see lib/ml/manageRun.ts CONFIRM)
+    // iteration 10: every version of F trained in each draw (they share its models), so the cap comparison has its own noise
+    (ml as { noiseAll?: unknown }).noiseAll = (ml.strategies ?? []).filter((x) => x.id !== 'placebo').map((x) => noiseOf(ml, dir, x.id)).filter((x) => x.draws.length > 1);
+    // iteration 9: no search; the add rule fixed in advance (iteration 10: none, B is dropped) is replayed on every set of trades (see lib/ml/manageRun.ts CONFIRM)
     try { (ml as { confirm?: unknown }).confirm = await confirmAll(ml as never, store, (m) => console.log(m)); }
     catch (e) { ml.managementError = (e as Error).message; console.error('management failed', e); }
     await putJson(store, mlKey(runId), ml);
