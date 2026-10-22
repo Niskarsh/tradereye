@@ -40,6 +40,8 @@ export interface ListItem { symbol: string; securityId: string; prevClose: numbe
 export interface StockPrep { symbol: string; securityId: string; daily: Candles; history: Candles }
 export interface Scored { symbol: string; pred: number | null; price?: number; adr?: number; above: boolean; note?: string }
 export interface OrderRec {
+  /** the risk this order was sized for (₹) */
+  risk?: number;
   symbol: string; securityId: string; slot: number; pred: number; price: number; adr: number; qty: number; stop: number; target: number;
   correlationId: string; sentAt: number; orderId?: string; status: string; error?: string; avgPrice?: number;
 }
@@ -61,6 +63,17 @@ export async function saveState(store: Store, s: DayState): Promise<void> {
   await putJson(store, stateKey(s.date), s);
 }
 export const note = (s: DayState, msg: string) => { s.log.push({ at: Date.now(), msg }); };
+
+/** settings that last from day to day (the page sets them) */
+export interface Settings { riskInr: number }
+export const RISK_MIN = 50, RISK_MAX = 5000, RISK_DEFAULT = 300;
+const SETTINGS_KEY = 'setups/live/settings.json';
+export async function loadSettings(store: Store): Promise<Settings> {
+  const s = await getJson<Partial<Settings>>(store, SETTINGS_KEY);
+  const r = Number(s?.riskInr);
+  return { riskInr: Number.isFinite(r) && r >= RISK_MIN && r <= RISK_MAX ? r : RISK_DEFAULT };
+}
+export async function saveSettings(store: Store, s: Settings): Promise<void> { await putJson(store, SETTINGS_KEY, s); }
 
 let modelCache: { at: number; m: LiveModel } | null = null;
 export async function loadModel(store: Store): Promise<LiveModel | undefined> {
@@ -214,11 +227,11 @@ export function pick(model: LiveModel, state: DayState, scored: Scored[], k: num
 }
 
 /** the short as the backtest takes it: stop ½ the usual daily range above the close, target ½ below, ₹300 risk */
-export function orderFor(model: LiveModel, x: Scored, date: string, k: number, securityId: string): Omit<OrderRec, 'sentAt' | 'status'> {
+export function orderFor(model: LiveModel, x: Scored, date: string, k: number, securityId: string, riskInr = model.rules.riskInr): Omit<OrderRec, 'sentAt' | 'status'> {
   const price = x.price!, adr = x.adr!;
   const stop = onTick(price + model.rules.stopAdr * adr, 1), target = onTick(price - model.rules.targetAdr * adr, -1);
   const entry = price - TICK; // a market order fills about a tick worse than the close
-  const qty = sizeFor(model.rules.riskInr, stop - entry);
+  const qty = sizeFor(riskInr, stop - entry);
   const correlationId = `te-${date.replace(/-/g, '')}-${x.symbol.replace(/[^A-Za-z0-9]/g, '')}`.slice(0, 30);
   return { symbol: x.symbol, securityId, slot: k, pred: x.pred!, price, adr, qty, stop, target, correlationId };
 }
