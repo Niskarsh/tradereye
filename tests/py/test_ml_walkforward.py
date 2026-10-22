@@ -21,6 +21,7 @@ import ml_walkforward as ml  # noqa: E402
 # a small world: the first 3 months are the untouched test; shorter training windows so it fits in 380 days
 ml.DECIDE_FROM = '2024-04'
 ml.TRAIN_MONTHS = 8
+ml.EXAM_MONTHS = 3  # the real exam (May 2026 on) is outside this small world: the last 3 months play it
 
 FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr', 'ret30Atr', 'ret60Atr', 'distVwapAtr', 'distHiAtr', 'distLoAtr',
          'rangeAdr', 'posInRange', 'minSinceHi', 'minSinceLo', 'testsHi', 'testsLo', 'tBody', 'tUpWick', 'tLoWick', 'tRangeAtr', 'tVol', 'volTrend',
