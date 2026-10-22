@@ -48,6 +48,7 @@ def make(d, planted, seed):
     X[:, FEATS.index('minute')] = np.tile(np.array(slots, dtype=np.float32), len(days) * syms)
     X[:, FEATS.index('tLoWick')] = rng.uniform(0, 1, n)
     X[:, FEATS.index('tUpWick')] = rng.uniform(0, 1, n)
+    X[:, FEATS.index('adrPct')] = rng.uniform(3, 5, n)  # a usual daily range of 3-5% of price, as in the real universe
     date = np.repeat(np.arange(len(days)), syms * len(slots))
     sym = np.repeat(np.tile(np.arange(syms), len(days)), len(slots))
     # the tight bracket (reference only): noise

@@ -495,6 +495,8 @@ def money_of(dev_t, dev, costs, ref, st):
     key = pd.MultiIndex.from_arrays([ref['day'].values, ref['sym'].values, ref['slot'].values])
     taken = ref.loc[key.isin(pd.MultiIndex.from_arrays([dev_t['day'].values, dev_t['sym'].values.astype(np.int32), dev_t['slot'].values.astype(np.int32)]))]
     stop_pct = float(taken['adrPct'].median()) * 0.5 if len(taken) else float('nan')
+    if not np.isfinite(stop_pct) or stop_pct < 0.2:
+        return None
     pos = RISK / (stop_pct / 100)
     eq = np.concatenate([[0], dev_t['net'].astype(float).cumsum().values])
     max_dd = float((np.maximum.accumulate(eq) - eq).max())
