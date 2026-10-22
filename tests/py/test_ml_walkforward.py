@@ -108,6 +108,9 @@ def check_picker():
     ps = np.full(n, -1.0)
     tr = ml.pick_dir(part, pl, ps, 0.05, st)
     assert len(tr) == ml.MAX_PER_SIDE and sorted(tr['slot']) == [20 + 10 * i for i in range(ml.MAX_PER_SIDE)], tr
+    cap2 = next(x for x in ml.STRATEGIES if x['id'] == 'fCap2')
+    tr = ml.pick_dir(part, pl, ps, 0.05, cap2)
+    assert sorted(tr['slot']) == [20, 30], f'cap 2: the first two of the day, not the two strongest: {tr}'
 
 
 check_picker()
@@ -126,7 +129,7 @@ if which in ('all', 'noise'):
       assert all(t[0] >= ml.DECIDE_FROM for t in s['trades'])
   for ut in noise['untouched']:
       print('NOISE untouched', ut['id'], ut['overall'])
-      assert ut['overall']['n'] < 100 or ut['overall']['netR'] <= 0.05, 'noise must not pass the untouched test'
+      assert ut['overall']['n'] < 100 or ut['overall']['netR'] <= 0.05 or ut['overall']['t'] < 2, 'noise must not pass the untouched test'
 
 if which in ('all', 'planted'):
   edge = run(True, 2)
@@ -146,18 +149,36 @@ if which in ('all', 'planted'):
   assert all(v['fill'] == 1 for v in cv.values()) and cv['now']['overall']['netR'] == o['netR'], 'same trades, every size'
   assert cv['l3']['overall']['netR'] > cv['l1']['overall']['netR'] > cv['now']['overall']['netR'], 'bigger positions keep more'
   assert len(w['trades']) == o['n'] and abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up'
-  for sid in ('wideShort', 'shortNear'):
+  ids = [s_['id'] for s_ in edge['strategies']]
+  assert ids == ['shortNear', 'f1055', 'fCap3', 'fCap2', 'fStrict', 'placebo'] and edge['locked'] == 'shortNear', ids
+  for sid in ids:
       st_ = strat(edge, sid)
       assert all(t[3] == -1 for t in st_['trades']) and all(t[2] >= '09:35' for t in st_['trades']), f'{sid}: shorts from 09:35'
-  assert {s_['id'] for s_ in edge['strategies']} == {'wideShort', 'shortNear'} and edge['locked'] == 'shortNear'
+      if sid != 'shortNear':
+          assert all(t[2] <= '10:55' for t in st_['trades']), f'{sid}: no entry after 10:55'
+      cap = next(x for x in ml.STRATEGIES if x['id'] == sid).get('cap')
+      if cap:
+          assert st_['daily']['maxPerDay'] <= cap, f'{sid}: at most {cap} a day'
+      print('PLANTED', sid, st_['dev']['n'], st_['dev']['netR'], st_['dev']['t'], 'per day', st_['daily']['perTradedDay'] if st_['daily'] else None)
+  f2, fs, fn = strat(edge, 'fCap2'), strat(edge, 'fStrict'), strat(edge, 'f1055')
+  assert f2['dev']['netR'] > 0.2 and fs['dev']['n'] > 0, 'the capped versions still find the planted edge'
+  assert fs['dev']['n'] < fn['dev']['n'], 'strict takes fewer trades'
+  pb = strat(edge, 'placebo')
+  print('PLANTED placebo', pb['overall'], 'ic', pb['ic'])
+  assert pb['overall']['n'] < 100 or pb['overall']['netR'] < 0.1, f'the placebo must not find the edge: {pb["overall"]}'
+  assert pb['ic']['mean'] is None or abs(pb['ic']['mean']) < 0.03, 'placebo predictions do not line up with outcomes'
+  assert edge['best'] != 'placebo'
+  cc = edge['capChoice']
+  print('PLANTED cap choice', cc)
+  assert cc and cc['tried'][0]['id'] == 'fCap2' and (cc['id'] is None or cc['id'] in ml.CAP_ORDER)
   assert edge['strategies'][1]['exam']['pass'] in (True, False, None)
   dl = w['daily']
   assert abs(dl['perTradedDay'] * dl['daysWithTrades'] - w['dev']['n']) < 1, 'your day = the decide months'
-  assert [u['id'] for u in edge['untouched']] == ['shortNear', 'wideShort'], 'both locked strategies get their one shot'
+  assert [u['id'] for u in edge['untouched']] == ml.UNTOUCHED, 'every F version gets the untouched months'
   for ut in edge['untouched']:
       print('PLANTED untouched', ut['id'], ut['overall'], ut['from'], ut['to'])
       assert ut['to'] < ml.DECIDE_FROM and all(t[0] < ml.DECIDE_FROM for t in ut['trades'])
-      assert ut['overall']['n'] >= 50 and ut['overall']['netR'] > 0.2, 'the planted edge is there in the untouched months too'
+      assert ut['overall']['n'] >= (20 if ut['id'] in ('fCap2', 'fStrict') else 50) and ut['overall']['netR'] > 0.2, f'the planted edge is there in the untouched months too: {ut["id"]}'
   sh = w['shadow']
   print('PLANTED shadow', sh)
   assert sh['n'] > 0 and sh['netR'] > 0.1 and all(m['shadow'] == (m['month'] >= ml.SHADOW_FROM) for m in w['months'])

@@ -79,3 +79,13 @@ written.
    trades); shadow months from Nov 2026 (`SHADOW_FROM`), never used for any decision; a money card (₹ a month,
    position, margin at 5×, capital incl. the deepest run of losses, % a month). After this the strategy is frozen as
    v1; further research goes on separate strategies or new data.
+   Result: F untouched +0.17R (t 3.4, 9/9), decide +0.06R (draws +0.05 to +0.07R); B decide +0.04R, untouched +0.20R;
+   the add rule did not confirm on the untouched months (+0.04R, t 0.8). Worst day −4.25R (4 shorts at most).
+10. **How many trades a day** (this version): F unchanged and locked; B and the add rule dropped. Four versions of F
+   share F's models and differ only in which trades they take, all but the first with no new entry after 10:55: up to
+   4 a day as now, first come first served 3 a day, 2 a day, and strict (`perDay` in scripts/ml_walkforward.py: the
+   bar is set each month on the 3 months before among higher quantiles, only bars that let through about 2 trades a
+   day or fewer there; at most 3 taken). Rule fixed before the run (`CAP_ORDER`, `CAP_RULE`): the smallest daily risk
+   that keeps +0.05R a trade with t ≥ 2.5 on the decide months. Placebo: F's pipeline trained on outcomes shuffled
+   among the stocks of the same month and minute, traded on the real outcomes; it must show no edge. Every version
+   gets the 5 training draws (`noiseAll`) and the untouched months (a second look for F, not a clean test).

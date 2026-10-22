@@ -24,17 +24,21 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 9
+ITERATION = 10
 CHANGES = [
-    'No new search: iteration 9 confirms. F (locked) and B are run unchanged; G is dropped (weakest in iteration 8).',
-    'One shot on the untouched months (Jan–Sep 2022) for B as it is and for B with iteration 8\'s winning add rule (add once on a pullback after 40% of the way, same size, one stop risking 1R on all, target 1.5× the daily range), fixed before this run. F\'s untouched result is repeated beside it.',
-    'Shadow months: from November 2026, every month that did not exist when this code was written is reported apart (never used for any decision): the forward test builds up with each monthly Re-run.',
-    'A money card: rupees a month, position size, margin at 5×, the capital a bad stretch needs, and % a month on that capital.',
+    'F stays locked and unchanged (B dropped: a hair worse on the decide months; adding to winners did not confirm on the untouched months, +0.04R at t 0.8).',
+    'Daily cap and entry window: four versions of F that share F\'s own models (so training luck cannot separate them) and differ only in which trades they take, all with no new entry after 10:55: as now (up to 4 a day), first come first served 3 a day, first come first served 2 a day, and strict (each month the bar is set on the 3 months before so that about 2 setups a day clear it, never more than 3).',
+    'Rule fixed before this run: take the version with the smallest daily risk (cap 2, then strict, then cap 3, then as now) that keeps at least +0.05R a trade with t of at least 2.5 on the decide months.',
+    'Placebo: the same pipeline trained on outcomes shuffled among the stocks of the same month and minute. It must show no edge; if it does, something leaks.',
+    'Every version also gets the untouched months (a second look for F there, not a clean test) and the five training draws.',
 ]
 DECIDE_FROM = '2022-10'  # months before this are the untouched test: never in any walk-forward, diagnostic or decision
 LOCKED = 'shortNear'     # the strategy locked for the noise check
-UNTOUCHED = ['shortNear', 'wideShort']  # tested once on the untouched months
+UNTOUCHED = ['shortNear', 'f1055', 'fCap3', 'fCap2', 'fStrict']  # tested on the untouched months
 SHADOW_FROM = '2026-11'  # months from here did not exist when iterations 1-9 were written: the forward test
+CAP_ORDER = ['fCap2', 'fStrict', 'fCap3', 'f1055']  # smallest daily risk first (the rule fixed before iteration 10)
+CAP_RULE = {'netR': 0.05, 't': 2.5}
+TOP_QUANTS = [0.99, 0.995, 0.997, 0.998, 0.999, 0.9993, 0.9995, 0.9997, 0.9998, 0.9999]
 MARGIN = 5               # Dhan's intraday leverage
 SHARD = 'main'           # 'main' (everything) or 'seed2' / 'seed3' (the locked strategy again, other random draws)
 SEED_OFF = 0
@@ -58,12 +62,20 @@ MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 
 _WIDE = {'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'L1': 'wbL1', 'S1': 'wbS1', 'L3': 'wbL3', 'S3': 'wbS3', 'noMarket': True}
 _WDESC = 'stop ½ of its usual daily range away, target ¾ of it, out by 15:15, picked from the stock\'s own facts and habits (no Nifty)'
+_F = {**_WIDE, 'only': -1, 'firstSlot': 20, 'targetAdr': 0.5, 'S': 'nbS', 'Sg': 'nbSg', 'S1': 'nbS1', 'S3': 'nbS3'}
 STRATEGIES = [
-    {**_WIDE, 'id': 'wideShort', 'name': 'B. Shorts, target ¾ range', 'only': -1, 'firstSlot': 20, 'targetAdr': 0.75,
-     'desc': f'Short only, from 09:35: {_WDESC}. The same as iterations 5–7.'},
-    {**_WIDE, 'id': 'shortNear', 'name': 'F. Shorts, target ½ range (locked)', 'only': -1, 'firstSlot': 20, 'targetAdr': 0.5,
-     'S': 'nbS', 'Sg': 'nbSg', 'S1': 'nbS1', 'S3': 'nbS3',
+    {**_F, 'id': 'shortNear', 'name': 'F. Shorts, target ½ range (locked)',
      'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target ½ of it, out by 15:15. Locked after iteration 7.'},
+    {**_F, 'id': 'f1055', 'name': 'F to 10:55, up to 4 a day', 'lastSlot': 100,
+     'desc': 'F with no new entry after 10:55 (open trades run to target, stop or 15:15); up to 4 a day as now.'},
+    {**_F, 'id': 'fCap3', 'name': 'F to 10:55, first 3 a day', 'lastSlot': 100, 'cap': 3,
+     'desc': 'F to 10:55, first come first served, at most 3 trades a day.'},
+    {**_F, 'id': 'fCap2', 'name': 'F to 10:55, first 2 a day', 'lastSlot': 100, 'cap': 2,
+     'desc': 'F to 10:55, first come first served, at most 2 trades a day.'},
+    {**_F, 'id': 'fStrict', 'name': 'F to 10:55, strict (~2 a day, max 3)', 'lastSlot': 100, 'cap': 3, 'perDay': 2.0,
+     'desc': 'F to 10:55 with a higher bar: each month the bar is set on the 3 months before so that at most about 2 setups a day clear it (never more than 3 taken).'},
+    {**_F, 'id': 'placebo', 'name': 'Placebo (shuffled outcomes)', 'lastSlot': 100, 'yS': 'nbS_shuf',
+     'desc': 'F to 10:55, but its models learned from outcomes shuffled among the stocks of the same month and minute (the facts carry no information). Traded on the real outcomes: it must show no edge.'},
 ]
 COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
          ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
@@ -172,13 +184,34 @@ def pick_dir(part, pl, ps, thr, st):
     c = c.sort_values(['day', 'sym', 'slot']).drop_duplicates(['day', 'sym'], keep='first')
     # time order; within the same minute the stronger prediction first
     c = c.sort_values(['day', 'slot', 'pred'], ascending=[True, True, False])
-    c = c[c.groupby(['day', 'side'], sort=False).cumcount() < MAX_PER_SIDE]
-    c = c[c.groupby('day', sort=False).cumcount() < MAX_PER_DAY]
+    cap = st.get('cap') or MAX_PER_DAY
+    c = c[c.groupby(['day', 'side'], sort=False).cumcount() < min(MAX_PER_SIDE, cap)]
+    c = c[c.groupby('day', sort=False).cumcount() < min(MAX_PER_DAY, cap)]
     c['net'] = np.where(c['side'] == 1, c[st['L']], c[st['S']])
     c['gross'] = np.where(c['side'] == 1, c[st['Lg']], c[st['Sg']])
     c['p1'] = np.where(c['side'] == 1, c[st['L1']], c[st['S1']])
     c['p3'] = np.where(c['side'] == 1, c[st['L3']], c[st['S3']])
     return c[EMPTY]
+
+
+def choose_bar(vpart, vl, vs, st):
+    """the bar to trade, set on the validation months: the one that made the most there (at least 10 trades a month);
+    a strict strategy ('perDay') only considers bars that let through at most that many trades a day on average"""
+    vb = np.maximum(vl, vs)
+    vb = vb[np.isfinite(vb)]
+    qs = TOP_QUANTS if st.get('perDay') else QUANTS
+    cands = sorted({float(q) for q in np.quantile(vb, qs) if q > 0}) if len(vb) else []
+    days = max(1, vpart['day'].nunique())
+    best_thr, best_sum = None, -1e18
+    for thr in cands:
+        tr = pick_dir(vpart, vl, vs, thr, st)
+        if len(tr) < 10 * VAL_MONTHS:
+            continue
+        if st.get('perDay') and len(tr) / days > st['perDay']:
+            continue
+        if tr['net'].sum() > best_sum:
+            best_thr, best_sum = thr, float(tr['net'].sum())
+    return best_thr, best_sum
 
 
 def neutral_groups(part, pred):
@@ -285,6 +318,15 @@ def main(d):
 
     res = {st['id']: {'trades': [], 'months': [], 'gain': np.zeros(len(feats)), 'ic': []} for st in STRATEGIES}
     y['excess'] = df['excess'].clip(-3, 3).values.astype(np.float32)
+    if any(st_.get('yS') == 'nbS_shuf' for st_ in STRATEGIES):
+        # placebo: each row learns the outcome of a random stock at the same month and minute (two random orders within
+        # the same groups); the facts then carry no information about the outcome
+        rng = np.random.default_rng(99)
+        g1 = np.lexsort((rng.random(len(df)), df['slot'].values, mi))
+        g2 = np.lexsort((rng.random(len(df)), df['slot'].values, mi))
+        sh = np.empty(len(df), dtype=np.float32)
+        sh[g1] = y['nbS'][g2]
+        y['nbS_shuf'] = sh
     for ti in range(first_test, len(months)):
         t0 = time.time()
         fitm = (mi >= max(0, ti - VAL_MONTHS - TRAIN_MONTHS)) & (mi < ti - VAL_MONTHS)
@@ -303,7 +345,7 @@ def main(d):
                 def side_model(lab, seed):
                     key = (lab, bool(st.get('noMarket')))
                     if key not in shared:
-                        m_ = fit(X, y[lab], fitm, seed, cols)
+                        m_ = fit(X, y[lab], fitm, seed + (77 if lab.endswith('_shuf') else 0), cols)
                         shared[key] = (m_, m_.predict(X[val]), m_.predict(X[test]))
                     return shared[key]
                 nv, nt = int(val.sum()), int(test.sum())
@@ -314,20 +356,11 @@ def main(d):
                 if st.get('only') == 1:
                     ms, vs, ts = None, np.full(nv, -np.inf), np.full(nt, -np.inf)
                 else:
-                    ms, vs, ts = side_model(st['S'], ti + 500)
+                    ms, vs, ts = side_model(st.get('yS', st['S']), ti + 500)
                 vl, vs = allowed(vpart, vl, vs, st)
                 tl_all, ts_all = tl, ts
                 tl, ts = allowed(tpart, tl, ts, st)
-                vb = np.maximum(vl, vs)
-                vb = vb[np.isfinite(vb)]
-                cands = [float(q) for q in np.quantile(vb, QUANTS) if q > 0] if len(vb) else []
-                best_thr, best_sum = None, -1e18
-                for thr in cands:
-                    tr = pick_dir(vpart, vl, vs, thr, st)
-                    if len(tr) < 10 * VAL_MONTHS:
-                        continue
-                    if tr['net'].sum() > best_sum:
-                        best_thr, best_sum = thr, float(tr['net'].sum())
+                best_thr, best_sum = choose_bar(vpart, vl, vs, st)
                 ok = best_thr is not None and best_sum > 0
                 tr = pick_dir(tpart, tl, ts, best_thr if ok else 1e18, st)
                 ics = [spearman(tl_all, tpart[st['L']].values) if ml else None, spearman(ts_all, tpart[st['S']].values) if ms else None]
@@ -469,7 +502,7 @@ def main(d):
         })
         log(st['id'], 'overall', overall, 'dev', dev['netR'], 'exam', exam['netR'], 'ic', ic)
 
-    best = max(out, key=lambda s: s['dev']['netR'] if s['dev']['n'] >= 100 else -9)
+    best = max(out, key=lambda s: s['dev']['netR'] if s['dev']['n'] >= 100 and s['id'] != 'placebo' else -9)
     untouched = [u for u in (untouched_test(df, X, y, mi, months, held, stock_cols, syms, sid) for sid in UNTOUCHED) if u] if SHARD == 'main' and held else []
     result = {
         'v': 2, 'iteration': ITERATION, 'changes': CHANGES, 'runId': head['runId'], 'createdAt': int(time.time() * 1000),
@@ -481,10 +514,26 @@ def main(d):
                   'neutralTimes': [f'{(555 + s) // 60:02d}:{(555 + s) % 60:02d}' for s in NEUTRAL_SLOTS], 'neutralK': NEUTRAL_K},
         'baselineTight': {'long': round(float(np.nanmean(ref['netL'])), 3), 'short': round(float(np.nanmean(ref['netS'])), 3)},
         'best': best['id'], 'locked': LOCKED, 'overall': best['overall'], 'shard': SHARD, 'seedOffset': SEED_OFF,
-        'decideFrom': DECIDE_FROM, 'shadowFrom': SHADOW_FROM, 'untouched': untouched,
+        'decideFrom': DECIDE_FROM, 'shadowFrom': SHADOW_FROM, 'untouched': untouched, 'capChoice': cap_choice(out),
         'strategies': out,
     }
     json.dump(result, open(os.path.join(d, 'ml.json' if SHARD == 'main' else f'ml-{SHARD}.json'), 'w'))
+
+
+def cap_choice(out):
+    """the rule fixed before iteration 10: the smallest daily risk that keeps CAP_RULE on the decide months"""
+    by = {s_['id']: s_ for s_ in out}
+    tried = []
+    for sid in CAP_ORDER:
+        s_ = by.get(sid)
+        if not s_:
+            continue
+        d_ = s_['dev']
+        ok = d_['n'] >= 100 and d_['netR'] >= CAP_RULE['netR'] and d_['t'] >= CAP_RULE['t']
+        tried.append({'id': sid, 'name': s_['name'], 'netR': d_['netR'], 't': d_['t'], 'n': d_['n'], 'ok': bool(ok)})
+        if ok:
+            return {'id': sid, 'name': s_['name'], 'rule': CAP_RULE, 'order': CAP_ORDER, 'tried': tried}
+    return {'id': None, 'name': None, 'rule': CAP_RULE, 'order': CAP_ORDER, 'tried': tried} if tried else None
 
 
 def money_of(dev_t, dev, costs, ref, st):
@@ -518,6 +567,9 @@ def money_of(dev_t, dev, costs, ref, st):
             'maxDrawdownR': round(max_dd, 1), 'capital': round(capital), 'pct': round(100 * per_month / capital, 1), 'bigger': sizes}
 
 
+_UNTOUCHED_MODELS = {}
+
+
 def untouched_test(df, X, y, mi, months, held, cols, syms, sid):
     """The locked strategy, once, on months never used before. No earlier data exists, so its models learn from the
     TRAIN_MONTHS decide months right after the untouched months, and the bar is set on the VAL_MONTHS after those (the
@@ -528,18 +580,16 @@ def untouched_test(df, X, y, mi, months, held, cols, syms, sid):
     fitm = (mi >= 0) & (mi < TRAIN_MONTHS)
     val = (mi >= TRAIN_MONTHS) & (mi < TRAIN_MONTHS + VAL_MONTHS)
     hold = mi == -1
-    m_ = fit(X, y[st['S']], fitm, 4242, cols)
+    lab = st.get('yS', st['S'])
+    if lab not in _UNTOUCHED_MODELS:  # versions that differ only in which trades they take share the model
+        m_ = fit(X, y[lab], fitm, 4242, cols)
+        _UNTOUCHED_MODELS[lab] = (m_.predict(X[val]), m_.predict(X[hold]))
     vpart, hpart = df.loc[val], df.loc[hold]
-    vs, hs = m_.predict(X[val]), m_.predict(X[hold])
+    vs, hs = _UNTOUCHED_MODELS[lab]
     vl, hl = np.full(len(vs), -np.inf), np.full(len(hs), -np.inf)
     vl, vs = allowed(vpart, vl, vs, st)
     hl_, hs_ = allowed(hpart, hl, hs, st)
-    vb = vs[np.isfinite(vs)]
-    best_thr, best_sum = None, -1e18
-    for thr in ([float(q) for q in np.quantile(vb, QUANTS) if q > 0] if len(vb) else []):
-        tr = pick_dir(vpart, vl, vs, thr, st)
-        if len(tr) >= 10 * VAL_MONTHS and tr['net'].sum() > best_sum:
-            best_thr, best_sum = thr, float(tr['net'].sum())
+    best_thr, best_sum = choose_bar(vpart, vl, vs, st)
     if best_thr is None:
         return {'id': st['id'], 'name': st['name'], 'months': held, 'note': 'no bar was profitable on the months used to set it', 'overall': stats([])}
     tr = pick_dir(hpart, hl_, hs_, best_thr, st)
@@ -564,5 +614,5 @@ if __name__ == '__main__':
     SHARD = sys.argv[2] if len(sys.argv) > 2 else 'main'
     if SHARD != 'main':
         SEED_OFF = int(SHARD.replace('seed', '') or 0)
-        STRATEGIES = [s_ for s_ in STRATEGIES if s_['id'] == LOCKED]
+        STRATEGIES = [s_ for s_ in STRATEGIES if s_['id'] == LOCKED or s_['id'] in CAP_ORDER]  # F and its capped versions (one shared model)
     main(sys.argv[1] if len(sys.argv) > 1 else 'ml-data')

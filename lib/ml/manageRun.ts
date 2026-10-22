@@ -91,7 +91,8 @@ export async function manageAll(ml: { examFrom: string; strategies: Strat[] }, s
 
 /* ---- iteration 9: confirm one rule fixed in advance (no search) -------------------------------------------- */
 
-/** the add rule iteration 8 picked for B on the second half of its decide months, fixed before iteration 9 ran */
+/** the add rule iteration 8 picked for B on the second half of its decide months, fixed before iteration 9 ran. It did not
+ * confirm on the untouched months (+0.04R, t 0.8) and B is dropped in iteration 10, so it no longer matches a strategy. */
 export const CONFIRM: Record<string, string> = { wideShort: 'a1-p0.4-x1-b1-tx1.5-r1' };
 
 type Trade = (string | number | null)[];
