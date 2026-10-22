@@ -3,7 +3,7 @@
 # engine (algo-live/model.json.gz; every model is also kept under algo-live/models/).
 #
 # When: once at the start of each month after a backtest Re-run (the backtest workflow keeps the dataset 7 days), or
-# by hand from the Actions tab. The repo is public: the log prints progress only.
+# by hand from the Actions tab. The repo is public: the log prints progress only (results show as annotations).
 name: Algo Live model
 
 on:
