@@ -120,7 +120,7 @@ if which in ('all', 'noise'):
       print('NOISE   ', s['id'], o, 'ic', s['ic'])
       assert o['netR'] <= 0.05 or o['n'] < 100, f'noise must not look like an edge: {s["id"]} {o}'
       assert s['ic']['mean'] is None or abs(s['ic']['mean']) < 0.03, f'noise predictions must not line up with outcomes: {s["ic"]}'
-      assert o['n'] == s['dev']['n'] + s['exam']['n'], 'dev + exam = all'
+      assert o['n'] == s['dev']['n'] + s['exam']['n'] + s['shadow']['n'], 'decide + exam + shadow = all'
       assert all(m['month'] >= ml.DECIDE_FROM for m in s['months']), 'the untouched months never enter the walk-forward'
       assert all(t[0] >= ml.DECIDE_FROM for t in s['trades'])
   for ut in noise['untouched']:
