@@ -9,7 +9,7 @@ import { addRanks, MODEL_KEY, predictVector, vectorOf, type LiveModel } from './
 import type { ScalerOrder, ScalerStatus } from './scaler';
 
 /**
- * Algo Live: the day, step by step (driven by the Algo Live page; everything is saved in S3 under algo-live/<date>/).
+ * Algo Live: the day, step by step (driven by the Algo Live page; everything is saved in S3 under setups/live/<date>/).
  *
  *  1. the day list (any time before the open): every NSE equity that passes the backtest's screener today, exactly as
  *     lib/setups/universe.ts screenerDays: previous close ₹250-340 and 10-day average volume above 5 lakh shares.
@@ -50,8 +50,8 @@ export interface DayState {
   model?: { month: string; threshold: number | null; standAside: boolean; createdAt: number };
 }
 
-const stateKey = (date: string) => `algo-live/${date}/state.json`;
-const stockKey = (date: string, sym: string) => `algo-live/${date}/stock/${sym.replace(/[^A-Za-z0-9&_-]/g, '_')}.json.gz`;
+const stateKey = (date: string) => `setups/live/${date}/state.json`;
+const stockKey = (date: string, sym: string) => `setups/live/${date}/stock/${sym.replace(/[^A-Za-z0-9&_-]/g, '_')}.json.gz`;
 
 export async function loadState(store: Store, date: string): Promise<DayState> {
   return (await getJson<DayState>(store, stateKey(date))) ?? { v: 1, date, list: [], prepared: [], vetoes: [], armed: false, ticks: {}, orders: [], log: [] };

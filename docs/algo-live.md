@@ -10,12 +10,12 @@ The strategy iteration 10 picked, traded with real money.
 - **The model** (`scripts/ml_live.py`, GitHub workflow "Algo Live model"):
   - Trains the model that trades this month, exactly as the walk-forward did (30 months to learn from). The bar is set
     on the 3 months before, with the cap of 2 a day; if no bar made money there, it stands aside.
-  - Exports the trees to `algo-live/model.json.gz` in S3.
+  - Exports the trees to `setups/live/model.json.gz` in S3.
   - Checks that both Python's walk of the exported trees and the live engine (`scripts/ml-live-check.ts`) reproduce
     scikit-learn. The run fails otherwise.
 - **The engine** (`lib/algoLive/`):
   - `engine.ts`: the day list (the backtest's screener: previous close ₹250–340, 10-day average volume above 5 lakh)
-    and each stock's history, saved once per day under `algo-live/<date>/`.
+    and each stock's history, saved once per day under `setups/live/<date>/`.
   - `features.ts`: at each 10-minute close, today's 1-minute candles go through `gridDay`, the same code that built the
     backtest's dataset. The rest of the day is filled flat. `tests/algolive.test.ts` proves the facts equal the
     backtest's.

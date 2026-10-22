@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   if (!g.clientId) return NextResponse.json({ error: 'TOKEN', message: 'The Dhan token has no client id in it.' }, { status: 400 });
   const { date } = istNow();
   const body = (await req.json().catch(() => ({}))) as { phase?: string; from?: number; n?: number };
-  const key = `algo-live/${date}/candidates.json`;
+  const key = `setups/live/${date}/candidates.json`;
   try {
     if (body.phase === 'scan') {
       const c = await candidates(g.dhan, g.clientId);
