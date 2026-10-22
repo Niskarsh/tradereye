@@ -25,11 +25,17 @@ STRATEGY = 'fCap2'
 PARITY_ROWS = 400
 
 
+def finite(x):
+    """JSON has no infinity: a split at +inf (every number goes left, only missing goes right) becomes 1e308"""
+    x = float(x)
+    return 1e308 if x == np.inf else -1e308 if x == -np.inf else 0.0 if np.isnan(x) else x
+
+
 def export_tree(nodes):
     return {
         'value': [float(x) for x in nodes['value']],
         'feature': [int(x) for x in nodes['feature_idx']],
-        'threshold': [float(x) for x in nodes['num_threshold']],
+        'threshold': [finite(x) for x in nodes['num_threshold']],
         'missingLeft': [int(x) for x in nodes['missing_go_to_left']],
         'left': [int(x) for x in nodes['left']],
         'right': [int(x) for x in nodes['right']],
@@ -111,8 +117,8 @@ def main(d, month=None):
         'val': [months[ti - ml.VAL_MONTHS], months[ti - 1]],
         'features': [feats[i] for i in cols],  # the order each model reads
         'ranked': ml.RANKED,
-        'threshold': None if not ok else float(thr), 'standAside': not ok,
-        'valTrades': 0 if vtr is None else int(len(vtr)), 'valR': None if vtr is None else round(float(vtr['net'].mean()), 4),
+        'threshold': None if not ok else float(thr), 'standAside': not ok,  # (float, finite)
+        'valTrades': 0 if vtr is None else int(len(vtr)), 'valR': None if vtr is None or not len(vtr) else round(float(vtr['net'].mean()), 4),
         'valDays': int(vpart['day'].nunique()),
         'rules': {'firstSlot': st['firstSlot'], 'lastSlot': st['lastSlot'], 'cap': st['cap'], 'stopAdr': 0.5, 'targetAdr': st['targetAdr'], 'exitSlot': 360, 'riskInr': ml.RISK},
         'models': models,
@@ -122,7 +128,7 @@ def main(d, month=None):
                    'worst': worst},
     }
     with open(os.path.join(d, 'live-model.json'), 'w') as f:
-        json.dump(out, f)
+        json.dump(out, f, allow_nan=False)  # anything not finite would break the live engine's JSON.parse
     ml.log('written', os.path.join(d, 'live-model.json'), 'trees', sum(len(m['trees']) for m in models))
 
 
