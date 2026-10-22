@@ -15,7 +15,7 @@ interface Month extends S { month: string; thr: number | null; note: string; ic:
 interface Strat {
   id: string; name: string; kind: 'dir' | 'neutral'; desc: string;
   baseline: { long: number; short: number; longGross: number; shortGross: number };
-  overall: P & { maxDrawdownR: number; inrPerMonth: number }; dev: P; exam: P;
+  overall: P & { maxDrawdownR: number; inrPerMonth: number }; dev: P; exam: P & { pass?: boolean | null };
   ic: { mean: number | null; positive: number; months: number };
   daily?: { tradingDays: number; daysWithTrades: number; perTradedDay: number; maxPerDay: number; at0935: number; greenDays: number; worstDayR: number; bestDayR: number; worstWeekR: number; greenWeeks: number } | null;
   costs?: { id: string; name: string; fill: number; overall: S; months: [number, number]; dev: S; devMonths: [number, number]; exam: S; examMonths: [number, number] }[];
@@ -30,6 +30,62 @@ interface Ml {
   setup: { trainMonths: number; valMonths: number; examMonths: number; maxPerDay: number; maxPerSide: number; riskInr: number; neutralTimes: string[]; neutralK: number };
   baselineTight: { long: number; short: number };
   best: string; strategies: Strat[];
+  locked?: string;
+  untouched?: { id: string; name: string; from?: string; to?: string; note?: string; overall: P; months?: (S & { month: string })[]; trainMonths?: [string, string]; valMonths?: [string, string] } | null;
+  noise?: { strategy: string; draws: { draw: string; n: number; netR: number; t: number; devNetR: number; devT: number; devGreen: [number, number] }[]; devMin: number; devMax: number; devMean: number };
+  management?: Mgmt[]; managementError?: string;
+}
+interface MLine { id: string; family: string; label: string; n: number; netR: number; diff: number; t: number; hit: number; addRate: number }
+interface Mgmt { strategy: string; variantsTested: number; trades: number; baseChecked: number; baseMismatch: number; skippedNoData: number; half1: [string, string]; half2: [string, string]; nHalf1: number; nHalf2: number; stage1: MLine[]; picked: string[]; stage2: MLine[]; winner: string; winnerBeatsBase: boolean }
+
+function MgmtTable({ rows, best }: { rows: MLine[]; best?: string }) {
+  return (
+    <div className="-mx-2 overflow-x-auto">
+      <table className="w-full min-w-[640px] text-xs">
+        <thead><tr className={HEAD}>
+          <th className="px-2 py-1.5 text-left">How the trade is managed</th><th className={TH}>R / trade</th><th className={TH}>vs as now</th><th className={TH}>t</th><th className={TH}>Made money</th><th className={TH}>Added on</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((l) => (
+            <tr key={l.id} className={`border-b border-line/60 font-mono tabular-nums ${l.id === best ? 'bg-data-green/10' : ''}`}>
+              <td className="px-2 py-1.5 font-sans">{l.label}</td>
+              <td className={`${TH} font-bold ${tone(l.netR)}`}>{rr(l.netR)}</td>
+              <td className={`${TH} ${l.id === 'base' ? 'text-ink-3' : tone(l.diff)}`}>{l.id === 'base' ? '–' : rr(l.diff)}</td>
+              <td className={TH}>{l.id === 'base' ? '–' : fx(l.t)}</td>
+              <td className={TH}>{pct(l.hit)}</td>
+              <td className={TH}>{l.family === 'add1' || l.family === 'add2' || l.family === 'combo' ? pct(l.addRate) : '–'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Management({ m }: { m: Mgmt }) {
+  const fam = (f: string, k: number) => m.stage1.filter((l) => l.family === f).sort((a, b) => b.netR - a.netR).slice(0, k);
+  const base1 = m.stage1.find((l) => l.id === 'base');
+  const win = m.stage2.find((l) => l.id === m.winner);
+  return (
+    <Card title="Managing the same trades: break-even and adding" sub={`The same ${m.trades.toLocaleString('en-IN')} trades (decide months), replayed minute by minute ${m.variantsTested} ways. "As now" replays the model's own result exactly for ${m.baseChecked - m.baseMismatch} of ${m.baseChecked} trades. Stage 1 picks on ${mon(m.half1[0])}–${mon(m.half1[1])}; stage 2 judges on ${mon(m.half2[0])}–${mon(m.half2[1])}, which played no part in picking.`}>
+      <p className={`mb-3 rounded-xl border px-3 py-2 text-sm font-bold ${m.winnerBeatsBase ? 'border-data-green/60 bg-data-green/10 text-data-green' : 'border-line-strong text-ink-2'}`}>
+        {m.winnerBeatsBase && win
+          ? `Winner on the second half: ${win.label}: ${rr(win.netR)} a trade vs ${rr(win.netR - win.diff)} as now (+${win.diff.toFixed(3)}R, t ${fx(win.t)}). It gets one shot at the untouched months next.`
+          : 'Nothing beat "as now" clearly (t ≥ 2) on the second half. Stop and target only stays.'}
+      </p>
+      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">Stage 2: the picks and their combinations, second half only</p>
+      <MgmtTable rows={[...m.stage2].sort((a, b) => b.netR - a.netR)} best={m.winnerBeatsBase ? m.winner : undefined} />
+      <details className="mt-3">
+        <summary className="cursor-pointer text-[11px] font-bold text-ink-2">Stage 1: each family on its own, first half (best of each)</summary>
+        <div className="mt-2 space-y-3">
+          {base1 && <MgmtTable rows={[base1]} />}
+          <MgmtTable rows={fam('be', 3)} />
+          <MgmtTable rows={fam('add1', 8)} />
+          <MgmtTable rows={fam('add2', 8)} />
+        </div>
+      </details>
+    </Card>
+  );
 }
 interface Line { id: string; name: string; n: number; netR: number; gross: number | null; t: number; monthsGreen: number; monthsTraded: number; dev: number | null; exam: number | null; ic: number | null }
 interface Head { runId: string; createdAt: number; iteration: number; code?: string | null; lines: Line[] }
@@ -41,17 +97,22 @@ const mon = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-
 const tone = (x: number | null | undefined, on = true) => (!on || x == null ? 'text-ink-3' : x > 0 ? 'text-data-green' : 'text-data-red-text');
 const fx = (x: number | null | undefined, d = 1) => (x == null || !Number.isFinite(x) ? '–' : x.toFixed(d));
 
-/** the honest one-line verdict for a strategy: judged on the earlier months, confirmed (or not) by the exam */
+/** the exam as Pass / Fail only (its numbers never steer anything) */
+const examPass = (e: { n: number; netR: number; pass?: boolean | null }) => (e.pass !== undefined ? e.pass : e.n >= 30 ? e.netR > 0 : null);
+const passText = (p: boolean | null | undefined) => (p == null ? '–' : p ? 'Pass' : 'Fail');
+
+/** the honest one-line verdict for a strategy: judged on the decide months, confirmed (or not) by the exam's Pass / Fail */
 function verdict(s: Strat): { text: string; cls: string } {
-  const { dev, exam, overall: o } = s;
+  const { dev } = s;
   const green = 'border-data-green/60 bg-data-green/10 text-data-green', amber = 'border-brand-accent/60 bg-brand-accent/10 text-brand-accent', red = 'border-data-red/60 bg-data-red/10 text-data-red-text';
-  if (o.n < 100) return { text: 'Not enough trades to judge.', cls: 'border-line-strong text-ink-2' };
-  const devGood = dev.n >= 100 && dev.netR > 0 && dev.t >= 2 && dev.monthsGreen >= 0.6 * dev.monthsTraded;
-  if (devGood && exam.n >= 30 && exam.netR > 0) return { text: 'Candidate edge: profitable after costs on the earlier months (sure enough, green most months) and it passed the exam months it never influenced. Paper-trade it next.', cls: green };
-  if (devGood) return { text: 'Profitable on the earlier months but it failed (or has too few trades in) the exam months. Most likely luck; not tradeable yet.', cls: amber };
-  if (o.netR > 0) return { text: 'Slightly profitable out of sample, but not sure enough (t under 2 or too many red months). Could be luck.', cls: amber };
-  if (o.gross > 0) return { text: `Some signal before costs (${rr(o.gross)} a trade), but the charges eat it (${rr(o.netR)} after). Close, not there.`, cls: amber };
-  return { text: 'No edge: out of sample, these trades lose money even before costs.', cls: red };
+  if (dev.n < 100) return { text: 'Not enough trades to judge.', cls: 'border-line-strong text-ink-2' };
+  const devGood = dev.netR > 0 && dev.t >= 2 && dev.monthsGreen >= 0.6 * dev.monthsTraded;
+  const pass = examPass(s.exam);
+  if (devGood && pass) return { text: 'Candidate edge: profitable after costs on the decide months (sure enough, green most months), and it passes the exam.', cls: green };
+  if (devGood) return { text: 'Profitable on the decide months but it does not pass the exam (or has too few exam trades). Treat with suspicion.', cls: amber };
+  if (dev.netR > 0) return { text: 'Slightly profitable on the decide months, but not sure enough (t under 2 or too many red months). Could be luck.', cls: amber };
+  if (dev.gross > 0) return { text: `Some signal before costs (${rr(dev.gross)} a trade), but the charges eat it (${rr(dev.netR)} after). Close, not there.`, cls: amber };
+  return { text: 'No edge: these trades lose money even before costs.', cls: red };
 }
 
 function Tiles({ items }: { items: [string, string, string?][] }) {
@@ -78,8 +139,7 @@ function History({ history }: { history: Head[] }) {
         <table className="w-full min-w-[640px] text-xs">
           <thead><tr className={HEAD}>
             <th className="px-2 py-1.5 text-left">#</th><th className="px-2 py-1.5 text-left">Run</th><th className="px-2 py-1.5 text-left">Strategy</th>
-            <th className={TH}>Trades</th><th className={TH}>Before costs</th><th className={TH}>After costs</th><th className={TH}>t</th>
-            <th className={TH}>Months green</th><th className={TH}>Earlier months</th><th className={TH}>Exam</th><th className={TH}>Signal</th>
+            <th className={TH}>Trades</th><th className={TH}>Decide months (R / trade)</th><th className={TH}>Exam</th><th className={TH}>Signal</th>
           </tr></thead>
           <tbody>
             {history.flatMap((h) => h.lines.map((l, i) => (
@@ -88,12 +148,8 @@ function History({ history }: { history: Head[] }) {
                 <td className="px-2 py-1.5 font-sans text-ink-3">{i === 0 ? <>{new Date(h.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} {codeLink(h.code)}</> : ''}</td>
                 <td className="px-2 py-1.5 font-sans">{l.name}</td>
                 <td className={TH}>{l.n}</td>
-                <td className={`${TH} ${tone(l.gross)}`}>{rr(l.gross)}</td>
-                <td className={`${TH} font-bold ${tone(l.netR, l.n > 0)}`}>{l.n ? rr(l.netR) : '–'}</td>
-                <td className={TH}>{l.n ? fx(l.t) : '–'}</td>
-                <td className={TH}>{l.monthsGreen} / {l.monthsTraded}</td>
-                <td className={`${TH} ${tone(l.dev)}`}>{rr(l.dev)}</td>
-                <td className={`${TH} ${tone(l.exam)}`}>{rr(l.exam)}</td>
+                <td className={`${TH} font-bold ${tone(l.dev ?? l.netR, l.n > 0)}`}>{rr(l.dev ?? l.netR)}</td>
+                <td className={TH}>{passText(l.exam == null ? null : l.exam > 0)}</td>
                 <td className={TH}>{fx(l.ic, 3)}</td>
               </tr>
             )))}
@@ -106,6 +162,7 @@ function History({ history }: { history: Head[] }) {
 }
 
 function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
+  const mg = ml.management?.find((m) => m.strategy === s.id);
   const v = verdict(s);
   const o = s.overall;
   const neutral = s.kind === 'neutral';
@@ -114,25 +171,28 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
       <p className="text-xs text-ink-2">{s.desc}</p>
       <p className={`rounded-xl border px-3 py-2 text-sm font-bold ${v.cls}`}>{v.text}</p>
       <Tiles items={[
-        ['Out-of-sample trades', o.n.toLocaleString('en-IN')],
-        ['R per trade after costs', rr(o.netR), tone(o.netR, o.n > 0)],
-        ['R per trade before costs', rr(o.gross), tone(o.gross, o.n > 0)],
-        ['How sure (t)', fx(o.t)],
-        ['Earlier months (decides)', s.dev.n ? `${rr(s.dev.netR)} · ${s.dev.monthsGreen}/${s.dev.monthsTraded} green` : '–', tone(s.dev.netR, s.dev.n > 0)],
-        [`Exam: from ${mon(ml.examFrom)}`, s.exam.n ? `${rr(s.exam.netR)} · ${s.exam.monthsGreen}/${s.exam.monthsTraded} green` : '–', tone(s.exam.netR, s.exam.n > 0)],
-        ['Per month, at ₹300 risk', inr(o.inrPerMonth), tone(o.inrPerMonth, o.n > 0)],
+        ['Trades (decide months)', s.dev.n.toLocaleString('en-IN')],
+        ['R per trade after costs', rr(s.dev.netR), tone(s.dev.netR, s.dev.n > 0)],
+        ['R per trade before costs', rr(s.dev.gross), tone(s.dev.gross, s.dev.n > 0)],
+        ['How sure (t)', fx(s.dev.t)],
+        ['Months green', `${s.dev.monthsGreen} of ${s.dev.monthsTraded}`],
+        [`Exam (from ${mon(ml.examFrom)})`, passText(examPass(s.exam)), examPass(s.exam) == null ? undefined : examPass(s.exam) ? 'text-data-green' : 'text-data-red-text'],
+        ['Per month, at ₹300 risk', inr(s.dev.monthsTotal ? s.dev.inr / s.dev.monthsTotal : null), tone(s.dev.inr, s.dev.n > 0)],
         ['Signal (does it know anything?)', s.ic.mean == null ? '–' : `${fx(s.ic.mean, 3)} · ${s.ic.positive}/${s.ic.months} months +`, tone(s.ic.mean)],
-        ['Made money after costs', o.n ? pct(o.hit) : '–'],
-        ['Worst drop (R)', `−${o.maxDrawdownR}R`],
+        ['Made money after costs', s.dev.n ? pct(s.dev.hit) : '–'],
       ]} />
+      <p className="text-[11px] text-ink-3">Every number on this page is from the decide months ({o.n ? 'before ' + mon(ml.examFrom) : ''}). The exam months only show Pass / Fail, so they never steer the next step.</p>
       <p className="text-[11px] text-ink-3">
         Taking every moment blindly with this trade makes {rr(s.baseline.long)} long / {rr(s.baseline.short)} short after costs
         ({rr(s.baseline.longGross)} / {rr(s.baseline.shortGross)} before): that is what the model has to beat.
         {neutral && ` Baskets at ${ml.setup.neutralTimes.join(', ')}: ${ml.setup.neutralK} longs + ${ml.setup.neutralK} shorts, each stock once a day.`}
       </p>
 
+      {mg && <Management m={mg} />}
+      {ml.managementError && <p className="text-xs text-data-red-text">Trade management did not run: {ml.managementError}</p>}
+
       {s.daily && (
-        <Card title="Your day, if you traded it by hand" sub="All tested months, after costs at ₹300 risk. What paper-trading this would feel like.">
+        <Card title="Your day, if you traded it by hand" sub="Decide months, after costs at ₹300 risk. What paper-trading this would feel like.">
           <Tiles items={[
             ['Days with a trade', `${s.daily.daysWithTrades} of ${s.daily.tradingDays} (${pct(s.daily.daysWithTrades / Math.max(1, s.daily.tradingDays))})`],
             ['Trades on those days', `${s.daily.perTradedDay} avg · ${s.daily.maxPerDay} max`],
@@ -151,20 +211,18 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
           <div className="-mx-2 overflow-x-auto">
             <table className="w-full min-w-[620px] text-xs">
               <thead><tr className={HEAD}>
-                <th className="px-2 py-1.5 text-left">Execution</th><th className={TH}>Filled</th><th className={TH}>Trades</th><th className={TH}>R after costs</th><th className={TH}>t</th>
-                <th className={TH}>Months green</th><th className={TH}>Earlier months</th><th className={TH}>Exam</th>
+                <th className="px-2 py-1.5 text-left">Execution</th><th className={TH}>Trades</th><th className={TH}>R after costs</th><th className={TH}>t</th>
+                <th className={TH}>Months green</th><th className={TH}>Exam</th>
               </tr></thead>
               <tbody>
                 {s.costs.map((c) => (
                   <tr key={c.id} className="border-b border-line/60 font-mono tabular-nums">
                     <td className="px-2 py-1.5 font-sans">{c.name}</td>
-                    <td className={TH}>{pct(c.fill)}</td>
-                    <td className={TH}>{c.overall.n}</td>
-                    <td className={`${TH} font-bold ${tone(c.overall.netR, c.overall.n > 0)}`}>{c.overall.n ? rr(c.overall.netR) : '–'}</td>
-                    <td className={TH}>{c.overall.n ? fx(c.overall.t) : '–'}</td>
-                    <td className={TH}>{c.months[0]} / {c.months[1]}</td>
-                    <td className={`${TH} ${tone(c.dev.netR, c.dev.n > 0)}`}>{c.dev.n ? `${rr(c.dev.netR)} · ${c.devMonths[0]}/${c.devMonths[1]}` : '–'}</td>
-                    <td className={`${TH} ${tone(c.exam.netR, c.exam.n > 0)}`}>{c.exam.n ? `${rr(c.exam.netR)} · ${c.examMonths[0]}/${c.examMonths[1]}` : '–'}</td>
+                    <td className={TH}>{c.dev.n}</td>
+                    <td className={`${TH} font-bold ${tone(c.dev.netR, c.dev.n > 0)}`}>{c.dev.n ? rr(c.dev.netR) : '–'}</td>
+                    <td className={TH}>{c.dev.n ? fx(c.dev.t) : '–'}</td>
+                    <td className={TH}>{c.devMonths[0]} / {c.devMonths[1]}</td>
+                    <td className={TH}>{passText(examPass(c.exam))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -173,7 +231,7 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
         </Card>
       )}
 
-      <Card title="Month by month (every month traded blind)" sub="A real edge is green most months, not just one big month. Exam months are marked; the bar to trade and 'stood aside' were decided on the months just before each month.">
+      <Card title="Month by month (every month traded blind)" sub="Decide months. A real edge is green most months, not just one big month. The bar to trade and 'stood aside' were decided on the months just before each month. The exam months are one Pass / Fail line.">
         <div className="-mx-2 overflow-x-auto">
           <table className="w-full min-w-[620px] text-xs">
             <thead><tr className={HEAD}>
@@ -181,7 +239,7 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
               <th className={TH}>R per trade</th><th className={TH}>Total R</th><th className={TH}>₹ at ₹300 risk</th><th className={TH}>Signal</th><th className="px-2 py-1.5 text-left"></th>
             </tr></thead>
             <tbody>
-              {s.months.map((m) => (
+              {s.months.filter((m) => !m.exam).map((m) => (
                 <tr key={m.month} className={`border-b border-line/60 font-mono tabular-nums ${m.exam ? 'bg-brand-accent/5' : ''}`}>
                   <td className="px-2 py-1.5 font-sans">{mon(m.month)}{m.exam && <span className="ml-1 text-[9px] font-black uppercase text-brand-accent">exam</span>}</td>
                   <td className={TH}>{m.n}</td>
@@ -194,6 +252,9 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
                   <td className="px-2 py-1.5 font-sans text-[10px] text-ink-3">{m.note}</td>
                 </tr>
               ))}
+              <tr className="border-b border-line/60 bg-brand-accent/5">
+                <td className="px-2 py-1.5 font-sans" colSpan={9}>Exam months ({mon(ml.examFrom)} on): <b>{passText(examPass(s.exam))}</b></td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -298,11 +359,30 @@ export default function AlgoPage() {
                 At most one trade per stock a day, {v2.setup.maxPerSide} a side and {v2.setup.maxPerDay} a day. For reference, iteration 1&apos;s tight bracket taken blindly: {rr(v2.baselineTight.long)} long / {rr(v2.baselineTight.short)} short.
               </p>
             </Card>
+            {v2.untouched && (
+              <Card title={`Untouched test: ${v2.untouched.name}`} sub={v2.untouched.from ? `${mon(v2.untouched.from)}–${mon(v2.untouched.to!)}: months no iteration ever loaded, looked at once. The models learned from ${mon(v2.untouched.trainMonths![0])}–${mon(v2.untouched.trainMonths![1])} and the bar to trade was set on ${mon(v2.untouched.valMonths![0])}–${mon(v2.untouched.valMonths![1])} (no older data exists); every fact is still only what was known at that minute.` : v2.untouched.note}>
+                <Tiles items={[
+                  ['Trades', v2.untouched.overall.n.toLocaleString('en-IN')],
+                  ['R per trade after costs', rr(v2.untouched.overall.netR), tone(v2.untouched.overall.netR, v2.untouched.overall.n > 0)],
+                  ['How sure (t)', fx(v2.untouched.overall.t)],
+                  ['Months green', `${v2.untouched.overall.monthsGreen} of ${v2.untouched.overall.monthsTraded}`],
+                ]} />
+                {!!v2.untouched.months?.length && (
+                  <p className="mt-2 font-mono text-[11px] text-ink-2">{v2.untouched.months.map((m) => `${mon(m.month)} ${m.n ? rr(m.netR) : '–'}`).join(' · ')}</p>
+                )}
+              </Card>
+            )}
+            {v2.noise && v2.noise.draws.length > 1 && (
+              <Card title="How much is luck in the training?" sub={`The locked strategy trained ${v2.noise.draws.length} times with different random draws (same data, same rules). The spread is the noise: differences smaller than this between iterations mean nothing.`}>
+                <p className="text-sm">Decide months: <b className="font-mono">{rr(v2.noise.devMin)} to {rr(v2.noise.devMax)}</b> a trade (average {rr(v2.noise.devMean)}).</p>
+                <p className="mt-1 font-mono text-[11px] text-ink-2">{v2.noise.draws.map((d) => `${d.draw}: ${rr(d.devNetR)} (t ${fx(d.devT)}, ${d.devGreen[0]}/${d.devGreen[1]} green)`).join(' · ')}</p>
+              </Card>
+            )}
             <div className="flex flex-wrap gap-2">
               {v2.strategies.map((x) => (
                 <button key={x.id} onClick={() => setPick(x.id)}
                   className={`rounded-full border px-3 py-1 text-xs font-bold ${x.id === s.id ? 'border-brand-accent bg-brand-accent/15 text-brand-accent' : 'border-line text-ink-2'}`}>
-                  {x.name} <span className={`font-mono ${tone(x.overall.netR, x.overall.n > 0)}`}>{x.overall.n ? rr(x.overall.netR) : '–'}</span>
+                  {x.name} <span className={`font-mono ${tone(x.dev.netR, x.dev.n > 0)}`}>{x.dev.n ? rr(x.dev.netR) : '–'}</span>
                 </button>
               ))}
             </div>

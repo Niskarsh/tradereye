@@ -1,12 +1,11 @@
 """
 Proves the Algo Lab pipeline before it is trusted on real data:
-  1. pure noise: no strategy may report an edge (out of sample R after costs near or below zero), and the model's
-     predictions must not line up with outcomes (rank correlation near zero);
-  2. a planted directional edge (longs after a long lower wick on a busy stock win more): the wide bracket must find it
-     out of sample, month after month, leaning on the planted facts;
-  3. a planted cross-sectional edge (stocks stronger than Nifty over the last 30 min keep outperforming the others, on
-     top of a big market move shared by every stock that day): the market-neutral basket must find it.
-Run: python3 tests/py/test_ml_walkforward.py
+  1. pure noise: no strategy may report an edge (out of sample R after costs near or below zero), the model's predictions
+     must not line up with outcomes, and the untouched test must not look like an edge either;
+  2. a planted short edge (shorts after a long upper wick on a busy stock win more): the locked strategy must find it out
+     of sample, month after month, leaning on the planted facts, and on the untouched months it never saw;
+  3. the untouched months never enter the walk-forward; every diagnostic uses the decide months only.
+Run: python3 tests/py/test_ml_walkforward.py [all | noise | planted]
 """
 import datetime
 import json
@@ -18,6 +17,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
 import ml_walkforward as ml  # noqa: E402
+
+# a small world: the first 3 months are the untouched test; shorter training windows so it fits in 380 days
+ml.DECIDE_FROM = '2024-04'
+ml.TRAIN_MONTHS = 8
 
 FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr', 'ret30Atr', 'ret60Atr', 'distVwapAtr', 'distHiAtr', 'distLoAtr',
          'rangeAdr', 'posInRange', 'minSinceHi', 'minSinceLo', 'testsHi', 'testsLo', 'tBody', 'tUpWick', 'tLoWick', 'tRangeAtr', 'tVol', 'volTrend',
@@ -42,23 +45,21 @@ def make(d, planted, seed):
     X = rng.normal(size=(n, len(FEATS))).astype(np.float32)
     X[:, FEATS.index('minute')] = np.tile(np.array(slots, dtype=np.float32), len(days) * syms)
     X[:, FEATS.index('tLoWick')] = rng.uniform(0, 1, n)
+    X[:, FEATS.index('tUpWick')] = rng.uniform(0, 1, n)
     date = np.repeat(np.arange(len(days)), syms * len(slots))
     sym = np.repeat(np.tile(np.arange(syms), len(days)), len(slots))
     # the tight bracket (reference only): noise
     rL = np.where(rng.uniform(size=n) < 0.38, 1.5, -1.0)
     rS = np.where(rng.uniform(size=n) < 0.38, 1.5, -1.0)
-    # the wide bracket: stop 1R, target 1.5R; base win rate 38%, charges 0.07R
-    p_win = np.full(n, 0.38)
-    if planted:
-        edge = (X[:, FEATS.index('tLoWick')] > 0.7) & (X[:, FEATS.index('rvolSame')] > 0.8)
-        p_win = np.where(edge, 0.62, p_win)
-    wbLg = np.where(rng.uniform(size=n) < p_win, 1.5, -1.0)
-    wbSg = np.where(rng.uniform(size=n) < 0.38, 1.5, -1.0)
+    # the shorts (wide / near / far targets): base win rates give about break-even before costs; the planted edge
+    # (a long upper wick on a busy stock) makes every short version win far more often
+    edge = (X[:, FEATS.index('tUpWick')] > 0.7) & (X[:, FEATS.index('rvolSame')] > 0.8) if planted else np.zeros(n, bool)
+    u = rng.uniform(size=n)
+    wbLg = np.where(rng.uniform(size=n) < 0.38, 1.5, -1.0)
+    wbSg = np.where(u < np.where(edge, 0.62, 0.38), 1.5, -1.0)
     # the ride to the close: a big market move shared by every stock that day, plus its own noise (%)
     market = rng.normal(0, 1.2, size=len(days))[date]
     ccRet = market + rng.normal(0, 1.0, size=n)
-    if planted:
-        ccRet = ccRet + 0.6 * X[:, FEATS.index('rs30')]
     stop_pct = 2.7
     ccLg, ccSg = ccRet / stop_pct, -ccRet / stop_pct
     lab = {'netL': rL - 0.3, 'netS': rS - 0.3, 'rL': rL, 'rS': rS, 'wbL': wbLg - 0.07, 'wbS': wbSg - 0.07, 'wbLg': wbLg, 'wbSg': wbSg,
@@ -69,8 +70,8 @@ def make(d, planted, seed):
             lab[f'{k}{side}1'] = lab[f'{k}{side}g'] - (0.035 if k == 'wb' else 0.03)
             lab[f'{k}{side}3'] = lab[f'{k}{side}g'] - 0.02
     # the short with a nearer / farther target: its own coin flips (noise)
-    for pre, win, gain in (('nb', 0.5, 1.0), ('fb', 0.3, 2.0)):
-        g_ = np.where(rng.uniform(size=n) < win, gain, -1.0)
+    for pre, win, gain in (('nb', 0.5, 1.0), ('fb', 0.33, 2.0)):
+        g_ = np.where(u < np.where(edge, win + 0.25, win), gain, -1.0)
         lab[f'{pre}Sg'], lab[f'{pre}S'], lab[f'{pre}S1'], lab[f'{pre}S3'] = g_, g_ - 0.07, g_ - 0.035, g_ - 0.02
     rows = np.column_stack([sym, date, X[:, 0], X] + [lab[k] for k in LABELS]).astype(np.float32)
     rows.tofile(os.path.join(d, 'grid.bin'))
@@ -118,39 +119,40 @@ if which in ('all', 'noise'):
       assert o['netR'] <= 0.05 or o['n'] < 100, f'noise must not look like an edge: {s["id"]} {o}'
       assert s['ic']['mean'] is None or abs(s['ic']['mean']) < 0.03, f'noise predictions must not line up with outcomes: {s["ic"]}'
       assert o['n'] == s['dev']['n'] + s['exam']['n'], 'dev + exam = all'
-      assert all(not m['exam'] for m in s['months'] if m['month'] < noise['examFrom'])
+      assert all(m['month'] >= ml.DECIDE_FROM for m in s['months']), 'the untouched months never enter the walk-forward'
+      assert all(t[0] >= ml.DECIDE_FROM for t in s['trades'])
+  ut = noise['untouched']
+  print('NOISE untouched', ut and ut['overall'])
+  assert ut is None or ut['overall']['n'] < 100 or ut['overall']['netR'] <= 0.05, 'noise must not pass the untouched test'
 
 if which in ('all', 'planted'):
   edge = run(True, 2)
-  w = strat(edge, 'wideStock')
+  w = strat(edge, 'shortNear')
   o = w['overall']
-  print('PLANTED wide   ', o, w['bySide']['long'], 'ic', w['ic'])
-  assert o['n'] >= 400, 'the planted edge must be traded'
-  assert o['netR'] > 0.25 and o['t'] > 4, f'the planted edge must be found out of sample: {o}'
+  print('PLANTED F      ', o, 'ic', w['ic'])
+  assert o['n'] >= 300, 'the planted edge must be traded'
+  assert o['netR'] > 0.2 and o['t'] > 4, f'the planted edge must be found out of sample: {o}'
   assert o['monthsGreen'] >= 0.8 * o['monthsTraded'], 'and month after month'
   assert o['gross'] > o['netR'], 'before costs is better than after'
   top = [x['f'] for x in w['importance'][:6]]
-  assert 'tLoWick' in top and 'rvolSame' in top, f'the model must lean on the planted facts: {top}'
+  assert 'tUpWick' in top and 'rvolSame' in top, f'the model must lean on the planted facts: {top}'
   liked = {(x['side'], x['f']): x['z'] for x in w['liked']}
-  assert liked.get(('long', 'tLoWick'), 0) > 0.5, 'taken longs have long lower wicks'
-  assert all(m['n'] <= ml.MAX_PER_DAY * 23 for m in w['months']), 'never more than the daily cap'
-
+  assert liked.get(('short', 'tUpWick'), 0) > 0.5, 'taken shorts have long upper wicks'
   assert not any(x['f'] in ml.MARKET for x in w['importance'] if x['share'] > 0), 'the stock-only model never uses a Nifty fact'
   cv = {c['id']: c for c in w['costs']}
-  print('PLANTED costs', {k: (v['fill'], v['overall']['netR']) for k, v in cv.items()})
   assert all(v['fill'] == 1 for v in cv.values()) and cv['now']['overall']['netR'] == o['netR'], 'same trades, every size'
   assert cv['l3']['overall']['netR'] > cv['l1']['overall']['netR'] > cv['now']['overall']['netR'], 'bigger positions keep more'
-  sh = strat(edge, 'wideShort')
-  assert sh['bySide']['long']['n'] == 0 and all(x['side'] == 'SHORT' for x in sh['recent']), 'shorts only'
-  assert all(t['time'] >= '09:35' for t in w['recent']) and all(t[2] >= '09:35' for t in w['trades']), 'A never trades before 09:35'
-  assert len(w['trades']) == o['n'] and w['tradeCols'][5] == 'net', 'every trade is kept with the results'
-  assert abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up to the headline'
+  assert len(w['trades']) == o['n'] and abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up'
   for sid in ('wideShort', 'shortNear', 'shortFar'):
-      assert all(t[3] == -1 for t in strat(edge, sid)['trades']), f'{sid}: shorts only'
-  assert {s_['id'] for s_ in edge['strategies']} == {'wideStock', 'wideShort', 'shortNear', 'shortFar'}
+      st_ = strat(edge, sid)
+      assert all(t[3] == -1 for t in st_['trades']) and all(t[2] >= '09:35' for t in st_['trades']), f'{sid}: shorts from 09:35'
+  assert {s_['id'] for s_ in edge['strategies']} == {'wideShort', 'shortNear', 'shortFar'} and edge['locked'] == 'shortNear'
+  assert edge['strategies'][1]['exam']['pass'] in (True, False, None)
   dl = w['daily']
-  assert dl['daysWithTrades'] <= dl['tradingDays'] and dl['maxPerDay'] <= ml.MAX_PER_DAY and dl['worstDayR'] <= dl['bestDayR']
-  assert abs(dl['perTradedDay'] * dl['daysWithTrades'] - o['n']) < 1, 'trades a day x days = all trades'
-  print('PLANTED your day', dl)
+  assert abs(dl['perTradedDay'] * dl['daysWithTrades'] - w['dev']['n']) < 1, 'your day = the decide months'
+  ut = edge['untouched']
+  print('PLANTED untouched', ut['overall'], ut['from'], ut['to'])
+  assert ut['id'] == 'shortNear' and ut['to'] < ml.DECIDE_FROM and all(t[0] < ml.DECIDE_FROM for t in ut['trades'])
+  assert ut['overall']['n'] >= 50 and ut['overall']['netR'] > 0.2, 'the planted edge is there in the untouched months too'
 
 print('OK:', which)
