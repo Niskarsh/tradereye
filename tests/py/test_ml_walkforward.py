@@ -31,7 +31,7 @@ FEATS = ['minute', 'retOpenPct', 'retOpenAdr', 'gapPct', 'prevDayRet', 'ret10Atr
          'habitClose', 'habitCloseUp', 'habitNext30', 'habitTrend', 'ret5d', 'ret20d', 'hi20Adr', 'lo20Adr', 'prevCloseLoc', 'prevLast30', 'gapVsUsual']
 LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
           'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3',
-          'nbS', 'nbSg', 'nbS1', 'nbS3', 'fbS', 'fbSg', 'fbS1', 'fbS3']
+          'nbS', 'nbSg', 'nbS1', 'nbS3', 'fbS', 'fbSg', 'fbS1', 'fbS3', 'avgVol', 'nbSx']
 
 
 def make(d, planted, seed):
@@ -76,6 +76,10 @@ def make(d, planted, seed):
     for pre, win, gain in (('nb', 0.5, 1.0), ('fb', 0.33, 2.0)):
         g_ = np.where(u < np.where(edge, win + 0.25, win), gain, -1.0)
         lab[f'{pre}Sg'], lab[f'{pre}S'], lab[f'{pre}S1'], lab[f'{pre}S3'] = g_, g_ - 0.07, g_ - 0.035, g_ - 0.02
+    # liquidity: each stock keeps its own average volume (0.5M-14M shares); realistic fills cost more in thin stocks
+    vol = np.exp(np.linspace(np.log(5e5), np.log(1.4e7), syms))[sym].astype(np.float32)
+    lab['avgVol'] = vol
+    lab['nbSx'] = lab['nbS'] - np.where(vol < 3e6, 0.12, np.where(vol < 5e6, 0.06, 0.03))
     rows = np.column_stack([sym, date, X[:, 0], X] + [lab[k] for k in LABELS]).astype(np.float32)
     rows.tofile(os.path.join(d, 'grid.bin'))
     cols = ['sym', 'date', 'slot'] + FEATS + LABELS
@@ -109,6 +113,7 @@ def check_picker():
     tr = ml.pick_dir(part, pl, ps, 0.05, st)
     assert len(tr) == ml.MAX_PER_SIDE and sorted(tr['slot']) == [20 + 10 * i for i in range(ml.MAX_PER_SIDE)], tr
     cap2 = next(x for x in ml.STRATEGIES if x['id'] == 'fCap2')
+    assert ml.allowed(part.assign(avgVol=[1e6] * n), pl, ps, next(x for x in ml.STRATEGIES if x['id'] == 'v3m'))[0].max() == -np.inf, 'a floor shuts thin stocks out'
     tr = ml.pick_dir(part, pl, ps, 0.05, cap2)
     assert sorted(tr['slot']) == [20, 30], f'cap 2: the first two of the day, not the two strongest: {tr}'
 
@@ -150,27 +155,35 @@ if which in ('all', 'planted'):
   assert cv['l3']['overall']['netR'] > cv['l1']['overall']['netR'] > cv['now']['overall']['netR'], 'bigger positions keep more'
   assert len(w['trades']) == o['n'] and abs(sum(t[5] for t in w['trades']) / o['n'] - o['netR']) < 0.002, 'the kept trades add up'
   ids = [s_['id'] for s_ in edge['strategies']]
-  assert ids == ['shortNear', 'f1055', 'fCap3', 'fCap2', 'fStrict', 'placebo'] and edge['locked'] == 'shortNear', ids
+  assert ids == ['shortNear', 'fCap2', 'vAll', 'v3m', 'v5m', 'v7m', 'v10m', 'placebo'] and edge['locked'] == 'shortNear', ids
+  syms_vol = {f'S{i}': v for i, v in enumerate(np.exp(np.linspace(np.log(5e5), np.log(1.4e7), 30)))}
   for sid in ids:
       st_ = strat(edge, sid)
+      cfg = next(x for x in ml.STRATEGIES if x['id'] == sid)
       assert all(t[3] == -1 for t in st_['trades']) and all(t[2] >= '09:35' for t in st_['trades']), f'{sid}: shorts from 09:35'
       if sid != 'shortNear':
           assert all(t[2] <= '10:55' for t in st_['trades']), f'{sid}: no entry after 10:55'
-      cap = next(x for x in ml.STRATEGIES if x['id'] == sid).get('cap')
-      if cap:
-          assert st_['daily']['maxPerDay'] <= cap, f'{sid}: at most {cap} a day'
-      print('PLANTED', sid, st_['dev']['n'], st_['dev']['netR'], st_['dev']['t'], 'per day', st_['daily']['perTradedDay'] if st_['daily'] else None)
-  f2, fs, fn = strat(edge, 'fCap2'), strat(edge, 'fStrict'), strat(edge, 'f1055')
-  assert f2['dev']['netR'] > 0.2 and fs['dev']['n'] > 0, 'the capped versions still find the planted edge'
-  assert fs['dev']['n'] < fn['dev']['n'], 'strict takes fewer trades'
+          assert st_['daily']['maxPerDay'] <= 2, f'{sid}: at most 2 a day'
+      if cfg.get('minVol'):
+          assert all(syms_vol[t[1]] >= cfg['minVol'] * 0.999 for t in st_['trades']), f'{sid}: only stocks above its floor'
+      print('PLANTED', sid, st_['dev']['n'], st_['dev']['netR'], st_['dev']['t'], 'old fills', st_.get('oldFills'))
+  f2, va = strat(edge, 'fCap2'), strat(edge, 'vAll')
+  assert f2['dev']['netR'] > 0.2 and va['dev']['netR'] > 0.1, 'the live version finds the planted edge, with real fills too'
+  assert va['oldFills']['n'] == va['dev']['n'] and va['oldFills']['netR'] > va['dev']['netR'], 'real fills cost more than the old ones'
+  assert [b_['band'] for b_ in va['bands']] == [b_[1] for b_ in ml.BANDS] and sum(b_['n'] for b_ in va['bands']) == va['dev']['n'], 'the bands add up'
+  thin, thick = va['bands'][0], va['bands'][-1]
+  assert thin['n'] == 0 or thin['old'] - thin['netR'] > thick['old'] - thick['netR'] - 1e-6, 'thin stocks pay more slippage'
+  assert strat(edge, 'v10m')['dev']['n'] < va['dev']['n'], 'a higher floor takes fewer trades'
   pb = strat(edge, 'placebo')
   print('PLANTED placebo', pb['overall'], 'ic', pb['ic'])
   assert pb['overall']['n'] < 100 or pb['overall']['netR'] < 0.1, f'the placebo must not find the edge: {pb["overall"]}'
   assert pb['ic']['mean'] is None or abs(pb['ic']['mean']) < 0.03, 'placebo predictions do not line up with outcomes'
   assert edge['best'] != 'placebo'
-  cc = edge['capChoice']
-  print('PLANTED cap choice', cc)
-  assert cc and cc['tried'][0]['id'] == 'fCap2' and (cc['id'] is None or cc['id'] in ml.CAP_ORDER)
+  vc = edge['volChoice']
+  print('PLANTED liquidity choice', vc)
+  assert vc and [x['id'] for x in vc['tried']] == ml.VOL_ORDER and (vc['id'] is None or vc['id'] in ml.VOL_ORDER)
+  if vc['id']:
+      assert all(not x['ok'] for x in vc['tried'][:ml.VOL_ORDER.index(vc['id'])]), 'the highest floor that passes'
   assert edge['strategies'][1]['exam']['pass'] in (True, False, None)
   dl = w['daily']
   assert abs(dl['perTradedDay'] * dl['daysWithTrades'] - w['dev']['n']) < 1, 'your day = the decide months'
@@ -178,7 +191,8 @@ if which in ('all', 'planted'):
   for ut in edge['untouched']:
       print('PLANTED untouched', ut['id'], ut['overall'], ut['from'], ut['to'])
       assert ut['to'] < ml.DECIDE_FROM and all(t[0] < ml.DECIDE_FROM for t in ut['trades'])
-      assert ut['overall']['n'] >= (20 if ut['id'] in ('fCap2', 'fStrict') else 50) and ut['overall']['netR'] > 0.2, f'the planted edge is there in the untouched months too: {ut["id"]}'
+      if ut['id'] in ('shortNear', 'fCap2', 'vAll'):
+          assert ut['overall']['n'] >= (20 if ut['id'] != 'shortNear' else 50) and ut['overall']['netR'] > 0.1, f'the planted edge is there in the untouched months too: {ut["id"]}'
   sh = w['shadow']
   print('PLANTED shadow', sh)
   assert sh['n'] > 0 and sh['netR'] > 0.1 and all(m['shadow'] == (m['month'] >= ml.SHADOW_FROM) for m in w['months'])

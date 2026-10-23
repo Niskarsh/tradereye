@@ -89,3 +89,14 @@ written.
    that keeps +0.05R a trade with t ≥ 2.5 on the decide months. Placebo: F's pipeline trained on outcomes shuffled
    among the stocks of the same month and minute, traded on the real outcomes; it must show no edge. Every version
    gets the 5 training draws (`noiseAll`) and the untouched months (a second look for F, not a clean test).
+11. **Real fills by liquidity, the next step on F (not a restart)** (this version): F as Algo Live trades it (short,
+   09:35–10:55, first 2 a day) keeps its models, facts and bar recipe; nothing is re-tuned. The dataset gains two
+   columns no model reads (`avgVol`, the 10-day average volume; `nbSx`, F's short filled by liquidity, `LIQ_BANDS` in
+   lib/ml/grid.ts): 5 lakh–3M shares 3 ticks worse in and out with the target needing a 3-tick trade-through and stops
+   slipping 0.20% of price; 3–5M 2 ticks / 0.10%; 5–7M 1 tick / 0.06%; 7–10M 1 tick / 0.05%; 10M+ 1 tick / 0.04%; a stop
+   hit in a fast 10-min candle slips at least 10% of its range. Versions: F as live with the old fills, and with real
+   fills at floors 5 lakh (all), 3M, 5M, 7M, 10M (`VOL_ORDER`); F's trades split by band, real vs old fills. Rule fixed
+   before the run (`VOL_RULE`): the highest floor with +0.04R a trade, t ≥ 2.0 and 150+ trades on the decide months.
+   Placebo, the 5 training draws and the untouched months (a second look) as in iteration 10. To be calibrated later
+   with Algo Live's own fills.
+

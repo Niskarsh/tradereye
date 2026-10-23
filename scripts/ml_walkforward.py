@@ -24,20 +24,22 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-ITERATION = 10
+ITERATION = 11
 CHANGES = [
-    'F stays locked and unchanged (B dropped: a hair worse on the decide months; adding to winners did not confirm on the untouched months, +0.04R at t 0.8).',
-    'Daily cap and entry window: four versions of F that share F\'s own models (so training luck cannot separate them) and differ only in which trades they take, all with no new entry after 10:55: as now (up to 4 a day), first come first served 3 a day, first come first served 2 a day, and strict (each month the bar is set on the 3 months before so that about 2 setups a day clear it, never more than 3).',
-    'Rule fixed before this run: take the version with the smallest daily risk (cap 2, then strict, then cap 3, then as now) that keeps at least +0.05R a trade with t of at least 2.5 on the decide months.',
-    'Placebo: the same pipeline trained on outcomes shuffled among the stocks of the same month and minute. It must show no edge; if it does, something leaks.',
-    'Every version also gets the untouched months (a second look for F there, not a clean test) and the five training draws.',
+    'Next step on the same strategy, not a restart: F as Algo Live trades it (short, 09:35-10:55, first 2 a day) keeps its models, facts and bar recipe unchanged. Its trades are re-scored first, then the universe is refined by liquidity.',
+    'Realistic fills by liquidity (10-day average volume): 5 lakh-3M shares 3 ticks worse on entry and on the 15:15 exit, the target must trade through by 3 ticks, stops slip 0.20% of price; 3-5M 2 ticks / 0.10%; 5-7M 1 tick / 0.06%; 7-10M 1 tick / 0.05%; 10M+ 1 tick / 0.04%. A stop hit inside a fast candle slips at least 10% of that 10-min candle\'s range. Dhan\'s charges as before.',
+    'Five liquidity floors, each with the realistic fills: all (5 lakh+, the universe as now), 3M+, 5M+, 7M+, 10M+. Same models and predictions; only which stocks may be traded differs. Plus F as now (old fills) for comparison, and F\'s trades split by liquidity band.',
+    'Rule fixed before this run: take the highest floor that keeps at least +0.04R a trade after realistic fills, t of at least 2.0 and 150 trades on the decide months; if none does, F is not trustworthy at real fills.',
+    'Placebo kept (must show no edge); every floor gets the untouched months (a second look, not a clean test) and the five training draws.',
 ]
 DECIDE_FROM = '2022-10'  # months before this are the untouched test: never in any walk-forward, diagnostic or decision
 LOCKED = 'shortNear'     # the strategy locked for the noise check
-UNTOUCHED = ['shortNear', 'f1055', 'fCap3', 'fCap2', 'fStrict']  # tested on the untouched months
 SHADOW_FROM = '2026-11'  # months from here did not exist when iterations 1-9 were written: the forward test
-CAP_ORDER = ['fCap2', 'fStrict', 'fCap3', 'f1055']  # smallest daily risk first (the rule fixed before iteration 10)
-CAP_RULE = {'netR': 0.05, 't': 2.5}
+# (iteration 11) liquidity floors, highest first, and the rule fixed before the run
+VOL_ORDER = ['v10m', 'v7m', 'v5m', 'v3m', 'vAll']
+VOL_RULE = {'netR': 0.04, 't': 2.0, 'n': 150}
+BANDS = [(0, '5 lakh-3M'), (3e6, '3M-5M'), (5e6, '5M-7M'), (7e6, '7M-10M'), (10e6, '10M+')]
+UNTOUCHED = ['shortNear', 'fCap2'] + VOL_ORDER  # tested on the untouched months
 TOP_QUANTS = [0.99, 0.995, 0.997, 0.998, 0.999, 0.9993, 0.9995, 0.9997, 0.9998, 0.9999]
 MARGIN = 5               # Dhan's intraday leverage
 SHARD = 'main'           # 'main' (everything) or 'seed2' / 'seed3' (the locked strategy again, other random draws)
@@ -63,19 +65,21 @@ MAX_FIT_ROWS = 400_000  # per ensemble member (each sees its own sample)
 _WIDE = {'kind': 'dir', 'L': 'wbL', 'S': 'wbS', 'Lg': 'wbLg', 'Sg': 'wbSg', 'L1': 'wbL1', 'S1': 'wbS1', 'L3': 'wbL3', 'S3': 'wbS3', 'noMarket': True}
 _WDESC = 'stop ½ of its usual daily range away, target ¾ of it, out by 15:15, picked from the stock\'s own facts and habits (no Nifty)'
 _F = {**_WIDE, 'only': -1, 'firstSlot': 20, 'targetAdr': 0.5, 'S': 'nbS', 'Sg': 'nbSg', 'S1': 'nbS1', 'S3': 'nbS3'}
+_F2 = {**_F, 'lastSlot': 100, 'cap': 2}
+_REAL = {**_F2, 'S': 'nbSx', 'yS': 'nbS'}  # traded on realistic fills; the model still learns F's own outcome (unchanged)
 STRATEGIES = [
     {**_F, 'id': 'shortNear', 'name': 'F. Shorts, target ½ range (locked)',
      'desc': 'Short only, from 09:35: stop ½ of its usual daily range away, target ½ of it, out by 15:15. Locked after iteration 7.'},
-    {**_F, 'id': 'f1055', 'name': 'F to 10:55, up to 4 a day', 'lastSlot': 100,
-     'desc': 'F with no new entry after 10:55 (open trades run to target, stop or 15:15); up to 4 a day as now.'},
-    {**_F, 'id': 'fCap3', 'name': 'F to 10:55, first 3 a day', 'lastSlot': 100, 'cap': 3,
-     'desc': 'F to 10:55, first come first served, at most 3 trades a day.'},
-    {**_F, 'id': 'fCap2', 'name': 'F to 10:55, first 2 a day', 'lastSlot': 100, 'cap': 2,
-     'desc': 'F to 10:55, first come first served, at most 2 trades a day.'},
-    {**_F, 'id': 'fStrict', 'name': 'F to 10:55, strict (~2 a day, max 3)', 'lastSlot': 100, 'cap': 3, 'perDay': 2.0,
-     'desc': 'F to 10:55 with a higher bar: each month the bar is set on the 3 months before so that at most about 2 setups a day clear it (never more than 3 taken).'},
-    {**_F, 'id': 'placebo', 'name': 'Placebo (shuffled outcomes)', 'lastSlot': 100, 'yS': 'nbS_shuf',
-     'desc': 'F to 10:55, but its models learned from outcomes shuffled among the stocks of the same month and minute (the facts carry no information). Traded on the real outcomes: it must show no edge.'},
+    {**_F2, 'id': 'fCap2', 'name': 'F as live (old fills)',
+     'desc': 'F to 10:55, first come first served, at most 2 trades a day: what Algo Live trades. Old fills (1 tick), for comparison.'},
+    {**_REAL, 'id': 'vAll', 'name': 'F as live, real fills, all (5 lakh+)', 'bands': True,
+     'desc': 'F as live, every stock in the universe as now (5 lakh+ shares a day), with fills by liquidity.'},
+    {**_REAL, 'id': 'v3m', 'name': 'Real fills, 3M+', 'minVol': 3e6, 'desc': 'F as live, only stocks with 3M+ shares a day, fills by liquidity.'},
+    {**_REAL, 'id': 'v5m', 'name': 'Real fills, 5M+', 'minVol': 5e6, 'desc': 'F as live, only stocks with 5M+ shares a day, fills by liquidity.'},
+    {**_REAL, 'id': 'v7m', 'name': 'Real fills, 7M+', 'minVol': 7e6, 'desc': 'F as live, only stocks with 7M+ shares a day, fills by liquidity.'},
+    {**_REAL, 'id': 'v10m', 'name': 'Real fills, 10M+', 'minVol': 1e7, 'desc': 'F as live, only stocks with 10M+ shares a day, fills by liquidity.'},
+    {**_F2, 'id': 'placebo', 'name': 'Placebo (shuffled outcomes)', 'yS': 'nbS_shuf',
+     'desc': 'F as live, but its models learned from outcomes shuffled among the stocks of the same month and minute (the facts carry no information). Traded on the real outcomes: it must show no edge.'},
 ]
 COSTS = [('now', 'Market orders, ₹300 risk', 'net'),
          ('l1', 'Market orders, ~₹1 lakh position', 'p1'),
@@ -167,6 +171,10 @@ def allowed(part, pl, ps, st):
         late = part['slot'].values > st['lastSlot']
         pl[late] = -np.inf
         ps[late] = -np.inf
+    if st.get('minVol') and 'avgVol' in part.columns:
+        thin = ~(part['avgVol'].values >= st['minVol'])
+        pl[thin] = -np.inf
+        ps[thin] = -np.inf
     return pl, ps
 
 
@@ -485,13 +493,19 @@ def main(d):
         imp = g / g.sum() if g.sum() else g
         top = sorted(({'f': f, 'label': labels.get(f, f), 'share': round(float(v), 4)} for f, v in zip(feats, imp)), key=lambda x: -x['share'])[:15]
         recent = trades.tail(40)
+        # (iteration 11) the same trades at the old fills, and (for 'bands') where the result comes from
+        old_fills = None
+        if st['S'] == 'nbSx' and len(dev_t):
+            o_ = dev_t.join(_lookup(df), on=['day', 'sym', 'slot'])['nbS'].astype(float)
+            old_fills = stats(o_)
+        bands = by_band(df, dev_t, st['S']) if st.get('bands') else None
         out.append({
             'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'desc': st['desc'],
             'baseline': {'long': round(float(np.nanmean(ref[st['L']])), 3), 'short': round(float(np.nanmean(ref[st['S']])), 3),
                          'longGross': round(float(np.nanmean(ref[st['Lg']])), 3), 'shortGross': round(float(np.nanmean(ref[st['Sg']])), 3)},
             'targetAdr': st.get('targetAdr'),
             'overall': overall, 'dev': dev, 'exam': exam, 'shadow': shadow, 'money': money_of(dev_t, dev, costs, ref, st), 'ic': ic, 'costs': costs, 'daily': daily, 'bySide': by_side, 'byHour': by_hour, 'months': mo,
-            'importance': top, 'liked': liked[:20],
+            'importance': top, 'liked': liked[:20], 'oldFills': old_fills, 'bands': bands, 'minVol': st.get('minVol'),
             'recent': [{'day': x.day, 'sym': syms[int(x.sym)], 'time': f'{(555 + int(x.slot)) // 60:02d}:{(555 + int(x.slot)) % 60:02d}',
                         'side': 'LONG' if x.side == 1 else 'SHORT', 'pred': round(float(x.pred), 3), 'net': round(float(x.net), 2)}
                        for x in recent.itertuples()],
@@ -514,26 +528,56 @@ def main(d):
                   'neutralTimes': [f'{(555 + s) // 60:02d}:{(555 + s) % 60:02d}' for s in NEUTRAL_SLOTS], 'neutralK': NEUTRAL_K},
         'baselineTight': {'long': round(float(np.nanmean(ref['netL'])), 3), 'short': round(float(np.nanmean(ref['netS'])), 3)},
         'best': best['id'], 'locked': LOCKED, 'overall': best['overall'], 'shard': SHARD, 'seedOffset': SEED_OFF,
-        'decideFrom': DECIDE_FROM, 'shadowFrom': SHADOW_FROM, 'untouched': untouched, 'capChoice': cap_choice(out),
+        'decideFrom': DECIDE_FROM, 'shadowFrom': SHADOW_FROM, 'untouched': untouched, 'volChoice': vol_choice(out),
         'strategies': out,
     }
     json.dump(result, open(os.path.join(d, 'ml.json' if SHARD == 'main' else f'ml-{SHARD}.json'), 'w'))
 
 
-def cap_choice(out):
-    """the rule fixed before iteration 10: the smallest daily risk that keeps CAP_RULE on the decide months"""
+def vol_choice(out):
+    """the rule fixed before iteration 11: the highest liquidity floor that keeps VOL_RULE on the decide months"""
     by = {s_['id']: s_ for s_ in out}
     tried = []
-    for sid in CAP_ORDER:
+    pick = None
+    for sid in VOL_ORDER:
         s_ = by.get(sid)
         if not s_:
             continue
         d_ = s_['dev']
-        ok = d_['n'] >= 100 and d_['netR'] >= CAP_RULE['netR'] and d_['t'] >= CAP_RULE['t']
-        tried.append({'id': sid, 'name': s_['name'], 'netR': d_['netR'], 't': d_['t'], 'n': d_['n'], 'ok': bool(ok)})
-        if ok:
-            return {'id': sid, 'name': s_['name'], 'rule': CAP_RULE, 'order': CAP_ORDER, 'tried': tried}
-    return {'id': None, 'name': None, 'rule': CAP_RULE, 'order': CAP_ORDER, 'tried': tried} if tried else None
+        ok = d_['n'] >= VOL_RULE['n'] and d_['netR'] >= VOL_RULE['netR'] and d_['t'] >= VOL_RULE['t']
+        tried.append({'id': sid, 'name': s_['name'], 'netR': d_['netR'], 't': d_['t'], 'n': d_['n'],
+                      'perMonth': (s_.get('money') or {}).get('tradesPerMonth'), 'ok': bool(ok)})
+        if ok and pick is None:
+            pick = s_
+    if not tried:
+        return None
+    return {'id': pick['id'] if pick else None, 'name': pick['name'] if pick else None, 'rule': VOL_RULE, 'order': VOL_ORDER, 'tried': tried}
+
+
+_LOOKUP = {}
+
+
+def _lookup(df):
+    """avgVol and the old-fill result of every row, by (day, sym, slot), built once"""
+    if 'k' not in _LOOKUP:
+        _LOOKUP['k'] = df.set_index(['day', 'sym', 'slot'])[['avgVol', 'nbS']]
+    return _LOOKUP['k']
+
+
+def by_band(df, trades, real_col):
+    """a strategy's decide-month trades split by liquidity band, with the realistic and the old fills side by side"""
+    if not len(trades) or 'avgVol' not in df.columns:
+        return []
+    j = trades.join(_lookup(df), on=['day', 'sym', 'slot'])
+    out = []
+    edges = [b[0] for b in BANDS] + [float('inf')]
+    for i, (lo, name) in enumerate(BANDS):
+        x = j[(j['avgVol'] >= lo) & (j['avgVol'] < edges[i + 1])]
+        s_ = stats(x['net'].astype(float))
+        s_['old'] = stats(x['nbS'].astype(float))['netR'] if len(x) else 0
+        s_['band'] = name
+        out.append(s_)
+    return out
 
 
 def money_of(dev_t, dev, costs, ref, st):
@@ -614,5 +658,5 @@ if __name__ == '__main__':
     SHARD = sys.argv[2] if len(sys.argv) > 2 else 'main'
     if SHARD != 'main':
         SEED_OFF = int(SHARD.replace('seed', '') or 0)
-        STRATEGIES = [s_ for s_ in STRATEGIES if s_['id'] == LOCKED or s_['id'] in CAP_ORDER]  # F and its capped versions (one shared model)
+        STRATEGIES = [s_ for s_ in STRATEGIES if s_['id'] in (LOCKED, 'fCap2') or s_['id'] in VOL_ORDER]  # F and its versions (one shared model)
     main(sys.argv[1] if len(sys.argv) > 1 else 'ml-data')

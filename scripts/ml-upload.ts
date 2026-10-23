@@ -64,6 +64,9 @@ async function main() {
     message = best
       ? `Algo Lab iteration ${ml.iteration}: best on the decide months is ${best.name}, ${r(best.dev.netR)} a trade after costs`
       : `Algo Lab: done`;
+    // iteration 11: the liquidity floor picked by the rule fixed before the run (real fills)
+    const vc = (ml as { volChoice?: { id: string | null; name: string | null } | null }).volChoice;
+    if (vc) message += vc.id ? `; liquidity pick at real fills: ${vc.name}` : '; no liquidity floor passes at real fills';
   } else message = 'Backtest done; the Algo Lab model step failed (see the GitHub run log)';
   if (changed) await putJson(store, ML_LEDGER_KEY, ledger.sort((a, b) => a.iteration - b.iteration || a.createdAt - b.createdAt));
   await putJson(store, STATUS_KEY, { runId, state: 'done', startedAt: prev?.startedAt ?? Date.now(), updatedAt: Date.now(), finishedAt: Date.now(), message } satisfies RunStatus);
