@@ -94,7 +94,29 @@ export const ML_KEYS = ML_FEATURES.map((f) => f[0]);
  */
 export const ML_LABELS = ['netL', 'netS', 'rL', 'rS', 'wbL', 'wbS', 'wbLg', 'wbSg', 'ccL', 'ccS', 'ccLg', 'ccSg', 'ccRet',
   'wbL1', 'wbS1', 'wbL3', 'wbS3', 'ccL1', 'ccS1', 'ccL3', 'ccS3',
-  'nbS', 'nbSg', 'nbS1', 'nbS3', 'fbS', 'fbSg', 'fbS1', 'fbS3'] as const;
+  'nbS', 'nbSg', 'nbS1', 'nbS3', 'fbS', 'fbSg', 'fbS1', 'fbS3', 'avgVol', 'nbSx'] as const;
+/**
+ * (iteration 11) liquidity and realistic fills. Not facts (no model reads them):
+ *   avgVol  the stock's 10-day average daily volume (shares), the screener's own measure, known before the open
+ *   nbSx    F's short (stop ½ the usual daily range, target ½ of it, out by 15:15) after charges at ₹300 risk, filled the
+ *           way a stock of that liquidity really fills (LIQ_BANDS): a worse entry, a target that must trade through by
+ *           more ticks, a stop that slips by a share of the price or of a fast candle's range, a worse exit at 15:15
+ */
+export interface LiqBand { min: number; ticks: number; stopPct: number }
+export const LIQ_BANDS: LiqBand[] = [
+  { min: 0, ticks: 3, stopPct: 0.2 },          // 5 lakh - 3M shares a day
+  { min: 3_000_000, ticks: 2, stopPct: 0.1 },  // 3M - 5M
+  { min: 5_000_000, ticks: 1, stopPct: 0.06 }, // 5M - 7M
+  { min: 7_000_000, ticks: 1, stopPct: 0.05 }, // 7M - 10M
+  { min: 10_000_000, ticks: 1, stopPct: 0.04 }, // 10M+
+];
+/** a stop hit inside a fast 10-min candle slips at least this share of that candle's range */
+export const FAST_STOP_FRAC = 0.1;
+export function liqBand(avgVol: number): LiqBand {
+  let b = LIQ_BANDS[0];
+  for (const x of LIQ_BANDS) if (avgVol >= x.min) b = x;
+  return b;
+}
 /**
  * (iteration 7) the short with the same stop (½ the usual daily range) but a different target, out by 15:15:
  *   nbS...  a nearer target (½ the usual daily range)       fbS...  a farther target (1× the usual daily range)
@@ -130,7 +152,9 @@ export const LATE_END = 360;
  * Returns R after charges and before.
  */
 export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d: 1 | -1, close: number, stopPx: number, target: number | undefined, end: number, risk: number,
-  ex: { limit?: boolean; notional?: number; slip?: number } = {}): { net: number; r: number } {
+  ex: { limit?: boolean; notional?: number; slip?: number; through?: number; stopPct?: number; fast?: number; outSlip?: number } = {}): { net: number; r: number } {
+  // (iteration 11) realistic fills; the defaults are the fills every earlier iteration used
+  const through = TICK * (ex.through ?? 1), outSlip = TICK * (ex.outSlip ?? 1);
   // a limit order rests at the close: filled (at the close) in the first minute that trades through it by a tick
   let from = k;
   if (ex.limit) {
@@ -142,16 +166,30 @@ export function ride(day: NonNullable<ReturnType<typeof toSlots>>, k: number, d:
   let stopAt = -1, targetAt = -1;
   for (let s = from; s < end; s++) {
     if (stopAt < 0 && (d === 1 ? day.l[s] <= stopPx : day.h[s] >= stopPx)) stopAt = s;
-    if (target !== undefined && targetAt < 0 && (d === 1 ? day.h[s] >= target + TICK : day.l[s] <= target - TICK)) targetAt = s;
+    if (target !== undefined && targetAt < 0 && (d === 1 ? day.h[s] >= target + through : day.l[s] <= target - through)) targetAt = s;
     if (stopAt >= 0 && (targetAt >= 0 || target === undefined)) break;
   }
   const win = target !== undefined && targetAt >= 0 && (stopAt < 0 || targetAt < stopAt);
-  const exit = win ? target! : stopAt >= 0 ? stopPx - d * TICK : day.c[end - 1] - d * TICK;
+  const exit = win ? target! : stopAt >= 0 ? stopPx - d * stopSlip(day, stopAt, stopPx, ex.stopPct, ex.fast) : day.c[end - 1] - d * outSlip;
   const dist = (entry - stopPx) * d;
   if (!(dist > 0)) return { net: NaN, r: NaN };
   const qty = ex.notional ? Math.max(1, Math.floor(ex.notional / entry)) : sizeFor(risk, dist);
   const r = ((exit - entry) * d) / dist;
   return { net: Math.round((r - roundTripCharges(qty, entry, exit, d) / (qty * dist)) * 1000) / 1000, r: Math.round(r * 1000) / 1000 };
+}
+
+/** how far worse than the stop price a stop fills: 1 tick, or (iteration 11) a share of the price or of the range of
+ * the 10-min candle it was hit in, whichever is bigger, rounded up to the tick */
+export function stopSlip(day: NonNullable<ReturnType<typeof toSlots>>, s: number, stopPx: number, stopPct?: number, fast?: number): number {
+  let slip = TICK;
+  if (stopPct) slip = Math.max(slip, (stopPct / 100) * stopPx);
+  if (fast) {
+    const b = s - (s % 10);
+    let hi = -Infinity, lo = Infinity;
+    for (let j = b; j < Math.min(b + 10, day.n); j++) { hi = Math.max(hi, day.h[j]); lo = Math.min(lo, day.l[j]); }
+    if (hi > lo) slip = Math.max(slip, fast * (hi - lo));
+  }
+  return Math.ceil(slip / TICK - 1e-9) * TICK;
 }
 
 export interface GridInput { date: string; history: Session[]; day: Bar[]; nifty: Bar[]; daily: Candles; riskInr?: number; pocRows?: number }
@@ -169,6 +207,7 @@ export function gridDay(inp: GridInput): number[][] {
   for (const b of nMinuteBars(hist, 5)) ema5.push(b.c);
   if (!hasSuspectGap(daily)) for (const c of daily.c) ema1d.push(c);
   const adr = daily.h.slice(-10).reduce((a, h, i) => a + h - daily.l[nd - 10 + i], 0) / 10;
+  const avgVol = daily.v.slice(-10).reduce((a, v) => a + v, 0) / 10, band = liqBand(avgVol);
   const prevClose = daily.c[nd - 1], pdh = daily.h[nd - 1], pdl = daily.l[nd - 1];
   const prevDayRet = (daily.c[nd - 1] / daily.c[nd - 2] - 1) * 100;
   const open = day.o[0], nOpen = nifty.o[0];
@@ -284,10 +323,13 @@ export function gridDay(inp: GridInput): number[][] {
       return [a.net, a.r, ride(day, k, -1, price, stop, tgt, LATE_END, risk, { slip, notional: MID_NOTIONAL }).net,
         ride(day, k, -1, price, stop, tgt, LATE_END, risk, { slip, notional: BIG_NOTIONAL }).net];
     };
+    // (iteration 11) F's short, filled as a stock of this liquidity really fills
+    const realShort = () => ride(day, k, -1, price, onTick(price + WIDE_STOP_ADR * adr, 1), onTick(price - NEAR_TARGET_ADR * adr, -1), LATE_END, risk,
+      { slip: Math.max(slip, band.ticks), through: band.ticks, stopPct: band.stopPct, fast: FAST_STOP_FRAC, outSlip: band.ticks }).net;
     const [wLl, cLl] = cheap(1, false), [wSl, cSl] = cheap(-1, false), [wLb, cLb] = cheap(1, true), [wSb, cSb] = cheap(-1, true);
     out.push([k, ...ML_KEYS.map((f) => (Number.isFinite(x[f]) ? x[f] : NaN)), lg.net, sh.net, lg.r, sh.r,
       wl.net, ws.net, wl.r, ws.r, cl.net, cs.net, cl.r, cs.r, pct(day.c[LATE_END - 1], price),
-      wLl, wSl, wLb, wSb, cLl, cSl, cLb, cSb, ...shortTo(NEAR_TARGET_ADR), ...shortTo(FAR_TARGET_ADR)]);
+      wLl, wSl, wLb, wSb, cLl, cSl, cLb, cSb, ...shortTo(NEAR_TARGET_ADR), ...shortTo(FAR_TARGET_ADR), avgVol, realShort()]);
   }
   return out;
 }

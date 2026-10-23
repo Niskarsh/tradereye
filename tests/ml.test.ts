@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
-import { BIG_NOTIONAL, MID_NOTIONAL, NEAR_TARGET_ADR, FAR_TARGET_ADR, OPEN_SLIP_TICKS, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR } from '../lib/ml/grid';
+import { BIG_NOTIONAL, MID_NOTIONAL, NEAR_TARGET_ADR, FAR_TARGET_ADR, OPEN_SLIP_TICKS, CLOSE_STOP_ADR, gridDay, LATE_END, ML_COLS, ML_KEYS, ML_WIDTH, STOP_ATR, TARGET_ATR, WIDE_STOP_ADR, WIDE_TARGET_ADR, LIQ_BANDS, FAST_STOP_FRAC, liqBand } from '../lib/ml/grid';
 import { roundTripCharges, sizeFor } from '../lib/setups/costs';
 import { TICK, onTick } from '../lib/study/mine';
 
@@ -167,6 +167,50 @@ test('grid: the short with a nearer / farther target matches an independent repl
     }
   }
   assert.ok(n > 300);
+});
+
+test('grid (iteration 11): F\'s short with fills by liquidity matches an independent replay, and thin stocks pay more', () => {
+  const H = hist();
+  const col = (c: string) => ML_COLS.indexOf(c) - 2;
+  const iAdr = 1 + ML_KEYS.indexOf('adrPct');
+  assert.equal(liqBand(499_999).ticks, 3); assert.equal(liqBand(3e6).ticks, 2); assert.equal(liqBand(1.2e7).stopPct, 0.04);
+  let n = 0, thinCost = 0, thickCost = 0;
+  for (const vol of [1e6, 4e6, 6e6, 8e6, 1.2e7]) {
+    const dly = daily(); dly.v = dly.v.map(() => vol);
+    const band = LIQ_BANDS.filter((b) => vol >= b.min).at(-1)!;
+    for (let seed = 1; seed <= 6; seed++) {
+      const { px, rnd } = walk(seed * 31 + 5);
+      const date = `2025-09-${String(seed + 3).padStart(2, '0')}`;
+      const day = session(date, (k) => px[k], rnd);
+      for (const r of gridDay({ date, history: H, day, nifty: session(date, () => 20000), daily: dly })) {
+        const k = r[0], close = day[k - 1].c, adr = (r[iAdr] / 100) * close;
+        assert.equal(r[col('avgVol')], vol);
+        const ticks = Math.max(band.ticks, k < 20 ? OPEN_SLIP_TICKS : 1);
+        const entry = close - TICK * ticks, stop = onTick(close + WIDE_STOP_ADR * adr, 1), tgt = onTick(close - NEAR_TARGET_ADR * adr, -1);
+        let sAt = -1, tAt = -1;
+        for (let s = k; s < LATE_END; s++) {
+          if (sAt < 0 && day[s].h >= stop) sAt = s;
+          if (tAt < 0 && day[s].l <= tgt - TICK * band.ticks) tAt = s;
+        }
+        const win = tAt >= 0 && (sAt < 0 || tAt < sAt);
+        let exit: number;
+        if (win) exit = tgt;
+        else if (sAt >= 0) {
+          const b0 = sAt - (sAt % 10); let hi = -Infinity, lo = Infinity;
+          for (let j = b0; j < b0 + 10; j++) { hi = Math.max(hi, day[j].h); lo = Math.min(lo, day[j].l); }
+          exit = stop + Math.ceil(Math.max(TICK, (band.stopPct / 100) * stop, FAST_STOP_FRAC * (hi - lo)) / TICK - 1e-9) * TICK;
+        } else exit = day[LATE_END - 1].c + TICK * band.ticks;
+        const dist = stop - entry, qty = sizeFor(300, dist);
+        const net = (entry - exit) / dist - roundTripCharges(qty, entry, exit, -1) / (qty * dist);
+        assert.ok(Math.abs(r[col('nbSx')] - net) < 0.002, `${vol} ${date} ${k}: ${r[col('nbSx')]} vs ${net}`);
+        assert.ok(r[col('nbSx')] <= r[col('nbS')] + 1e-9, 'real fills are never better than the old ones');
+        if (vol === 1e6) thinCost += r[col('nbS')] - r[col('nbSx')];
+        if (vol === 1.2e7) thickCost += r[col('nbS')] - r[col('nbSx')];
+        n++;
+      }
+    }
+  }
+  assert.ok(n > 500 && thinCost > thickCost, `thin stocks pay more: ${thinCost} vs ${thickCost}`);
 });
 
 test('grid: memory facts come only from earlier sessions and daily candles, and add up', () => {
