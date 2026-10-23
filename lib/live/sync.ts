@@ -9,9 +9,11 @@ import { istDateKey, istDateTime, istTime } from './time';
 import type { OrderSnapIn, TradeGroup, TradeMeta, TrackedOrder } from './types';
 import type { LiveStatus } from './schema';
 import { checksForTrade } from '../copilot/store';
+import { superOrderRows } from '../copilot/pending';
 
 export interface SyncDeps {
-  dhan: { orders(): Promise<any[]>; trades(): Promise<any[]>; positions(): Promise<any[]> };
+  /** superOrders: brackets (TradingView, Algo Live) keep their stop and target inside the super order, not in /orders */
+  dhan: { orders(): Promise<any[]>; trades(): Promise<any[]>; positions(): Promise<any[]>; superOrders?(): Promise<any[]> };
   sheets: SheetsClient;
   now?: () => number;
 }
@@ -107,10 +109,13 @@ export async function runSync(deps: SyncDeps, opts: { includeRecent?: boolean; f
   // Dhan and the sheet are read in parallel; the sheet costs 2 requests however many tabs are involved.
   const preloaded = store.preload();
   preloaded.catch(() => { /* surfaced below */ });
-  const [orders, trades, positions] = await Promise.all([
+  const [plain, trades, positions, supers] = await Promise.all([
     deps.dhan.orders(), deps.dhan.trades(),
     deps.dhan.positions().catch((e: Error) => { warnings.push(`Positions unavailable: ${e.message}`); return [] as any[]; }),
+    deps.dhan.superOrders ? deps.dhan.superOrders().catch((e: Error) => { warnings.push(`Super orders unavailable: ${e.message}`); return [] as any[]; }) : Promise.resolve([] as any[]),
   ]);
+  // the stop and target legs of super orders, as order-book rows (skipping any Dhan already lists in the order book)
+  const orders = [...plain, ...superOrderRows(supers, new Set(plain.map((o: any) => String(o?.orderId ?? o?.orderNo ?? ''))), { legsAtCreate: true })];
 
   await preloaded;
 

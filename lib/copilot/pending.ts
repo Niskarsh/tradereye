@@ -78,7 +78,10 @@ function check(p: PendingPlan): PendingPlan {
  * Super orders (GET /super/orders) as plain order-book rows: the entry leg (leg 1) plus its stop-loss leg (2) and
  * target leg (3), which carry their price in `price` and no symbol of their own. Skips legs already in the order book.
  */
-export function superOrderRows(supers: any[], have: Set<string>): any[] {
+const realTs = (v: unknown) => (typeof v === 'string' && v && !/^(1980|0001|1970)/.test(v) ? v : undefined);
+const legDate = (so: any) => { const t = realTs(so.exchangeTime) ?? realTs(so.createTime); return t ? { updateTime: t, createTime: t } : {}; };
+
+export function superOrderRows(supers: any[], have: Set<string>, opts: { legsAtCreate?: boolean } = {}): any[] {
   const out: any[] = [];
   for (const so of Array.isArray(supers) ? supers : []) {
     if (!so?.orderId) continue;
@@ -94,6 +97,9 @@ export function superOrderRows(supers: any[], have: Set<string>): any[] {
         ...base, orderId: id, legName: name, transactionType: leg.transactionType ?? (so.transactionType === 'BUY' ? 'SELL' : 'BUY'),
         orderType: name === 'TARGET_LEG' ? 'LIMIT' : 'STOP_LOSS_MARKET', price: px, triggerPrice: name === 'TARGET_LEG' ? 0 : px,
         orderStatus: leg.orderStatus ?? 'PENDING', quantity: leg.totalQuatity ?? leg.totalQuantity ?? leg.remainingQuantity ?? so.quantity, filledQty: 0,
+        // the legs go live with the entry: dated when it filled (or was placed), so a trade read after it closed still
+        // finds its stop and target inside its window
+        ...(opts.legsAtCreate ? legDate(so) : {}),
       });
     }
   }

@@ -162,3 +162,25 @@ test('co-pilot: no checks tab is fine, the trade is still logged', async () => {
   assert.deepEqual(r.finalized.map((x) => x.result), ['LOGGED']);
   assert.equal(s.f.table('october-2026')[0].CkId, '');
 });
+
+test('a super order (bracket): its stop and target legs are read from the super order, even after the trade closed', async () => {
+  const s = setup((f) => f.addTab('october-2026', [[...MONTHLY_BASE]]));
+  const entry = { orderId: 'E1', orderStatus: 'TRADED', transactionType: 'SELL', orderType: 'MARKET', tradingSymbol: 'ABC', securityId: '11',
+    exchangeSegment: 'NSE_EQ', productType: 'INTRADAY', price: 0, quantity: 22, filledQty: 22, createTime: `${T} 09:35:47`, updateTime: `${T} 09:35:48` };
+  const sup = (target: string, stop: string, upd: string) => [{ ...entry, exchangeTime: `${T} 09:35:48`, updateTime: upd, legDetails: [
+    { orderId: 'E1', legName: 'STOP_LOSS_LEG', transactionType: 'BUY', price: 275.75, orderStatus: stop, remainingQuantity: 22 },
+    { orderId: 'E1', legName: 'TARGET_LEG', transactionType: 'BUY', price: 249.4, orderStatus: target, remainingQuantity: 22 },
+  ] }];
+  (s.dhan as any).superOrders = async () => (s.dhan as any).s;
+  // read only after it closed at the target (as on the first sync after this change)
+  s.dhan.o = [entry];
+  (s.dhan as any).s = sup('TRADED', 'CANCELLED', `${T} 10:40:00`);
+  s.dhan.t = [trade('1', 'SELL', 22, 261.74, '09:35:48', 'ABC', 'E1'), trade('2', 'BUY', 22, 249.4, '10:40:00', 'ABC', 'E1')];
+  s.at('15:40:00');
+  const r = await s.run();
+  const g = r.groups.find((x) => x.symbol === 'ABC')!;
+  assert.equal(g.initialStop, 275.75); assert.equal(g.tpLast, 249.4);
+  assert.equal(g.riskInr, Number(((275.75 - 261.74) * 22).toFixed(2)));
+  assert.ok(g.rMultiple! > 0.8 && g.rMultiple! < 0.9, `R ${g.rMultiple}`);
+  assert.equal(s.f.table('october-2026').filter((x) => x.Symbol === 'ABC')[0].InitialStop, '275.75');
+});
