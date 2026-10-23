@@ -158,6 +158,66 @@ function LiquidityCard({ ml }: { ml: Ml }) {
     </Card>
   );
 }
+/** Algo Live's real fills next to what the backtest assumed (read only: lib/algoLive/fills.ts, /api/algo/fills) */
+interface FillRow { date: string; symbol: string; time: string; avgVol?: number; signal: number; entry: number; stop: number; target: number; exit: number | null; exitType: string; entryTicks: number; stopTicks: number | null; stopPct: number | null; targetTicks: number | null; extraR: number; matched: boolean }
+interface FillSum { trades: number; matched: number; entryTicks: number | null; stopsHit: number; stopTicks: number | null; stopPct: number | null; targetsHit: number; targetTicks: number | null; manual: number; extraR: number | null }
+const FILLS_NEEDED = 20, STOPS_NEEDED = 8;
+function LiveFillsCard({ ml }: { ml: Ml }) {
+  const [f, setF] = useState<{ rows: FillRow[]; summary: FillSum } | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    fetch('/api/algo/fills', { cache: 'no-store' }).then(async (r) => {
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setF(j);
+    }).catch((e) => setErr((e as Error).message));
+  }, []);
+  const old = ml.strategies.find((x) => x.id === 'fCap2')?.dev.netR, est = ml.strategies.find((x) => x.id === 'vAll')?.dev.netR;
+  const s = f?.summary;
+  const done = s ? s.trades - (f!.rows.filter((r) => r.exitType === 'OPEN').length) : 0;
+  const proj = s && s.extraR !== null && old !== undefined ? old - s.extraR : null;
+  let verdict: React.ReactNode = null;
+  if (s && done < FILLS_NEEDED) verdict = <b className="text-ink-2">Too few trades yet: {done} of {FILLS_NEEDED}. Keep F at ₹300 risk.</b>;
+  else if (proj !== null && old !== undefined && est !== undefined) {
+    const stopsOk = s!.stopsHit >= STOPS_NEEDED;
+    if (proj >= old - 0.015 && stopsOk) verdict = <b className="text-data-green">Fills are close to the backtest&apos;s own: F is about {rr(proj)} a trade. Scaling up can be considered.</b>;
+    else if (proj <= est + 0.01) verdict = <b className="text-data-red-text">Fills are as bad as the estimate or worse: F is about {rr(proj)} a trade. Stay at ₹300 risk.</b>;
+    else verdict = <b className="text-brand-accent">In between: F is about {rr(proj)} a trade{stopsOk ? '' : ` (only ${s!.stopsHit} stops so far, ${STOPS_NEEDED} needed to judge stops)`}. Stay at ₹300 risk for now.</b>;
+  }
+  return (
+    <Card title="Live fills vs the backtest" sub={`Algo Live's real entries and exits (its orders and your journal) against what the backtest assumed: 1 tick worse in, 1 tick worse on a stop, targets at their price. Exits by hand count only for the entry. Backtest F as live: ${old !== undefined ? rr(old) : '–'} a trade with those fills, ${est !== undefined ? rr(est) : '–'} with iteration 11's estimate.`}>
+      {err && <p className="text-xs text-data-red-text">{err}</p>}
+      {!f && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Reading fills…</p>}
+      {s && (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Entry, ticks worse</p><p className="font-mono font-bold">{fx(s.entryTicks)} <span className="text-[11px] font-normal text-ink-3">(backtest 1, est. up to 3)</span></p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Stops hit</p><p className="font-mono font-bold">{s.stopsHit}{s.stopsHit ? ` · ${fx(s.stopTicks)} ticks (${fx(s.stopPct, 2)}%)` : ''} <span className="text-[11px] font-normal text-ink-3">(backtest 1 tick, est. up to 0.20%)</span></p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Targets hit</p><p className="font-mono font-bold">{s.targetsHit}{s.targetsHit ? ` · ${fx(s.targetTicks)} ticks` : ''}</p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">R lost vs backtest</p><p className={`font-mono font-bold ${tone(s.extraR === null ? null : -s.extraR, s.extraR !== null)}`}>{s.extraR === null ? '–' : rr(-s.extraR)} <span className="text-[11px] font-normal text-ink-3">a trade</span></p></div>
+          </div>
+          <p className="mt-2 text-sm">{verdict}</p>
+          {f!.rows.length > 0 && (
+            <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[720px] text-xs"><thead><tr className={HEAD}>
+              <th className="px-2 py-1.5 text-left">Day</th><th className="px-2 py-1.5 text-left">Stock</th><th className={TH}>Signal</th><th className={TH}>Entry</th><th className={TH}>In (ticks)</th><th className={TH}>Exit</th><th className={TH}>How</th><th className={TH}>Out (ticks)</th><th className={TH}>R lost</th>
+            </tr></thead><tbody>
+              {f!.rows.slice().reverse().map((r) => (
+                <tr key={`${r.date}-${r.symbol}`} className="border-b border-line/60 font-mono tabular-nums">
+                  <td className="px-2 py-1.5">{r.date.slice(5)} {r.time}</td><td className="px-2 py-1.5 font-sans">{r.symbol}</td>
+                  <td className={TH}>{r.signal.toFixed(2)}</td><td className={TH}>{r.entry.toFixed(2)}</td><td className={TH}>{fx(r.entryTicks)}</td>
+                  <td className={TH}>{r.exit ? r.exit.toFixed(2) : '–'}</td><td className={TH}>{r.matched ? r.exitType : 'not in journal yet'}</td>
+                  <td className={TH}>{r.stopTicks !== null ? fx(r.stopTicks) : r.targetTicks !== null ? fx(r.targetTicks) : '–'}</td>
+                  <td className={`${TH} ${tone(-r.extraR, r.exitType !== 'OPEN')}`}>{rr(-r.extraR)}</td>
+                </tr>
+              ))}
+            </tbody></table></div>
+          )}
+          {f!.rows.length === 0 && <p className="text-xs text-ink-3">No filled Algo Live orders yet.</p>}
+        </>
+      )}
+    </Card>
+  );
+}
 interface Untouched { id: string; name: string; from?: string; to?: string; note?: string; overall: P; months?: (S & { month: string })[]; trainMonths?: [string, string]; valMonths?: [string, string] }
 interface CPart { n: number; base: number; rule: number; diff: number; t: number; monthsGreenBase: number; monthsGreenRule: number; months: number; addRate: number }
 interface Confirmed { strategy: string; rule: string; label: string; decide: CPart; exam: { pass: boolean | null; n: number }; untouched: CPart | null; shadow: CPart | null; baseMismatch: number }
@@ -567,6 +627,7 @@ export default function AlgoPage() {
             )}
             <CapCard ml={v2} />
             <LiquidityCard ml={v2} />
+            <LiveFillsCard ml={v2} />
             <div className="flex flex-wrap gap-2">
               {v2.strategies.map((x) => (
                 <button key={x.id} onClick={() => setPick(x.id)}
