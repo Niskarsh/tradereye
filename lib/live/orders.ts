@@ -251,7 +251,9 @@ export function analyzeTrade(g: TradeGroup, orders: TrackedOrder[]): TradeMeta {
   const startTs = g.entryTs - 30_000;
   const endTs = g.status === 'CLOSED' ? g.lastTs + 10_000 : Number.POSITIVE_INFINITY;
 
-  const inWindow = (o: TrackedOrder) => o.history.length > 0 && o.history[0].ts >= startTs && o.history[0].ts <= endTs;
+  // a bracket's stop / target leg (leg 2 / 3) goes in with its entry, which can be placed a few minutes before it fills
+  const legSlack = (o: TrackedOrder) => (o.legNo === 2 || o.legNo === 3 ? 6 * 3600_000 : 0);
+  const inWindow = (o: TrackedOrder) => o.history.length > 0 && o.history[0].ts >= startTs - legSlack(o) && o.history[0].ts <= endTs;
   // Orders the feed told us about without a symbol (older partial frames): theirs if the size matches the open position then.
   const orphanFits = (o: TrackedOrder) => {
     if (o.symbol || !inWindow(o)) return false;
