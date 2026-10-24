@@ -16,7 +16,7 @@ import {
 /** Server-side loading for the shorts: journal trades, Algo Live's orders, and the trade day's candles. */
 
 const MONTH_TAB = new RegExp(`^(${MONTHS.join('|')})-(\\d{4})$`);
-const tabMonth = (title: string) => { const m = title.match(MONTH_TAB); return m ? `${m[2]}-${String(MONTHS.indexOf(m[1]) + 1).padStart(2, '0')}` : ''; };
+const tabMonth = (title: string) => { const m = title.match(MONTH_TAB); return m ? `${m[2]}-${String((MONTHS as readonly string[]).indexOf(m[1]) + 1).padStart(2, '0')}` : ''; };
 
 /** Every closed trade from the monthly tabs whose month lies in [fromMonth, toMonth] ("YYYY-MM"). */
 export async function journalTradesBetween(fromMonth: string, toMonth: string): Promise<ShortTrade[]> {
