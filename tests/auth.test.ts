@@ -59,6 +59,8 @@ test('after login, only same-site paths are followed (no open redirect)', () => 
 
 test('gate: Home and the login routes are public; every other page and API needs the session', () => {
   assert.equal(gate('/', false), 'allow');
+  assert.equal(gate('/privacy', false), 'allow');
+  assert.equal(gate('/privacy/x', false), 'redirect-home');
   assert.equal(gate('/api/analytics', false), 'allow');
   assert.equal(gate('/api/auth/google/callback', false), 'allow');
   for (const p of ['/journal', '/copilot', '/order-book/', '/dhan-login']) assert.equal(gate(p, false), 'redirect-home', p);

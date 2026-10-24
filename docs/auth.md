@@ -16,7 +16,7 @@ calls Claude, writes the sheet, uploads to S3 or talks to Dhan) needs the owner'
    in Vercel signs every old session out.
 
 ## Two locks
-- `proxy.ts` (Next 16's request gate) runs before every page and API. Public: `/`, the four `/api/auth/google|me|logout`
+- `proxy.ts` (Next 16's request gate) runs before every page and API. Public: `/`, `/privacy` (the privacy policy Google and Meta link to), the four `/api/auth/google|me|logout`
   routes, `/api/analytics` (trimmed to P&L totals when signed out) and `/api/live/postback` (its own secret).
   Everything else: pages redirect to Home with a sign-in prompt, APIs answer 401. New routes are private by default.
 - Every private route checks the session again itself (`guard()` in `lib/live/guard.ts`, `ownerRequired` elsewhere),
