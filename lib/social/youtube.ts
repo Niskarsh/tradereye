@@ -9,7 +9,11 @@ const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const API = 'https://www.googleapis.com/youtube/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/youtube/v3/videos';
 
-export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'];
+// force-ssl: change or remove a scheduled video (new time, edited title, unschedule). upload alone cannot.
+export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/youtube.force-ssl'];
+export const MANAGE_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
+/** Connected before force-ssl was asked for: uploads work, changing or removing a scheduled video needs a reconnect. */
+export const canManage = (scope: string | undefined) => !!scope && scope.split(/\s+/).includes(MANAGE_SCOPE);
 
 /** The only channel tradereye will post to. Anything else connected is refused, so nothing lands on another channel. */
 export const expectedHandle = (env: Record<string, string | undefined> = process.env) =>
@@ -70,7 +74,8 @@ export async function youtubeAccessToken(refreshToken: string, fetchImpl: typeof
 async function apiError(res: Response, what: string): Promise<YouTubeError> {
   const j = await res.json().catch(() => ({})) as { error?: { message?: string; errors?: { reason?: string }[] } };
   const reason = j.error?.errors?.[0]?.reason ?? '';
-  const hint = reason === 'quotaExceeded' ? ' (daily YouTube API quota used up; try again tomorrow)'
+  const hint = reason === 'insufficientPermissions' || (res.status === 403 && /scope|permission/i.test(j.error?.message ?? '')) ? ' (connect YouTube again on this page to allow changing scheduled videos)'
+    : reason === 'quotaExceeded' ? ' (daily YouTube API quota used up; try again tomorrow)'
     : reason === 'uploadLimitExceeded' ? ' (YouTube\'s upload limit for this channel was reached)' : '';
   return new YouTubeError(`${what} failed: ${j.error?.message ?? `HTTP ${res.status}`}${hint}`, res.status, reason);
 }
@@ -100,7 +105,7 @@ export interface UploadMeta {
 export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: UploadMeta, fetchImpl: typeof fetch = fetch): Promise<{ id: string; url: string }> {
   if (meta.publishAt && meta.privacy !== 'private') throw new YouTubeError('A scheduled video must be uploaded as private.');
   const body = {
-    snippet: { title: meta.title.slice(0, 100), description: meta.description ?? '', tags: meta.tags ?? [], categoryId: meta.categoryId ?? '27' },
+    snippet: snippetOf(meta),
     status: { privacyStatus: meta.privacy, selfDeclaredMadeForKids: false, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
   };
   const start = await fetchImpl(`${UPLOAD}?uploadType=resumable&part=snippet,status`, {
@@ -116,4 +121,30 @@ export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: 
   const v = await put.json() as { id?: string };
   if (!v.id) throw new YouTubeError('YouTube accepted the upload but returned no video id.');
   return { id: v.id, url: `https://youtube.com/shorts/${v.id}` };
+}
+
+/** YouTube rejects < and > in titles and descriptions. */
+export const cleanText = (s: string) => s.replace(/[<>]/g, '');
+
+function snippetOf(meta: UploadMeta) {
+  return { title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? ''), tags: meta.tags ?? [], categoryId: meta.categoryId ?? '27' };
+}
+
+/** New title / description / tags and publish time for a video that is still private (needs force-ssl). */
+export async function updateVideo(accessToken: string, id: string, meta: UploadMeta, fetchImpl: typeof fetch = fetch): Promise<void> {
+  if (meta.publishAt && meta.privacy !== 'private') throw new YouTubeError('A scheduled video must stay private until its time.');
+  const body = {
+    id, snippet: snippetOf(meta),
+    status: { privacyStatus: meta.privacy, selfDeclaredMadeForKids: false, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+  };
+  const res = await fetchImpl(`${API}/videos?part=snippet,status`, {
+    method: 'PUT', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json; charset=UTF-8' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await apiError(res, 'Changing the YouTube video');
+}
+
+/** Removes a video (unscheduling). A video already gone counts as removed. */
+export async function deleteVideo(accessToken: string, id: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const res = await fetchImpl(`${API}/videos?${new URLSearchParams({ id })}`, { method: 'DELETE', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}` } });
+  if (!res.ok && res.status !== 404) throw await apiError(res, 'Removing the YouTube video');
 }

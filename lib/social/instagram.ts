@@ -115,6 +115,12 @@ export async function publishContainer(p: { accessToken: string; userId: string;
   return String(j.id);
 }
 
+/** The public link of a published Reel. */
+export async function mediaPermalink(accessToken: string, mediaId: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const j = await readJson(await fetchImpl(`${GRAPH}/${mediaId}?${new URLSearchParams({ fields: 'permalink', access_token: accessToken })}`, { cache: 'no-store' }), 'Reading the Reel link');
+  return String(j.permalink ?? '');
+}
+
 /**
  * Meta's signed_request (deauthorize / data deletion callbacks): "<sig>.<payload>", base64url, where
  * sig = HMAC-SHA256(payload, app secret). Returns the payload only when the signature is right.

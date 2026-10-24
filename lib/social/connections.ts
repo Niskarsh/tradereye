@@ -1,5 +1,5 @@
 import { loadConn, saveConn, type InstagramConn, type YouTubeConn } from './store';
-import { youtubeAccessToken, isExpectedChannel, expectedHandle, YouTubeError } from './youtube';
+import { youtubeAccessToken, isExpectedChannel, expectedHandle, canManage, YouTubeError } from './youtube';
 import { needsRefresh, refreshInstagramToken, InstagramError } from './instagram';
 
 /** What the Socials page shows for each platform (no tokens, ever). */
@@ -15,7 +15,8 @@ export interface ConnStatus {
 export async function youtubeStatus(): Promise<ConnStatus> {
   const c = await loadConn('youtube');
   if (!c) return { connected: false };
-  return { connected: true, account: c.handle, title: c.channelTitle, connectedAt: c.connectedAt, problem: isExpectedChannel(c.handle) ? undefined : `Connected to ${c.handle}, not ${expectedHandle()}.` };
+  return { connected: true, account: c.handle, title: c.channelTitle, connectedAt: c.connectedAt, problem: !isExpectedChannel(c.handle) ? `Connected to ${c.handle}, not ${expectedHandle()}.`
+    : !canManage(c.scope) ? 'Connect again once: needed to change or unschedule a scheduled video (uploading works already).' : undefined };
 }
 
 export async function instagramStatus(): Promise<ConnStatus> {

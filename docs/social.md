@@ -89,7 +89,20 @@ needs `GH_DISPATCH_TOKEN` like the backtest). The job runs `scripts/shorts/rende
 uploads `short.mp4` + `poster.jpg` and marks `status.json` done. The job's AWS key (repo secrets, same as the backtest)
 needs read/write on `shorts/`. The page polls and shows the preview.
 
-## How posting will work
-- YouTube: uploaded right away as private with `publishAt`; YouTube makes it public at that time.
-- Instagram: the API has no publish-at option, so tradereye creates the Reel container at the chosen time (containers
-  expire after 24 hours), waits for FINISHED, then publishes.
+## Scheduling (each finished short: Schedule / Edit schedule)
+The editor opens above the shorts: Claude's YouTube title, description, tags and Instagram caption (all editable), a
+YouTube date/time and "Same time as YouTube" for Instagram (untick to give Instagram its own time, or untick a platform
+to skip it). Times are IST. A short not scheduled yet is offered the next free **Mon / Wed / Fri 18:30 IST** slot,
+oldest short first (`lib/shorts/slots.ts`). The plan for every short is one S3 file, `shorts/posts.json`
+(`lib/shorts/posts.ts` rules, `lib/shorts/publish.ts` work); each card shows Scheduled / Live (link) / Failed.
+- **YouTube:** uploaded when Schedule is pressed, private with `publishAt`; YouTube itself makes it public at that time,
+  whatever tradereye is doing. A new time or new words change the upload; Unschedule removes it. Changing or removing
+  needs the `youtube.force-ssl` scope: a channel connected before it was added shows "Connect again once".
+- **Instagram:** the API cannot schedule or post privately, so tradereye publishes it. **Social post timer**
+  (`.github/workflows/social-tick.yml`, every 5 minutes) calls `POST /api/social/tick` with `CRON_SECRET`: from 20 minutes
+  before the slot the video is handed to Meta (a Reel container, so it is processed in time; nothing is visible), and at
+  the slot it is published once Meta says FINISHED. Expect it live within ~5-10 minutes of the time (GitHub's timer can
+  lag). Three failed tries in a row, or over 90 minutes late, marks it Failed with **Post now** (publish at once, also
+  the retry). The timer's answer is counts only (its log is public).
+- A scheduled short cannot be deleted until it is unscheduled. Anything already public is never touched.
+- Env: `CRON_SECRET` (24+ random characters) in Vercel **and** as a GitHub repo secret, same value.

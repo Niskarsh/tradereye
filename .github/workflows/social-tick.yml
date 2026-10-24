@@ -1,0 +1,31 @@
+name: Social post timer
+
+# Every 5 minutes: asks tradereye to prepare / publish Instagram Reels that are due (the Instagram API cannot schedule,
+# so tradereye publishes them itself; YouTube schedules its own). The answer is counts only, so this public log shows
+# nothing about the trades. Needs the repo secret CRON_SECRET (same value as CRON_SECRET in Vercel).
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: social-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Publish due Reels
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TICK_URL: https://tradereye.candlesbeforecubicles.com/api/social/tick
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in the repo secrets; nothing to do."; exit 0; fi
+          code=$(curl -sS -o out.json -w '%{http_code}' -X POST -H "authorization: Bearer $CRON_SECRET" --max-time 150 "$TICK_URL" || echo 000)
+          echo "HTTP $code"
+          head -c 200 out.json 2>/dev/null; echo
+          [ "$code" = "200" ]
