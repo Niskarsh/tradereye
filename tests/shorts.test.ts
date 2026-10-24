@@ -144,3 +144,40 @@ test('Claude gets the candles with the entry and exit marked, and his own journa
   assert.match(msg, /RvolAtEntry=2.3/);
   assert.match(msg, /never put them in title/);
 });
+
+test('a losing trade gets the honest instructions: WHAT I MISSED, not THE TELL', async () => {
+  const { mysteryMessage } = await import('../lib/shorts/write');
+  const day = session('2026-07-15', 375);
+  const base = { date: '2026-07-15', dir: 'LONG' as const, entryTime: '09:56:16', exitTime: '10:18:00', holdMin: 22, stop: 99.5,
+    fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' as const }, { time: '10:18:00', price: 99.4, qty: 50, kind: 'out' as const }] };
+  const loss = mysteryMessage(T({ ...base, netR: -1.1, net: -330 }), buildPanel(day, T({ ...base, netR: -1.1, net: -330 })));
+  assert.match(loss, /OUTCOME: A LOSS/);
+  assert.match(loss, /WHAT I MISSED/);
+  assert.doesNotMatch(loss, /OUTCOME: A WIN/);
+  const win = mysteryMessage(T({ ...base, netR: 1.4 }), buildPanel(day, T({ ...base, netR: 1.4 })));
+  assert.match(win, /OUTCOME: A WIN/);
+  assert.match(win, /THE TELL/);
+});
+
+test('recap marks: only candles on the chart, prices from the candles, levels inside the range, at most 3', async () => {
+  const { toMarks, slots } = await import('../lib/shorts/spec');
+  const day = session('2026-07-15', 375);
+  const p = buildPanel(day, T({ date: '2026-07-15', dir: 'LONG', entryTime: '09:56:16', exitTime: '11:00:18', holdMin: 64, netR: 1,
+    fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' }, { time: '11:00:18', price: 101, qty: 50, kind: 'out' }] }));
+  const ss = slots(p);
+  assert.equal(ss[0].time, '09:15');
+  assert.equal(ss[3].time, '09:45');
+  const m = toMarks([
+    { time: '09:35', kind: 'high', price: 999, label: 'lower high' },   // price comes from the candle, not Claude
+    { time: '09:45', kind: 'low', price: 0, label: 'held the low' },
+    { time: '13:05', kind: 'high', price: 0, label: 'not on chart' },   // dropped
+    { time: '09:45', kind: 'level', price: 5000, label: 'way off' },    // dropped: outside the range
+    { time: '09:45', kind: 'wick', price: 0, label: 'unknown kind' },   // dropped
+    { time: '09:25', kind: 'close', price: 0, label: 'x'.repeat(40) },
+  ], p);
+  assert.equal(m.length, 3);
+  assert.deepEqual(m[0], { slot: 2, kind: 'high', price: Math.round(ss[2].h * 100) / 100, label: 'lower high' });
+  assert.equal(m[1].price, Math.round(ss[3].l * 100) / 100);
+  assert.equal(m[2].label.length, 24);
+  assert.deepEqual(toMarks('nonsense', p), []);
+});

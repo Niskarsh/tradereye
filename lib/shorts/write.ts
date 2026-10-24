@@ -12,6 +12,7 @@ import type { ShortTrade, WeekScore } from './trades';
 
 export interface SocialText {
   tell?: string;                                   // mystery
+  marks?: unknown;                                 // mystery: what to mark on the recap chart (checked by toMarks)
   notes?: { me: string; algo: string };            // me vs algo
   youtube: { title: string; description: string; tags: string[] };
   instagram: { caption: string };
@@ -28,22 +29,43 @@ Hard rules:
 - Plain English, Indian retail-trader audience. At most 2 emoji in a caption, none in the title.
 - Every description and caption carries one line: "Real trade, real money. Not investment advice."`;
 
-const MYSTERY_TASK = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
-"Long, short, or wait?", then plays the trade and finally reveals the stock.
-- tell: one sentence, max 80 characters (it must fit two short lines on screen): the clue visible on the chart
-  BEFORE the entry that the trade was based on (or, for a losing trade, the warning sign that was there).
-  The video shows ONLY the 10-minute candles listed below, so the clue must be visible on THOSE candles: e.g. a higher
-  low, a long lower wick, a close back above a level, a lower high, a tight base. Name the candle by its time when that
-  helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show. If his
-  journal comment says why he took it, use it only where the 10-minute candles back it up.
+const MYSTERY_CORE = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
+"Long, short, or wait?", shows HIS call ("MY CALL: LONG"), plays the trade and finally reveals the stock.
+The video shows ONLY the 10-minute candles listed below, so anything you point at must be visible on THOSE candles: e.g.
+a higher low, a lower high, a long wick, a close back above or below a level, a tight base. Name the candle by its time
+when that helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show.
+If his journal comment explains the trade, use it only where the 10-minute candles back it up.
+- marks: after the reveal the chart comes back with the ticker named, and the candles your tell talks about are marked on
+  it. Give 1-3 marks, each pointing at a 10-minute candle by its time exactly as listed ("09:45"): kind "high" or "low"
+  rings that candle's high or low (two or more highs, or lows, are joined by a line: e.g. falling highs), "close" rings
+  its close, "level" draws a horizontal line at "price" (a level the tell names, inside the chart's range; for other
+  kinds set price to 0). label: max 24 characters ("lower high", "held the low"). The marks must show exactly what the
+  tell says.
 - The stock's name and ticker are the reveal: never put them in title, description, tags or caption.
+- youtube.tags: 8-15 lowercase tags (no #), general trading terms only.
+- notes: leave both empty.`;
+
+const MYSTERY_WIN = `OUTCOME: A WIN.
+- tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 10-minute
+  candles BEFORE the entry that the trade was based on.
 - youtube.title: max 70 characters, a curiosity hook built around the decision; do not give the answer away.
 - youtube.description: 3-5 short lines: the hook, "Answer and the stock revealed at the end.", the not-advice line,
   then 4-6 hashtags on the last line (#shorts first).
-- youtube.tags: 8-15 lowercase tags (no #), general trading terms only.
 - instagram.caption: max 600 characters: hook line, "Long, short or wait? Comment before the reveal 👇", the not-advice
-  line, then 6-10 hashtags.
-- notes: leave both empty.`;
+  line, then 6-10 hashtags.`;
+
+const MYSTERY_LOSS = `OUTCOME: A LOSS. Be honest and plain about it: no excuses, no spin, no "it was still a good trade" unless the
+facts clearly show a valid setup that simply failed.
+- tell (shown as "WHAT I MISSED"): one sentence, max 80 characters (two short lines on screen): the warning sign that
+  was visible on the 10-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
+  high: buyers were already fading"). If no such sign is visible on those candles, say so plainly instead of inventing
+  one, e.g. "Nothing on the 10-min chart warned. The stop did its job."
+- youtube.title: max 70 characters, honest that it is a losing trade, built around the decision (e.g. "I lost on this
+  one. Would you have taken it?"); do not reveal the stock.
+- youtube.description: 3-5 short lines: the hook, "The stock and what I missed, revealed at the end.", the not-advice
+  line, then 4-6 hashtags on the last line (#shorts first).
+- instagram.caption: max 600 characters: an honest hook about the loss, "What would you have done? Comment below 👇",
+  the not-advice line, then 6-10 hashtags.`;
 
 const VS_TASK = `This is a ME vs ALGO short: one week of his own trades against his trading bot's (Algo Live), each side's
 biggest trade replayed, the week's totals in R, and the season score. Tickers are never shown.
@@ -55,13 +77,19 @@ biggest trade replayed, the week's totals in R, and the season score. Tickers ar
   not-advice line, then 4-6 hashtags (#shorts first).
 - youtube.tags: 8-15 lowercase tags (no #).
 - instagram.caption: max 600 characters, ending with a question that invites comments, the not-advice line, 6-10 hashtags.
-- tell: empty string.`;
+- tell: empty string. marks: empty array.`;
 
 export const TEXT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['tell', 'notes', 'youtube', 'instagram'],
+  required: ['tell', 'marks', 'notes', 'youtube', 'instagram'],
   properties: {
     tell: { type: 'string' },
+    marks: {
+      type: 'array', items: {
+        type: 'object', additionalProperties: false, required: ['time', 'kind', 'price', 'label'],
+        properties: { time: { type: 'string' }, kind: { type: 'string', enum: ['high', 'low', 'close', 'level'] }, price: { type: 'number' }, label: { type: 'string' } },
+      },
+    },
     notes: { type: 'object', additionalProperties: false, required: ['me', 'algo'], properties: { me: { type: 'string' }, algo: { type: 'string' } } },
     youtube: {
       type: 'object', additionalProperties: false, required: ['title', 'description', 'tags'],
@@ -104,8 +132,12 @@ function tradeFacts(t: ShortTrade, p: PanelSpec, label: string): string {
   return lines.join('\n');
 }
 
-export function mysteryMessage(t: ShortTrade, p: PanelSpec): string {
-  return `${MYSTERY_TASK}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
+/** A loss is any trade whose shown result is below zero (R after charges, or the % move). */
+export const isLoss = (p: PanelSpec) => p.result.value < 0;
+
+export function mysteryMessage(t: ShortTrade, p: PanelSpec, ownTell = ''): string {
+  const own = ownTell.trim() ? `\n\nHE WROTE THE TELL HIMSELF: "${ownTell.trim()}". Return it unchanged as tell, and make the marks show exactly that.` : '';
+  return `${MYSTERY_CORE}\n\n${isLoss(p) ? MYSTERY_LOSS : MYSTERY_WIN}${own}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
 }
 
 export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScore; after: { me: number; algo: number }; me?: { t: ShortTrade; p: PanelSpec }; algo?: { t: ShortTrade; p: PanelSpec } }): string {
@@ -138,7 +170,7 @@ export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs')
   const yt = (j.youtube ?? {}) as Record<string, unknown>, ig = (j.instagram ?? {}) as Record<string, unknown>, n = (j.notes ?? {}) as Record<string, unknown>;
   const tags = Array.isArray(yt.tags) ? yt.tags.map((t) => clip(t, 40).replace(/^#/, '').toLowerCase()).filter(Boolean).slice(0, 15) : [];
   return {
-    ...(kind === 'mystery' ? { tell: clip(j.tell, 90) } : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) } }),
+    ...(kind === 'mystery' ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] } : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) } }),
     youtube: { title: clip(yt.title, 100), description: clip(yt.description, 4500), tags },
     instagram: { caption: clip(ig.caption, 2000) },
   };

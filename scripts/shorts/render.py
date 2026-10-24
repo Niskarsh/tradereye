@@ -159,6 +159,10 @@ class Chart:
     def price_at(self, upto):
         return self.state(upto)[1]
 
+    def slot_x(self, s):
+        x0, _, x1, _ = self.box
+        return x0 + (x1 - x0) / self.slots * (s + 0.5)
+
     def half(self):
         """half a drawn candle's width (design units)"""
         return max(3.0, (self.box[2] - self.box[0]) / self.slots * 0.62) / 2
@@ -256,13 +260,19 @@ def fit_tell(text):
     return [text[:40]], 23
 
 
-def draw_tell(d, y, tell, k):
-    """THE TELL box: same padding above and below, height fixed by its (max 2) lines. Returns the box bottom."""
+def tell_height(tell):
+    lines, size = fit_tell(tell)
+    return 20 + 30 + 8 + (size + 10) * len(lines) + 20
+
+
+def draw_tell(d, y, tell, k, label="THE TELL"):
+    """THE TELL (a win) / WHAT I MISSED (a loss) box: same padding above and below, height fixed by its (max 2)
+    lines. Returns the box bottom."""
     lines, size = fit_tell(tell)
     pad, label_h, line_h = 20, 30, size + 10
     h = pad + label_h + 8 + line_h * len(lines) + pad
     d.rounded_rectangle([u(50), u(y), u(670), u(y + h)], radius=u(18), fill=mix(BG, (36, 32, 22), k))
-    T(d, (360, y + pad + label_h / 2), "THE TELL", F("Black", 24), mix(BG, GOLD, k))
+    T(d, (360, y + pad + label_h / 2), label, F("Black", 24), mix(BG, GOLD, k))
     for i, line in enumerate(lines):
         T(d, (360, y + pad + label_h + 8 + line_h * (i + 0.5)), line, F("Bold", size), mix(BG, TXT, k))
     return y + h
@@ -293,7 +303,7 @@ def render_mystery(spec, out, poster):
     play_s = min(11.0, max(6.0, (end - e) * 0.13))
     v = (end - e) / play_s  # minutes of the trade per second of video
 
-    # "Most people bail right here.": from the first minute the trade is 0.3R (or 0.15%) under water. The message
+    # "Most people bail right here." (a win) / "The stop stays where it is." (a loss): from the first minute the trade is 0.3R (or 0.15%) under water. The message
     # stays MESSAGE_MIN_S, and the replay runs in slow motion meanwhile, so those seconds show the dip, not the recovery.
     def under_water(m):
         val, unit = live_result(p, ch.price_at(m))
@@ -306,8 +316,20 @@ def render_mystery(spec, out, poster):
         t_play = t_bail + (end - m1) / (v * slow)
     bail = (t_bail, min(t_play, t_bail + MESSAGE_MIN_S)) if m1 is not None else None
     # straight from the trade to "THE STOCK WAS" + drum roll, then the ticker pops in; tell and subscribe after it
-    t_reveal = t_play + 1.5; t_end_card = t_reveal + 1.6; total = t_end_card + 4.6
+    t_reveal = t_play + 1.5; t_end_card = t_reveal + 1.6
+    # the recap: after the end card has been read, the tell box moves to the top, the result and ticker band clear,
+    # and the chart comes back (ticker named) with what the tell talks about marked on it. Comment + Subscribe stay put.
+    marks = c.get("marks") or []
+    recap = bool(c.get("tell"))
+    t_recap = t_end_card + 3.2; RECAP_MOVE = 0.9
+    t_marks = t_recap + RECAP_MOVE + 0.3; MARK_STEP = 0.7
+    total = (t_marks + MARK_STEP * len(marks) + 4.2) if recap else (t_end_card + 4.6)
     ans = p["side"]
+    # a losing trade is shown just as fully, but nothing on screen may suggest his call was the right one
+    lost = p["result"]["value"] < 0
+    msg_dip = "The stop stays where it is." if lost else "Most people bail right here."
+    box_label = "WHAT I MISSED" if lost else "THE TELL"
+    cta = "Would you have taken it? Comment below" if lost else "New mystery chart every week"
 
     def upto_at(t):
         if t < t_ff: return e * (t / t_ff)
@@ -322,8 +344,7 @@ def render_mystery(spec, out, poster):
         k = ease((t - t_rev) / 1.0)
         return (lerp(full_yr[0], trade_yr[0], k), lerp(full_yr[1], trade_yr[1], k))
 
-    def frame(f):
-        t = f / FPS
+    def frame_main(t, show_tell=True, show_cta=True):
         img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
         up = upto_at(t)
         T(d, (32, 70), c["symbol"] if t >= t_reveal else "MYSTERY STOCK", F("Black", 40), GOLD if t >= t_reveal else TXT, "lm")
@@ -356,7 +377,7 @@ def render_mystery(spec, out, poster):
                 T(d, (360, 730), str(max(1, n)), F("Black", int(150 - 40 * ease(ph))), mix(GOLD, BG, ease((ph - 0.6) / 0.4)))
                 T(d, (360, 840), "Comment your answer", F("SemiBold", 28), TXT)
             if t >= t_q + DECIDE_S:
-                T(d, (360, 760), "Answer…", F("Black", 48), GOLD)
+                T(d, (360, 760), "My call…", F("Black", 48), GOLD)
             for j, (lab, col) in enumerate([("LONG", EM), ("SHORT", RED), ("WAIT", GOLD)]):
                 pill(d, 140 + j * 220, 960, 190, 76, lab, mix(BG, col, k), F("Black", 32))
 
@@ -371,13 +392,13 @@ def render_mystery(spec, out, poster):
             if t < t_play:
                 val, unit = live_result(p, ch.price_at(up))
                 pulse = 1 - ease((t - t_rev) / 0.5)
-                pill(d, 360, 935, 300, 88, ans, EM if ans == "LONG" else RED, F("Black", 44))
-                d.rounded_rectangle([u(210 - 8 * pulse), u(891 - 8 * pulse), u(510 + 8 * pulse), u(979 + 8 * pulse)], radius=u(48), outline=GOLD, width=u(3))
+                pill(d, 360, 935, 420, 88, f"MY CALL: {ans}", EM if ans == "LONG" else RED, F("Black", 40))
+                d.rounded_rectangle([u(150 - 8 * pulse), u(891 - 8 * pulse), u(570 + 8 * pulse), u(979 + 8 * pulse)], radius=u(48), outline=GOLD, width=u(3))
                 T(d, (360, 205), fmt_result(val, unit), F("Black", 54), EM if val >= 0 else RED)
                 if bail and bail[0] <= t < bail[1]:
                     a = min(ease((t - bail[0]) / 0.3), 1 - ease((t - (bail[1] - 0.3)) / 0.3))
                     d.rounded_rectangle([u(90), u(255), u(630), u(305)], radius=u(12), fill=mix(BG, (60, 26, 24), a))
-                    T(d, (360, 280), "Most people bail right here.", F("Bold", 25), mix(BG, TXT, a))
+                    T(d, (360, 280), msg_dip, F("Bold", 25), mix(BG, TXT, a))
             else:
                 xx = px(x)
                 d.ellipse([u(xx - 9), u(py(p["exit"]) - 9), u(xx + 9), u(py(p["exit"]) + 9)], fill=GOLD)
@@ -405,11 +426,67 @@ def render_mystery(spec, out, poster):
                     if t > t_reveal + 0.35:
                         k3 = ease((t - t_reveal - 0.35) / 0.4)
                         T(d, (360, 650), f"NSE  ·  {c['dateLabel']}", F("Bold", 32), mix(BG, TXT, k3))
-                    y = 712
-                    if t > t_end_card and c.get("tell"):
-                        y = draw_tell(d, y, c["tell"], ease((t - t_end_card) / 0.4)) + 26
-                    if t > t_end_card + 0.8:
-                        subscribe(d, y + 18, ease((t - t_end_card - 0.8) / 0.4), "New mystery chart every week")
+                    if show_tell and t > t_end_card and c.get("tell"):
+                        draw_tell(d, TELL_Y, c["tell"], ease((t - t_end_card) / 0.4), box_label)
+                    if show_cta and t > t_end_card + 0.8:
+                        subscribe(d, CTA_Y, ease((t - t_end_card - 0.8) / 0.4), cta)
+        return img
+
+    # where the tell box and the call to action sit (the CTA never moves once shown)
+    TELL_Y = 712
+    tell_h = (tell_height(c["tell"]) if c.get("tell") else -26)
+    CTA_Y = TELL_Y + tell_h + 26 + 18
+    TELL_TOP = 146
+    rbox = (20, TELL_TOP + tell_height(c["tell"]) + 26 if c.get("tell") else 300, 700, CTA_Y - 82)
+    rch = Chart(rbox, p)
+    r_yr = rch.yrange(0, None, (p["entry"], p.get("stop"), p["exit"], *[m["price"] for m in marks]))
+    res = p["result"]
+
+    def frame_recap_base(t):
+        """The chart again, ticker named, the whole trade drawn, P&L under it, and the marks appearing one by one."""
+        img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
+        T(d, (32, 70), c["symbol"], F("Black", 40), GOLD, "lm")
+        T(d, (32, 114), f"NSE  ·  {p['tf']}-min chart  ·  {c['dateLabel']}", F("Medium", 23), MUTED, "lm")
+        py, px = rch.draw(d, end, r_yr, labels=True, live=False)
+        ex = px(e) - 8
+        dashed(d, ex, rbox[2], py(p["entry"]), GOLD, 2.5)
+        if p.get("stop"): dashed(d, ex, rbox[2], py(p["stop"]), RED, 2.5)
+        draw_fills(d, p, py, px, end, rch.half())
+        col = EM if res["value"] >= 0 else RED
+        T(d, (360, rbox[3] + 34), f"{fmt_result(res['value'], res['unit'])}  in {p['holdMin']} min" + ("  ·  after charges" if res["unit"] == "R" else ""), F("Black", 34), col)
+        # marks
+        shown = [m for i, m in enumerate(marks) if t >= t_marks + i * MARK_STEP]
+        for kind in ("high", "low", "close"):
+            pts = [(rch.slot_x(m["slot"]), py(m["price"])) for m in shown if m["kind"] == kind]
+            for a, b in zip(pts, pts[1:]):
+                d.line([(u(a[0]), u(a[1])), (u(b[0]), u(b[1]))], fill=GOLD, width=u(3))
+        for i, m in enumerate(shown):
+            k = ease((t - (t_marks + i * MARK_STEP)) / 0.35)
+            y = py(m["price"])
+            if m["kind"] == "level":
+                dashed(d, rbox[0], rbox[2], y, mix(PANEL, GOLD, k), 3, 12, 6)
+                lx, ly, anchor = rbox[0] + 10, y - 18, "lm"
+            else:
+                x = rch.slot_x(m["slot"]); r = 15 + 10 * (1 - k)
+                d.ellipse([u(x - r), u(y - r), u(x + r), u(y + r)], outline=mix(PANEL, GOLD, k), width=u(3.5))
+                lx, ly, anchor = x, (y - 36 if m["kind"] != "low" else y + 36), "mm"
+            if m.get("label"):
+                f = F("Bold", 19); w = f.getlength(m["label"]) / K + 18
+                cx = lx + w / 2 if anchor == "lm" else min(max(lx, rbox[0] + w / 2 + 4), rbox[2] - w / 2 - 4)
+                d.rounded_rectangle([u(cx - w / 2), u(ly - 15), u(cx + w / 2), u(ly + 15)], radius=u(8), fill=mix(PANEL, GOLD, k))
+                T(d, (cx, ly), m["label"], f, mix(PANEL, BG, k))
+        return img
+
+    def frame(f):
+        t = f / FPS
+        if not recap or t < t_recap:
+            return frame_main(t)
+        kx = ease((t - t_recap) / RECAP_MOVE)
+        base = frame_recap_base(t)
+        img = base if kx >= 1 else Image.blend(frame_main(t, show_tell=False, show_cta=False), base, kx)
+        d = ImageDraw.Draw(img)
+        draw_tell(d, lerp(TELL_Y, TELL_TOP, kx), c["tell"], 1.0, box_label)
+        subscribe(d, CTA_Y, 1.0, cta)
         return img
 
     nf = int(total * FPS)
@@ -430,6 +507,9 @@ def render_mystery(spec, out, poster):
     place(buf, tone(70, 0.9, 0.7, 3.5), t_reveal); place(buf, tone(140, 0.6, 0.4, 5), t_reveal)
     win = p["result"]["value"] >= 0
     for kk, fr in enumerate([784, 1047, 1319] if win else [523, 392, 330]): place(buf, tone(fr, 0.7, 0.22, 4), t_reveal + 0.05 + kk * 0.06)
+    if recap:
+        place(buf, tone(240, 0.5, 0.18, 4), t_recap)
+        for i in range(len(marks)): place(buf, tone(1320, 0.12, 0.22, 14), t_marks + i * MARK_STEP)
     finish(frame, nf, buf, out, poster, poster_t=t_q + 0.5)  # the question, never the answer
 
 

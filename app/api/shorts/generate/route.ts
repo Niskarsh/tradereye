@@ -3,7 +3,7 @@ import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { NeedsDhanError } from '@/lib/candles/store';
 import { DispatchError, dispatchWorkflow } from '@/lib/setups/github';
 import { findTrade, season, seasonBeforeAfter, tradeDay } from '@/lib/shorts/source';
-import { dateLabel, mysterySpec, vsPanel, vsSpec, type MysterySpec, type ShortSpec } from '@/lib/shorts/spec';
+import { dateLabel, mysterySpec, toMarks, vsPanel, vsSpec, type MysterySpec, type ShortSpec } from '@/lib/shorts/spec';
 import { addShort, setStatus, store, textKey } from '@/lib/shorts/store';
 import { putJson } from '@/lib/setups/store';
 import { mysteryMessage, vsMessage, writeText, type WrittenText } from '@/lib/shorts/write';
@@ -39,8 +39,9 @@ export async function POST(req: Request) {
       label = `Mystery: ${t.symbol} · ${dateLabel(t.date)}`;
       const c = spec.content as MysterySpec;
       if (ai) {
-        text = await writeText('mystery', mysteryMessage(t, c.panel), t.symbol).catch((e) => ({ error: (e as Error).message }));
+        text = await writeText('mystery', mysteryMessage(t, c.panel, c.tell), t.symbol).catch((e) => ({ error: (e as Error).message }));
         if (!c.tell && 'tell' in text && text.tell) c.tell = text.tell;
+        if ('youtube' in text) c.marks = toMarks(text.marks, c.panel); // only candles on the chart, real prices
       }
     } else if (b.kind === 'vs') {
       const s = await season();
