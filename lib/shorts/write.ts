@@ -30,9 +30,12 @@ Hard rules:
 
 const MYSTERY_TASK = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
 "Long, short, or wait?", then plays the trade and finally reveals the stock.
-- tell: one sentence, max 90 characters: the clue visible on the chart BEFORE the entry that the trade was based on
-  (or, for a losing trade, the warning sign that was there). It must be checkable on the candles given. If his journal
-  comment says why he took it, build on that.
+- tell: one sentence, max 80 characters (it must fit two short lines on screen): the clue visible on the chart
+  BEFORE the entry that the trade was based on (or, for a losing trade, the warning sign that was there).
+  The video shows ONLY the 10-minute candles listed below, so the clue must be visible on THOSE candles: e.g. a higher
+  low, a long lower wick, a close back above a level, a lower high, a tight base. Name the candle by its time when that
+  helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show. If his
+  journal comment says why he took it, use it only where the 10-minute candles back it up.
 - The stock's name and ticker are the reveal: never put them in title, description, tags or caption.
 - youtube.title: max 70 characters, a curiosity hook built around the decision; do not give the answer away.
 - youtube.description: 3-5 short lines: the hook, "Answer and the stock revealed at the end.", the not-advice line,

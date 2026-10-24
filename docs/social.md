@@ -44,7 +44,11 @@ Two templates, both drawn from real data only:
   to the 10-minute candle after the exit, drawn as **10-minute candles that form live**: price moves through each
   minute (a green minute dips to its low before its high, a red one the reverse; only O/H/L/C are known), the open
   candle's body and wicks follow it, with a live price tag, until its 10 minutes are over. Finished candles are exact.
-- **Mystery chart:** one of his trades, replayed. Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
+- **Mystery chart:** one of his trades, replayed. Hook line held 5 s; fast-forward to the entry; "Long, short, or
+  wait?" with a 5-second countdown; the trade plays. When it first goes 0.3R (or 0.15%) under water, "Most people bail
+  right here." stays 5 s while the replay runs in slow motion, so those seconds show the dip. Then straight to "THE
+  STOCK WAS" + drum roll, the ticker pops onto a gold band with the result above it, the tell box (max 2 lines, even
+  padding), and a YouTube-style SUBSCRIBE button with @CandlesBeforeCubicles. Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
   trade plays out with a live R counter (price R from his first stop), then the result (the journal's R after charges,
   or the % move when no risk was logged), a drum-roll build-up, and the ticker reveal: the symbol slams onto a
   full-width gold band and stays on screen (the header switches to it too) through the optional one-line "tell". Only trades over
