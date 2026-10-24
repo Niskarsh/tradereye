@@ -197,6 +197,37 @@ def draw_fills(d, panel, py, px, upto, half=0.0, show_in=True):
             d.polygon([(u(x - r), u(y)), (u(x + r), u(y - r * 0.7)), (u(x + r), u(y + r * 0.7))], fill=TXT)
 
 
+def draw_marks(d, ch, py, marks, t, t0, step, bg=PANEL, label_size=19):
+    """Marks appearing one by one from t0 (step apart): rings on 10-min highs / lows / closes (same kind joined by a
+    line, e.g. falling highs) or a level line, each with a small gold label."""
+    box = ch.box
+    shown = [m for i, m in enumerate(marks) if t >= t0 + i * step]
+    for kind in ("high", "low", "close"):
+        pts = [(ch.slot_x(m["slot"]), py(m["price"])) for m in shown if m["kind"] == kind]
+        for a, b in zip(pts, pts[1:]):
+            d.line([(u(a[0]), u(a[1])), (u(b[0]), u(b[1]))], fill=GOLD, width=u(3))
+    for i, m in enumerate(shown):
+        k = ease((t - (t0 + i * step)) / 0.35)
+        y = py(m["price"])
+        if m["kind"] == "level":
+            dashed(d, box[0], box[2], y, mix(bg, GOLD, k), 3, 12, 6)
+            lx, ly, anchor = box[0] + 10, y - 18, "lm"
+        else:
+            x = ch.slot_x(m["slot"]); r = 15 + 10 * (1 - k)
+            d.ellipse([u(x - r), u(y - r), u(x + r), u(y + r)], outline=mix(bg, GOLD, k), width=u(3.5))
+            below = m["kind"] == "low"
+            prev = shown[i - 1] if i > 0 else None
+            if prev and prev["kind"] != "level" and abs(ch.slot_x(prev["slot"]) - x) < 150:
+                below = not below  # a neighbour's label is right there: put this one on the other side
+            lx, ly, anchor = x, (y + 36 if below else y - 36), "mm"
+        ly = min(max(ly, box[1] + 16), box[3] - 16)
+        if m.get("label"):
+            f = F("Bold", label_size); w = f.getlength(m["label"]) / K + 18
+            cx = lx + w / 2 if anchor == "lm" else min(max(lx, box[0] + w / 2 + 4), box[2] - w / 2 - 4)
+            d.rounded_rectangle([u(cx - w / 2), u(ly - 15), u(cx + w / 2), u(ly + 15)], radius=u(8), fill=mix(bg, GOLD, k))
+            T(d, (cx, ly), m["label"], f, mix(bg, BG, k))
+
+
 def header_common(d):
     T(d, (W / K / 2, 172), "Own trade, own money. Not advice.", F("Medium", 17), MUTED)
 
@@ -454,27 +485,7 @@ def render_mystery(spec, out, poster):
         draw_fills(d, p, py, px, end, rch.half())
         col = EM if res["value"] >= 0 else RED
         T(d, (360, rbox[3] + 34), f"{fmt_result(res['value'], res['unit'])}  in {p['holdMin']} min" + ("  ·  after charges" if res["unit"] == "R" else ""), F("Black", 34), col)
-        # marks
-        shown = [m for i, m in enumerate(marks) if t >= t_marks + i * MARK_STEP]
-        for kind in ("high", "low", "close"):
-            pts = [(rch.slot_x(m["slot"]), py(m["price"])) for m in shown if m["kind"] == kind]
-            for a, b in zip(pts, pts[1:]):
-                d.line([(u(a[0]), u(a[1])), (u(b[0]), u(b[1]))], fill=GOLD, width=u(3))
-        for i, m in enumerate(shown):
-            k = ease((t - (t_marks + i * MARK_STEP)) / 0.35)
-            y = py(m["price"])
-            if m["kind"] == "level":
-                dashed(d, rbox[0], rbox[2], y, mix(PANEL, GOLD, k), 3, 12, 6)
-                lx, ly, anchor = rbox[0] + 10, y - 18, "lm"
-            else:
-                x = rch.slot_x(m["slot"]); r = 15 + 10 * (1 - k)
-                d.ellipse([u(x - r), u(y - r), u(x + r), u(y + r)], outline=mix(PANEL, GOLD, k), width=u(3.5))
-                lx, ly, anchor = x, (y - 36 if m["kind"] != "low" else y + 36), "mm"
-            if m.get("label"):
-                f = F("Bold", 19); w = f.getlength(m["label"]) / K + 18
-                cx = lx + w / 2 if anchor == "lm" else min(max(lx, rbox[0] + w / 2 + 4), rbox[2] - w / 2 - 4)
-                d.rounded_rectangle([u(cx - w / 2), u(ly - 15), u(cx + w / 2), u(ly + 15)], radius=u(8), fill=mix(PANEL, GOLD, k))
-                T(d, (cx, ly), m["label"], f, mix(PANEL, BG, k))
+        draw_marks(d, rch, py, marks, t, t_marks, MARK_STEP)
         return img
 
     def frame(f):
@@ -521,8 +532,14 @@ def render_vs(spec, out, poster):
     # bottom panel would sit in the platforms' caption zone: keep it short and above y=1030 (80% of 1280 = 1024)
     boxes["algo"] = (20, 690, 700, 1010)
     charts = {k: Chart(boxes[k], v) for k, v in (("me", me), ("algo", algo)) if v}
-    t0, t_end = 4.0, 21.0  # the opening line stays 4 s before the trades play
-    t_tot, t_score = t_end + 0.6, t_end + 3.4
+    t0 = MESSAGE_MIN_S; t_end = t0 + 17.0  # the opening line stays 5 s before the trades play
+    # the "why" beat: both trades done, each side's reason shown and the candles it refers to marked, held 5 s
+    vmarks = {k: (c.get(k) or {}).get("marks") or [] for k in ("me", "algo")}
+    why = any(vmarks.values()) or any((c.get(k) or {}).get("note") for k in ("me", "algo"))
+    WHY_STEP = 0.6
+    t_why = t_end + 0.5
+    t_tot = (t_why + MESSAGE_MIN_S) if why else (t_end + 0.6)
+    t_score = t_tot + 2.8
     total = t_score + 6.0
 
     def prog(t): return 0 if t < t0 else min(1.0, (t - t0) / (t_end - t0))
@@ -542,6 +559,7 @@ def render_vs(spec, out, poster):
         ch = charts[key]; e, x = v["entryIdx"], v["exitIdx"]
         up = ch.n * prog(t)
         yr = ch.yrange(0, None, (v["entry"], v.get("stop"), v["exit"]))
+        yr = (yr[0] - (yr[1] - yr[0]) * 0.3, yr[1])  # room at the bottom for the reason, so it never covers a mark
         py, px = ch.draw(d, up, yr, labels=False)
         T(d, (bx[2], bx[1] - 30), ch.clock(up), F("Bold", 24), MUTED, "rm")
         if up > e:
@@ -553,13 +571,25 @@ def render_vs(spec, out, poster):
             if done:
                 res = v["result"]; good = res["value"] >= 0
                 cy = (bx[1] + bx[3]) / 2
-                d.rounded_rectangle([u(bx[0] + 160), u(cy - 40), u(bx[2] - 160), u(cy + 40)], radius=u(16), fill=EM if good else RED)
-                T(d, ((bx[0] + bx[2]) / 2, cy), ("BOOKED " if good else "STOPPED ") + fmt_result(res["value"], res["unit"]), F("Black", 32), TXT)
+                # honest wording: STOPPED only when the stop actually hit; a loss closed earlier is CUT
+                word = "BOOKED " if good else ("STOPPED " if (v.get("exitType") or "").upper() == "STOP" else "CUT ")
+                if t < t_why or not why:
+                    d.rounded_rectangle([u(bx[0] + 160), u(cy - 40), u(bx[2] - 160), u(cy + 40)], radius=u(16), fill=EM if good else RED)
+                    T(d, ((bx[0] + bx[2]) / 2, cy), word + fmt_result(res["value"], res["unit"]), F("Black", 32), TXT)
                 T(d, (bx[2] - 210, bx[1] - 30), fmt_result(res["value"], res["unit"]), F("Black", 36), EM if good else RED, "rm")
             else:
                 val, unit = live_result(v, ch.price_at(up))
                 T(d, (bx[2] - 210, bx[1] - 30), fmt_result(val, unit), F("Black", 36), EM if val >= 0 else RED, "rm")
-            if v.get("note"): T(d, (bx[0] + 12, bx[3] - 22), f"“{v['note']}”", F("SemiBold", 21), TXT, "lm")
+            if why and t >= t_why:
+                # the why beat: the reason, big, and the candles it refers to marked
+                order = ["me", "algo"].index(key)
+                start = t_why + 0.3 + order * WHY_STEP * max(1, len(vmarks["me"]))
+                draw_marks(d, ch, py, vmarks[key], t, start, WHY_STEP)
+                if v.get("note"):
+                    k = ease((t - t_why) / 0.35); f = F("Bold", 24); w = min(640, f.getlength(f"“{v['note']}”") / K + 28)
+                    d.rounded_rectangle([u(360 - w / 2), u(bx[3] - 46), u(360 + w / 2), u(bx[3] - 10)], radius=u(10), fill=mix(PANEL, (36, 32, 22), k))
+                    T(d, (360, bx[3] - 28), f"“{v['note']}”", f, mix(PANEL, TXT, k))
+            elif v.get("note"): T(d, (bx[0] + 12, bx[3] - 22), f"“{v['note']}”", F("SemiBold", 21), TXT, "lm")
 
     def frame(f):
         t = f / FPS
@@ -615,6 +645,11 @@ def render_vs(spec, out, poster):
         else:
             place(buf, tone(110, 0.7, 0.55, 4), at(v["exitIdx"]))
     for kk, fr in enumerate([784, 988, 1175, 1568]): place(buf, tone(fr, 0.6, 0.2, 4), t_score + kk * 0.08)
+    if why:
+        place(buf, tone(240, 0.5, 0.18, 4), t_why)
+        n_me = max(1, len(vmarks["me"]))
+        for i in range(len(vmarks["me"])): place(buf, tone(1320, 0.12, 0.22, 14), t_why + 0.3 + i * WHY_STEP)
+        for i in range(len(vmarks["algo"])): place(buf, tone(1320, 0.12, 0.22, 14), t_why + 0.3 + (n_me + i) * WHY_STEP)
     finish(frame, nf, buf, out, poster, poster_t=1.2)  # the hook, not the result
 
 

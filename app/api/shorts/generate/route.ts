@@ -60,11 +60,17 @@ export async function POST(req: Request) {
         const msg = vsMessage({
           weekNo: s.weeks.findIndex((x) => x.week === w.week) + 1, weekLabel: label, week: w, after: score.after,
           me: me && w.meTrade ? { t: w.meTrade, p: me } : undefined, algo: algo && w.algoTrade ? { t: w.algoTrade, p: algo } : undefined,
+          ownNotes: { me: me?.note, algo: algo?.note },
         });
         text = await writeText('vs', msg).catch((e) => ({ error: (e as Error).message }));
         if ('notes' in text && text.notes) {
           if (me && !me.note) me.note = text.notes.me;
           if (algo && !algo.note) algo.note = text.notes.algo;
+        }
+        if ('youtube' in text && text.vsMarks) {  // only candles on each side's chart, real prices
+          if (me) me.marks = toMarks(text.vsMarks.me, me);
+          if (algo) algo.marks = toMarks(text.vsMarks.algo, algo).slice(0, 2);
+          if (me?.marks) me.marks = me.marks.slice(0, 2);
         }
       }
     } else return bad('kind must be mystery or vs');

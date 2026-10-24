@@ -13,6 +13,7 @@ import type { ShortTrade, WeekScore } from './trades';
 export interface SocialText {
   tell?: string;                                   // mystery
   marks?: unknown;                                 // mystery: what to mark on the recap chart (checked by toMarks)
+  vsMarks?: { me: unknown; algo: unknown };        // me vs algo: what each side's reason refers to (checked by toMarks)
   notes?: { me: string; algo: string };            // me vs algo
   youtube: { title: string; description: string; tags: string[] };
   instagram: { caption: string };
@@ -70,7 +71,13 @@ facts clearly show a valid setup that simply failed.
 const VS_TASK = `This is a ME vs ALGO short: one week of his own trades against his trading bot's (Algo Live), each side's
 biggest trade replayed, the week's totals in R, and the season score. Tickers are never shown.
 - notes.me / notes.algo: max 40 characters each: why that side's trade was taken, from the facts (for the algo, describe
-  it mechanically, e.g. "Short on a 10-min breakdown"). Empty string when that side had no trade.
+  it mechanically, e.g. "Short on a 10-min breakdown"). Empty string when that side had no trade. A losing side's
+  reason is still why it was taken: no excuses, no spin.
+- vs_marks.me / vs_marks.algo: after both trades play, each side's reason is shown and the candles it refers to are
+  marked on that side's chart. 1-2 marks per side, same format as below: time of a 10-minute candle exactly as listed
+  for THAT side, kind "high" | "low" | "close" | "level" (price only for a level, else 0), label max 24 characters.
+  The marks must show exactly what that side's reason says. Empty array when that side had no trade.
+  The charts show ONLY the 10-minute candles listed; never point at something only a 1-minute chart would show.
 - No stock names or tickers anywhere.
 - youtube.title: max 70 characters, the rivalry and the result of the week (who won), no answer-spoiling numbers needed.
 - youtube.description: 3-5 short lines: what this series is, this week's result, "New round every Monday.", the
@@ -79,17 +86,23 @@ biggest trade replayed, the week's totals in R, and the season score. Tickers ar
 - instagram.caption: max 600 characters, ending with a question that invites comments, the not-advice line, 6-10 hashtags.
 - tell: empty string. marks: empty array.`;
 
+const MARKS_SCHEMA = {
+  type: 'array', items: {
+    type: 'object', additionalProperties: false, required: ['time', 'kind', 'price', 'label'],
+    properties: { time: { type: 'string' }, kind: { type: 'string', enum: ['high', 'low', 'close', 'level'] }, price: { type: 'number' }, label: { type: 'string' } },
+  },
+} as const;
+
 export const TEXT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['tell', 'marks', 'notes', 'youtube', 'instagram'],
+  required: ['tell', 'marks', 'vs_marks', 'notes', 'youtube', 'instagram'],
   properties: {
-    tell: { type: 'string' },
-    marks: {
-      type: 'array', items: {
-        type: 'object', additionalProperties: false, required: ['time', 'kind', 'price', 'label'],
-        properties: { time: { type: 'string' }, kind: { type: 'string', enum: ['high', 'low', 'close', 'level'] }, price: { type: 'number' }, label: { type: 'string' } },
-      },
+    vs_marks: {
+      type: 'object', additionalProperties: false, required: ['me', 'algo'],
+      properties: { me: MARKS_SCHEMA, algo: MARKS_SCHEMA },
     },
+    tell: { type: 'string' },
+    marks: MARKS_SCHEMA,
     notes: { type: 'object', additionalProperties: false, required: ['me', 'algo'], properties: { me: { type: 'string' }, algo: { type: 'string' } } },
     youtube: {
       type: 'object', additionalProperties: false, required: ['title', 'description', 'tags'],
@@ -140,10 +153,12 @@ export function mysteryMessage(t: ShortTrade, p: PanelSpec, ownTell = ''): strin
   return `${MYSTERY_CORE}\n\n${isLoss(p) ? MYSTERY_LOSS : MYSTERY_WIN}${own}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
 }
 
-export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScore; after: { me: number; algo: number }; me?: { t: ShortTrade; p: PanelSpec }; algo?: { t: ShortTrade; p: PanelSpec } }): string {
+export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScore; after: { me: number; algo: number }; me?: { t: ShortTrade; p: PanelSpec }; algo?: { t: ShortTrade; p: PanelSpec }; ownNotes?: { me?: string; algo?: string } }): string {
   const side = (k: 'me' | 'algo') => `${k === 'me' ? 'HIS' : 'THE ALGO\'S'} WEEK: ${p.week[k].r}R over ${p.week[k].n} scored trades`;
+  const own = (['me', 'algo'] as const).filter((k) => p.ownNotes?.[k]?.trim())
+    .map((k) => `HE WROTE notes.${k} HIMSELF: "${p.ownNotes![k]!.trim()}". Return it unchanged and mark exactly that.`);
   return [
-    VS_TASK, '',
+    VS_TASK, ...own, '',
     `Week ${p.weekNo} of the season (${p.weekLabel}). Winner this week: ${p.week.winner}. Season after this week: me ${p.after.me} - ${p.after.algo} algo.`,
     side('me'), p.me ? tradeFacts(p.me.t, p.me.p, 'his trade of the week') : 'no trade of the week',
     '', side('algo'), p.algo ? tradeFacts(p.algo.t, p.algo.p, 'the algo\'s trade of the week') : 'no trade of the week',
@@ -168,9 +183,12 @@ export function scrubTicker(x: SocialText, ticker: string): SocialText {
 /** The model's JSON -> SocialText, every field length-capped. */
 export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs'): SocialText {
   const yt = (j.youtube ?? {}) as Record<string, unknown>, ig = (j.instagram ?? {}) as Record<string, unknown>, n = (j.notes ?? {}) as Record<string, unknown>;
+  const vm = (j.vs_marks ?? {}) as { me?: unknown; algo?: unknown };
   const tags = Array.isArray(yt.tags) ? yt.tags.map((t) => clip(t, 40).replace(/^#/, '').toLowerCase()).filter(Boolean).slice(0, 15) : [];
   return {
-    ...(kind === 'mystery' ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] } : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) } }),
+    ...(kind === 'mystery'
+      ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] }
+      : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) }, vsMarks: { me: vm.me ?? [], algo: vm.algo ?? [] } }),
     youtube: { title: clip(yt.title, 100), description: clip(yt.description, 4500), tags },
     instagram: { caption: clip(ig.caption, 2000) },
   };

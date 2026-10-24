@@ -181,3 +181,15 @@ test('recap marks: only candles on the chart, prices from the candles, levels in
   assert.equal(m[2].label.length, 24);
   assert.deepEqual(toMarks('nonsense', p), []);
 });
+
+test('Me vs Algo: Claude marks per side, and each panel knows how its trade ended', async () => {
+  const { toSocialText } = await import('../lib/shorts/write');
+  const t = toSocialText({ notes: { me: 'Higher low', algo: 'Short on a breakdown' }, vs_marks: { me: [{ time: '09:45', kind: 'low', price: 0, label: 'higher low' }], algo: [] },
+    youtube: { title: 't', description: 'd', tags: [] }, instagram: { caption: 'c' } }, 'vs');
+  assert.deepEqual(t.notes, { me: 'Higher low', algo: 'Short on a breakdown' });
+  assert.equal((t.vsMarks?.me as unknown[]).length, 1);
+  assert.equal(t.tell, undefined);
+  const day = session('2026-07-15', 375);
+  const p = buildPanel(day, T({ date: '2026-07-15', exitType: 'STOP', netR: -1, entryTime: '09:56:00', exitTime: '10:10:00', holdMin: 14 }));
+  assert.equal(p.exitType, 'STOP');
+});
