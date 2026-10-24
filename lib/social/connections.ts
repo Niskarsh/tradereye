@@ -2,7 +2,7 @@ import { loadConn, saveConn, type InstagramConn, type YouTubeConn } from './stor
 import { youtubeAccessToken, isExpectedChannel, expectedHandle, YouTubeError } from './youtube';
 import { needsRefresh, refreshInstagramToken, InstagramError } from './instagram';
 
-/** What the YouTube page shows for each platform (no tokens, ever). */
+/** What the Socials page shows for each platform (no tokens, ever). */
 export interface ConnStatus {
   connected: boolean;
   account?: string;        // "@candlesbeforecubicles"

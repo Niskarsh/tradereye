@@ -1,6 +1,6 @@
 # YouTube and Instagram (Shorts and Reels)
 
-The **YouTube** page (`/youtube`, signed in only) connects the Candles Before Cubicles YouTube channel and Instagram
+The **Socials** page (`/socials`, signed in only; `/youtube` redirects there) connects the Candles Before Cubicles YouTube channel and Instagram
 account once, then posts Shorts and Reels from tradereye. This first part covers connecting and testing; generating
 and scheduling shorts are built on the same page next.
 
@@ -33,6 +33,24 @@ app id and secret from Meta's "API setup with Instagram login" page, not the Fac
 - **Test upload (private)** uploads `public/social/sample-short.mp4` to YouTube as private. Delete it in Studio after.
 - **Test upload (not published)** sends the same video to Instagram and waits until Meta has processed it, without
   publishing (Reels cannot be private). The unpublished upload expires on its own within 24 hours.
+
+## Making shorts (Make a short, on the Socials page)
+Two templates, both drawn from real data only:
+- **Mystery chart:** one of his trades, replayed from the trade day's saved 1-minute candles (grouped into 2/3/5/10-min
+  candles when the trade is long). Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
+  trade plays out with a live R counter (price R from his first stop), then the result (the journal's R after charges,
+  or the % move when no risk was logged), the ticker and date, and an optional one-line "tell". Only trades over
+  92 days old are offered: the ticker is shown, and SEBI wants price data in market education to be 3+ months old.
+- **Me vs Algo:** one finished week (Mon-Fri) since Algo Live started. A trade is the algo's when an Algo Live order
+  for that day, stock and side filled within 5 minutes of the journal trade's entry; everything else is his. Each side
+  is scored by the journal's R (net after charges / RiskInr; the algo's order risk when RiskInr is missing). Trades with
+  neither are not scored. Each panel replays that side's biggest-R trade of the week; tickers are never shown. Season
+  table = weeks won per side.
+
+Generate saves a spec to S3 (`shorts/<id>/spec.json`) and starts **Render short** (`.github/workflows/shorts-render.yml`,
+needs `GH_DISPATCH_TOKEN` like the backtest). The job runs `scripts/shorts/render.py` (Pillow + ffmpeg, Inter font),
+uploads `short.mp4` + `poster.jpg` and marks `status.json` done. The job's AWS key (repo secrets, same as the backtest)
+needs read/write on `shorts/`. The page polls and shows the preview.
 
 ## How posting will work
 - YouTube: uploaded right away as private with `publishAt`; YouTube makes it public at that time.

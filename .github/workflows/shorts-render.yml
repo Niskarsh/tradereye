@@ -1,0 +1,65 @@
+# Renders one Short / Reel. Started only by the Generate button on tradereye's YouTube page (workflow_dispatch with
+# the short's id); never on a schedule or on pushes.
+#
+# The repo is public, so this log is public: it prints nothing about the trade. The spec (candles, prices, ticker)
+# stays in S3 and is read and written there only; the input is just the short's id.
+#
+# Repository secrets (same as the setup backtest): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET.
+# That AWS key needs read/write on the shorts/ prefix of the bucket.
+name: Render short
+
+on:
+  workflow_dispatch:
+    inputs:
+      short_id:
+        description: Short id (set by tradereye's Generate button)
+        required: true
+        type: string
+
+concurrency:
+  group: shorts-render-${{ inputs.short_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SHORT_ID: ${{ inputs.short_id }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+      BUCKET: ${{ secrets.S3_BUCKET }}
+    steps:
+      - name: Check the id
+        run: |
+          echo "$SHORT_ID" | grep -Eq '^[a-z0-9-]{6,40}$' || { echo "bad short id"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/shorts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Pillow, numpy and ffmpeg
+        run: |
+          pip install --quiet pillow numpy
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - name: Mark as rendering and fetch the spec
+        run: |
+          printf '{"state":"rendering","updatedAt":%s}' "$(date +%s%3N)" | aws s3 cp - "s3://$BUCKET/shorts/$SHORT_ID/status.json" --content-type application/json --only-show-errors
+          aws s3 cp "s3://$BUCKET/shorts/$SHORT_ID/spec.json" spec.json --only-show-errors
+      - name: Render
+        run: python scripts/shorts/render.py spec.json short.mp4 poster.jpg
+      - name: Upload the video and mark as done
+        run: |
+          aws s3 cp short.mp4 "s3://$BUCKET/shorts/$SHORT_ID/short.mp4" --content-type video/mp4 --only-show-errors
+          aws s3 cp poster.jpg "s3://$BUCKET/shorts/$SHORT_ID/poster.jpg" --content-type image/jpeg --only-show-errors
+          printf '{"state":"done","updatedAt":%s}' "$(date +%s%3N)" | aws s3 cp - "s3://$BUCKET/shorts/$SHORT_ID/status.json" --content-type application/json --only-show-errors
+      - name: Mark as failed
+        if: failure()
+        run: |
+          printf '{"state":"failed","updatedAt":%s,"error":"The render job failed. See the Render short run on GitHub Actions."}' "$(date +%s%3N)" \
+            | aws s3 cp - "s3://$BUCKET/shorts/$SHORT_ID/status.json" --content-type application/json --only-show-errors || true

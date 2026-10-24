@@ -1,10 +1,11 @@
 "use client";
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, XCircle } from 'lucide-react';
+import MakeShorts from '@/components/shorts/MakeShorts';
 
 /**
- * YouTube tab. For now: connect YouTube and Instagram once, and test that each pipe works.
- * Generating, previewing and scheduling shorts comes next on this same page.
+ * Socials tab: connect YouTube and Instagram once (and test each pipe), then make shorts from real trades.
+ * Titles, captions and scheduling come next on this same page.
  */
 
 type Platform = 'youtube' | 'instagram';
@@ -25,7 +26,7 @@ const ERRORS: Record<string, string> = {
   failed: 'Connecting failed.',
 };
 
-export default function YouTubePage() {
+export default function SocialsPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [err, setErr] = useState('');
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
@@ -50,7 +51,7 @@ export default function YouTubePage() {
       const extra = q.get('got') ? ` (got ${q.get('got')})` : q.get('why') ? ` ${q.get('why')}` : '';
       setFlash({ ok: false, text: `${ERRORS[error] ?? 'Something went wrong.'}${extra}` });
     }
-    if (connected || error) window.history.replaceState(null, '', '/youtube');
+    if (connected || error) window.history.replaceState(null, '', '/socials');
     void load();
   }, [load]);
 
@@ -78,7 +79,7 @@ export default function YouTubePage() {
     <main className="page-shell py-8">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-white">YouTube</h1>
+          <h1 className="text-2xl font-semibold text-white">Socials</h1>
           <p className="mt-1 text-sm text-ink-3">Connect your channel and Instagram once. Shorts and Reels get scheduled from here.</p>
         </div>
         <a href={CHANNEL_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-brand-accent hover:underline">
@@ -102,6 +103,8 @@ export default function YouTubePage() {
           note="Log in as candlesbeforecubicles. The test sends a video to Instagram without publishing it."
           testLabel="Test upload (not published)" onTest={() => test('instagram')} onCheck={(id) => test('instagram', id)} onDisconnect={() => disconnect('instagram')} />
       </div>
+
+      <MakeShorts />
     </main>
   );
 }
