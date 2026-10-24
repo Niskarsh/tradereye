@@ -20,7 +20,8 @@ interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' |
 interface Side { r: number; n: number; uncounted: number }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
 interface Week { week: string; label: string; me: Side; algo: Side; winner: 'me' | 'algo' | 'tie' | 'none'; meTrade?: WeekTrade; algoTrade?: WeekTrade }
-interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string }
+interface SocialText { tell?: string; notes?: { me: string; algo: string }; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
+interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string } }
 
 type Pick =
   | { key: number; kind: 'mystery'; trade: MysteryTrade; tell: string; state?: 'sending' | 'sent' | string }
@@ -52,6 +53,8 @@ export default function MakeShorts() {
   const [shorts, setShorts] = useState<Short[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [ai, setAi] = useState(true);              // Claude writes the tell / reasons, titles and captions
+  const [textOpen, setTextOpen] = useState<string | null>(null);
 
   const loadShorts = useCallback(async () => {
     const r = await fetch('/api/shorts/list', { cache: 'no-store' }).catch(() => null);
@@ -94,11 +97,12 @@ export default function MakeShorts() {
     const left: Pick[] = [];
     for (const p of picks) {
       update(p.key, (x) => ({ ...x, state: 'sending' }));
-      const body = p.kind === 'mystery' ? { kind: 'mystery', tradeId: p.trade.id, date: p.trade.date, tell: p.tell } : { kind: 'vs', week: p.week.week, notes: p.notes };
+      const body = p.kind === 'mystery' ? { kind: 'mystery', tradeId: p.trade.id, date: p.trade.date, tell: p.tell, ai } : { kind: 'vs', week: p.week.week, notes: p.notes, ai };
       try {
         const r = await fetch('/api/shorts/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': token ?? '' }, body: JSON.stringify(body) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) left.push({ ...p, state: j.message ?? `HTTP ${r.status}` });
+        else if (j.textError) setErr(`Made, but Claude could not write the text: ${j.textError}`);
       } catch (e) { left.push({ ...p, state: (e as Error).message }); }
     }
     setPicks(left); setChartFor(null); setBusy(false);
@@ -217,7 +221,7 @@ export default function MakeShorts() {
                   <>
                     {chartFor === p.key && <div className="mt-2"><Chart c={p.trade.chart} token={token} /></div>}
                     <label className="mt-2 block text-xs text-ink-3">
-                      The tell (optional): what gave the trade away, shown at the end
+                      The tell: what gave the trade away, shown at the end{ai ? ' (leave empty and Claude writes it)' : ' (optional)'}
                       <input value={p.tell} disabled={busy} onChange={(e) => { const v = e.target.value.slice(0, 90); update(p.key, (x) => ({ ...x, tell: v } as Pick)); }}
                         placeholder="e.g. Three tests of the same low, each wick longer" className={input} />
                     </label>
@@ -228,7 +232,7 @@ export default function MakeShorts() {
                       const t = side === 'me' ? p.week.meTrade : p.week.algoTrade;
                       return (
                         <label key={side} className="block text-xs text-ink-3">
-                          {side === 'me' ? 'Your' : 'Algo’s'} one-line reason (optional){t ? '' : ': no trade'}
+                          {side === 'me' ? 'Your' : 'Algo’s'} one-line reason{t ? (ai ? ' (empty: Claude writes it)' : ' (optional)') : ': no trade'}
                           <input value={p.notes[side]} disabled={busy || !t} placeholder={t ? `${t.symbol} ${fmtR(t.r)}` : ''}
                             onChange={(e) => { const v = e.target.value.slice(0, 40); update(p.key, (x) => (x.kind === 'vs' ? { ...x, notes: { ...x.notes, [side]: v } } : x)); }} className={input} />
                         </label>
@@ -239,7 +243,11 @@ export default function MakeShorts() {
               </div>
             ))}
           </div>
-          <div className="mt-4 flex items-center gap-3">
+          <label className="mt-4 flex items-center gap-2 text-sm text-ink-2">
+            <input type="checkbox" checked={ai} disabled={busy} onChange={(e) => setAi(e.target.checked)} className="accent-[var(--color-brand-accent)]" />
+            Claude writes the tell, YouTube title, description, tags and Instagram caption (one call per short, about ₹1–2)
+          </label>
+          <div className="mt-3 flex items-center gap-3">
             <button onClick={generate} disabled={!picks.length || busy}
               className="inline-flex h-10 items-center gap-2 rounded-full bg-brand-accent px-5 text-sm font-semibold text-brand-bg hover:bg-brand-accent-hover disabled:opacity-40">
               {busy && <Loader2 className="size-4 animate-spin" />}Generate {picks.length || ''} {picks.length === 1 ? 'short' : 'shorts'}
@@ -260,9 +268,27 @@ export default function MakeShorts() {
                     ? <p className="px-3 text-center text-xs text-data-red-text">{s.status.error ?? 'Render failed.'}</p>
                     : <span className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="size-4 animate-spin" />{s.status.state === 'queued' ? 'Waiting for GitHub' : 'Rendering'}</span>}
               </div>
-              <div className="flex items-start justify-between gap-2 p-3">
-                <p className="text-xs leading-5 text-ink-2">{s.label}</p>
-                <button onClick={() => remove(s.id)} aria-label="Delete" className="text-ink-4 hover:text-data-red-text"><Trash2 className="size-4" /></button>
+              <div className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs leading-5 text-ink-2">{s.label}</p>
+                  <button onClick={() => remove(s.id)} aria-label="Delete" className="text-ink-4 hover:text-data-red-text"><Trash2 className="size-4" /></button>
+                </div>
+                {s.text && 'error' in s.text && <p className="mt-1 text-[11px] text-data-red-text">No text: {s.text.error}</p>}
+                {s.text && 'youtube' in s.text && (
+                  <>
+                    <p className="mt-1 text-xs font-semibold text-white">{s.text.youtube.title}</p>
+                    <button onClick={() => setTextOpen(textOpen === s.id ? null : s.id)} className="mt-1 text-[11px] text-brand-accent hover:underline">{textOpen === s.id ? 'Hide text' : 'Show text'}</button>
+                    {textOpen === s.id && (
+                      <div className="mt-2 space-y-2 text-[11px] leading-4 text-ink-2">
+                        {s.text.tell && <p><b className="text-ink-3">Tell:</b> {s.text.tell}</p>}
+                        {s.text.notes && (s.text.notes.me || s.text.notes.algo) && <p><b className="text-ink-3">Reasons:</b> me &ldquo;{s.text.notes.me}&rdquo; · algo &ldquo;{s.text.notes.algo}&rdquo;</p>}
+                        <p className="whitespace-pre-line"><b className="text-ink-3">YouTube description:</b>{'\n'}{s.text.youtube.description}</p>
+                        <p><b className="text-ink-3">Tags:</b> {s.text.youtube.tags.join(', ')}</p>
+                        <p className="whitespace-pre-line"><b className="text-ink-3">Instagram caption:</b>{'\n'}{s.text.instagram.caption}</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           ))}

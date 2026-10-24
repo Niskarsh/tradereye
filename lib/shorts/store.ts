@@ -12,6 +12,7 @@ import type { ShortSpec, Template } from './spec';
  *   shorts/<id>/status.json        queued -> rendering -> done / failed (the job updates it)
  *   shorts/<id>/short.mp4          the video (1080x1920)
  *   shorts/<id>/poster.jpg         a still for the list
+ *   shorts/<id>/text.json          its words: title, description, tags, Instagram caption (Claude, at Generate)
  */
 
 export const store: Store = {
@@ -30,6 +31,8 @@ export const specKey = (id: string) => `shorts/${id}/spec.json`;
 export const statusKey = (id: string) => `shorts/${id}/status.json`;
 export const videoKey = (id: string) => `shorts/${id}/short.mp4`;
 export const posterKey = (id: string) => `shorts/${id}/poster.jpg`;
+/** the words: tell / reasons, YouTube title, description, tags, Instagram caption (written by Claude at Generate) */
+export const textKey = (id: string) => `shorts/${id}/text.json`;
 export const validId = (id: string) => /^[a-z0-9-]{6,40}$/.test(id);
 
 /** A job that has said nothing for this long is treated as failed (GitHub never started it, or it died). */
@@ -74,7 +77,7 @@ export async function signedGet(key: string, seconds = 3600): Promise<string> {
 export async function deleteShort(id: string): Promise<void> {
   const all = await listShorts();
   await putJson(store, INDEX_KEY, all.filter((x) => x.id !== id));
-  for (const key of [specKey(id), statusKey(id), videoKey(id), posterKey(id)]) {
+  for (const key of [specKey(id), statusKey(id), videoKey(id), posterKey(id), textKey(id)]) {
     await s3().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key })).catch(() => {});
   }
 }

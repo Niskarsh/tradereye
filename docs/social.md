@@ -52,6 +52,13 @@ Two templates, both drawn from real data only:
   neither are not scored. Each panel replays that side's biggest-R trade of the week; tickers are never shown. Season
   table = weeks won per side.
 
+**Claude writes the words (optional, on by default):** at Generate, one Claude call per short (`lib/shorts/write.ts`,
+`ANTHROPIC_API_KEY`, model `COPILOT_MODEL`) gets only real facts: the trade, the candles before and during it (entry
+and exit marked), his journal comment and context columns. It returns the tell (mystery) or the two one-line reasons
+(Me vs Algo), the YouTube title / description / tags and the Instagram caption, saved as `shorts/<id>/text.json`.
+Anything he typed is used instead of Claude's tell / reasons. The mystery's ticker is kept out of every public text
+(it is the reveal), and that is enforced in code too. If Claude fails, the short is still made, just without text.
+
 Generate saves a spec to S3 (`shorts/<id>/spec.json`) and starts **Render short** (`.github/workflows/shorts-render.yml`,
 needs `GH_DISPATCH_TOKEN` like the backtest). The job runs `scripts/shorts/render.py` (Pillow + ffmpeg, Inter font),
 uploads `short.mp4` + `poster.jpg` and marks `status.json` done. The job's AWS key (repo secrets, same as the backtest)
