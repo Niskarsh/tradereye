@@ -96,17 +96,23 @@ export interface UploadMeta {
   title: string;               // max 100 characters
   description?: string;        // max 5000 bytes
   tags?: string[];
-  categoryId?: string;         // 27 = Education
+  categoryId?: string;         // default 22 = People & Blogs (a personal trade journal, not education)
   privacy: 'private' | 'unlisted' | 'public';
   publishAt?: string;          // ISO time; YouTube makes a private video public then
 }
+
+/**
+ * The questions YouTube Studio asks on every upload, answered the same way each time: not made for kids, and no
+ * realistic altered or synthetic (AI) content (the videos are drawn from real trade data by code).
+ */
+export const AUDIENCE = { selfDeclaredMadeForKids: false, containsSyntheticMedia: false } as const;
 
 /** Resumable upload in two calls: start a session with the details, then send the bytes. Returns the video id. */
 export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: UploadMeta, fetchImpl: typeof fetch = fetch): Promise<{ id: string; url: string }> {
   if (meta.publishAt && meta.privacy !== 'private') throw new YouTubeError('A scheduled video must be uploaded as private.');
   const body = {
     snippet: snippetOf(meta),
-    status: { privacyStatus: meta.privacy, selfDeclaredMadeForKids: false, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+    status: { privacyStatus: meta.privacy, ...AUDIENCE, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
   };
   const start = await fetchImpl(`${UPLOAD}?uploadType=resumable&part=snippet,status`, {
     method: 'POST', cache: 'no-store',
@@ -126,8 +132,19 @@ export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: 
 /** YouTube rejects < and > in titles and descriptions. */
 export const cleanText = (s: string) => s.replace(/[<>]/g, '');
 
+/**
+ * People & Blogs: the channel is one person's own trades, shared as a journal. Not "Education": an unregistered person
+ * should not present trades as education or advice (SEBI), and the descriptions say so.
+ */
+export const CATEGORY_PEOPLE_BLOGS = '22';
+/** Title / description language and audio language: English (United States). */
+export const LANGUAGE = 'en-US';
+
 function snippetOf(meta: UploadMeta) {
-  return { title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? ''), tags: meta.tags ?? [], categoryId: meta.categoryId ?? '27' };
+  return {
+    title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? ''), tags: meta.tags ?? [],
+    categoryId: meta.categoryId ?? CATEGORY_PEOPLE_BLOGS, defaultLanguage: LANGUAGE, defaultAudioLanguage: LANGUAGE,
+  };
 }
 
 /** New title / description / tags and publish time for a video that is still private (needs force-ssl). */
@@ -135,7 +152,7 @@ export async function updateVideo(accessToken: string, id: string, meta: UploadM
   if (meta.publishAt && meta.privacy !== 'private') throw new YouTubeError('A scheduled video must stay private until its time.');
   const body = {
     id, snippet: snippetOf(meta),
-    status: { privacyStatus: meta.privacy, selfDeclaredMadeForKids: false, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+    status: { privacyStatus: meta.privacy, ...AUDIENCE, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
   };
   const res = await fetchImpl(`${API}/videos?part=snippet,status`, {
     method: 'PUT', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json; charset=UTF-8' }, body: JSON.stringify(body),
@@ -165,4 +182,30 @@ export async function videoChecks(accessToken: string, ids: string[], fetchImpl:
     out[v.id] = { privacy: s.privacyStatus ?? '', upload: s.uploadStatus ?? '', publishAt: s.publishAt, problem };
   }
   return out;
+}
+
+export interface Playlist { id: string; title: string; privacy: string; count: number }
+
+/** The channel's playlists (newest first, up to 50). */
+export async function myPlaylists(accessToken: string, fetchImpl: typeof fetch = fetch): Promise<Playlist[]> {
+  const res = await fetchImpl(`${API}/playlists?${new URLSearchParams({ part: 'snippet,status,contentDetails', mine: 'true', maxResults: '50' })}`, { cache: 'no-store', headers: { authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw await apiError(res, 'Reading your playlists');
+  const j = await res.json() as { items?: { id: string; snippet?: { title?: string }; status?: { privacyStatus?: string }; contentDetails?: { itemCount?: number } }[] };
+  return (j.items ?? []).map((p) => ({ id: p.id, title: p.snippet?.title ?? '', privacy: p.status?.privacyStatus ?? '', count: p.contentDetails?.itemCount ?? 0 }));
+}
+
+/** Adds a video to a playlist (works while the video is still private). Returns the playlist item id. */
+export async function addToPlaylist(accessToken: string, playlistId: string, videoId: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const res = await fetchImpl(`${API}/playlistItems?part=snippet`, {
+    method: 'POST', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify({ snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } } }),
+  });
+  if (!res.ok) throw await apiError(res, 'Adding it to the playlist');
+  return String(((await res.json()) as { id?: string }).id ?? '');
+}
+
+/** Takes a video out of a playlist (by the playlist item id). Already gone counts as removed. */
+export async function removeFromPlaylist(accessToken: string, itemId: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const res = await fetchImpl(`${API}/playlistItems?${new URLSearchParams({ id: itemId })}`, { method: 'DELETE', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}` } });
+  if (!res.ok && res.status !== 404) throw await apiError(res, 'Removing it from the playlist');
 }

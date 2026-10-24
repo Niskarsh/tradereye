@@ -1,6 +1,6 @@
 "use client";
-import React, { useState, type ReactNode } from 'react';
-import { ExternalLink, Loader2, X } from 'lucide-react';
+import React, { useEffect, useState, type ReactNode } from 'react';
+import { Check, ExternalLink, Loader2, X } from 'lucide-react';
 import { fromIstInput, istLabel, toIstInput } from '@/lib/shorts/slots';
 import { hashtagCount, IG_MAX_HASHTAGS, type PlatformPost, type PostPlan } from '@/lib/shorts/posts';
 
@@ -59,8 +59,17 @@ export function PostStatus({ post, now, onPostNow, busy, youtubeCheck, bare }: {
   );
 }
 
-export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, onClose, onSaved }: {
-  id: string; label: string; poster?: string; text?: ShortText; post?: PostPlan; defaultAt?: number; now: number;
+interface Playlist { id: string; title: string; privacy: string; count: number }
+let playlistCache: Playlist[] | null = null;  // one fetch per page load
+
+/** The playlist a new short goes into by default: by its template's name ("Mystery…", "…Algo…"). */
+export function defaultPlaylists(kind: string | undefined, lists: Playlist[]): string[] {
+  const pat = kind === 'mystery' ? /myster/i : kind === 'vs' ? /algo/i : null;
+  return pat ? lists.filter((p) => pat.test(p.title)).slice(0, 1).map((p) => p.id) : [];
+}
+
+export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt, defaultIgAt, now, onClose, onSaved }: {
+  id: string; kind?: string; label: string; poster?: string; text?: ShortText; post?: PostPlan; defaultAt?: number; defaultIgAt?: number; now: number;
   onClose: () => void; onSaved: () => void;
 }) {
   const yt = post?.youtube, ig = post?.instagram;
@@ -68,9 +77,27 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
   const start = yt?.at ?? ig?.at ?? defaultAt ?? now + 3_600_000;
   const [ytOn, setYtOn] = useState(ytLive || !post || !!yt);
   const [igOn, setIgOn] = useState(igLive || !post || !!ig);
-  const [same, setSame] = useState(!ig || !yt || ig.at === yt.at);
+  // defaults: YouTube 15:30, Instagram 11:00 the same day, so not "same time" unless he sets it
+  const [same, setSame] = useState(post ? (!ig || !yt || ig.at === yt.at) : false);
   const [ytAt, setYtAt] = useState(toIstInput(yt?.at ?? start));
-  const [igAt, setIgAt] = useState(toIstInput(ig?.at ?? start));
+  const [igAt, setIgAt] = useState(toIstInput(ig?.at ?? (post ? start : defaultIgAt ?? start)));
+  const [lists, setLists] = useState<Playlist[] | null>(playlistCache);
+  const [listErr, setListErr] = useState('');
+  const [chosen, setChosen] = useState<string[] | null>(yt?.playlists ? yt.playlists.map((x) => x.id) : null);
+  const loadLists = async (fresh = false) => {
+    if (playlistCache && !fresh) return;
+    setListErr('');
+    try {
+      const r = await fetch('/api/social/playlists', { cache: 'no-store' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      playlistCache = j.playlists; setLists(j.playlists);
+    } catch (e) { setListErr((e as Error).message); }
+  };
+  useEffect(() => { void loadLists(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // until he touches them, the playlists follow the template's default
+  const picked = chosen ?? defaultPlaylists(kind, lists ?? []);
+  const toggleList = (pid: string) => setChosen(picked.includes(pid) ? picked.filter((x) => x !== pid) : [...picked, pid]);
   const [title, setTitle] = useState(text?.youtube.title ?? '');
   const [description, setDescription] = useState(text?.youtube.description ?? '');
   const [tags, setTags] = useState((text?.youtube.tags ?? []).join(', '));
@@ -97,7 +124,7 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
     if (igOn && !igLive && Number.isNaN(i)) return setErr('Pick the Instagram date and time.');
     const dropping = [!ytOn && yt && !ytLive && 'YouTube', !igOn && igPending(ig) && 'Instagram'].filter(Boolean);
     if (dropping.length && !window.confirm(`Unschedule it from ${dropping.join(' and ')}?`)) return;
-    void send({ id, text: words, youtube: ytOn ? { at: ytLive ? yt!.at : y } : null, instagram: igOn ? { at: igLive ? ig!.at : i } : null });
+    void send({ id, text: words, youtube: ytOn ? { at: ytLive ? yt!.at : y, playlists: picked } : null, instagram: igOn ? { at: igLive ? ig!.at : i } : null });
   };
   const unscheduleAll = () => {
     if (!window.confirm('Unschedule this short? The private YouTube upload is removed; nothing already public is touched.')) return;
@@ -130,7 +157,29 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
             <div className="rounded-xl border border-line p-3">
               {check(ytOn, setYtOn, 'YouTube Short', ytLive)}
               {ytLive ? <p className="mt-2 text-xs text-data-green">Live. Edit it in YouTube Studio.</p> : (
-                <div className="mt-2 flex flex-wrap items-center gap-2">{when(ytAt, setYtAt, !ytOn)}</div>
+                <>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">{when(ytAt, setYtAt, !ytOn)}</div>
+                  <div className="mt-3">
+                    <div className="flex items-center gap-2 text-xs text-ink-3">
+                      Playlists
+                      <button onClick={() => void loadLists(true)} disabled={busy} className="text-brand-accent hover:underline">refresh</button>
+                    </div>
+                    {listErr ? <p className="mt-1 text-xs text-data-red-text">{listErr}</p>
+                      : !lists ? <Loader2 className="mt-1 size-4 animate-spin text-ink-3" />
+                      : !lists.length ? <p className="mt-1 text-xs text-ink-4">No playlists yet. Create them in YouTube Studio, then refresh.</p>
+                      : (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {lists.map((pl) => (
+                            <button key={pl.id} onClick={() => toggleList(pl.id)} disabled={busy || !ytOn}
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-40 ${picked.includes(pl.id) ? 'border-brand-accent bg-brand-accent/15 text-brand-accent' : 'border-line-strong text-ink-3 hover:text-white'}`}>
+                              {picked.includes(pl.id) && <Check className="size-3" />}{pl.title}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                  <p className="mt-3 text-[11px] leading-4 text-ink-4">Set on every upload: not made for kids · no altered or synthetic (AI) content · category People &amp; Blogs · English (US). A SEBI risk disclaimer is added to the description and caption if missing.</p>
+                </>
               )}
             </div>
             <div className="rounded-xl border border-line p-3">
@@ -163,7 +212,7 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button onClick={save} disabled={busy || (!ytOn && !igOn && !scheduledAny)}
+            <button onClick={save} disabled={busy || (!ytOn && !igOn && !scheduledAny) || (ytOn && !ytLive && !lists && !listErr)}
               className="inline-flex h-10 items-center gap-2 rounded-full bg-brand-accent px-5 text-sm font-semibold text-brand-bg hover:bg-brand-accent-hover disabled:opacity-40">
               {busy && <Loader2 className="size-4 animate-spin" />}{scheduledAny ? 'Save changes' : 'Schedule'}
             </button>
