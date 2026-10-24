@@ -532,7 +532,7 @@ def render_vs(spec, out, poster):
     # bottom panel would sit in the platforms' caption zone: keep it short and above y=1030 (80% of 1280 = 1024)
     boxes["algo"] = (20, 690, 700, 1010)
     charts = {k: Chart(boxes[k], v) for k, v in (("me", me), ("algo", algo)) if v}
-    t0 = MESSAGE_MIN_S; t_end = t0 + 17.0  # the opening line stays 5 s before the trades play
+    t0 = 2.0; t_end = t0 + 17.0  # the opening line clears after 2 s and the trades start (this template only)
     # the "why" beat: both trades done, each side's reason shown and the candles it refers to marked, held 5 s
     vmarks = {k: (c.get(k) or {}).get("marks") or [] for k in ("me", "algo")}
     why = any(vmarks.values()) or any((c.get(k) or {}).get("note") for k in ("me", "algo"))
