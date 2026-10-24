@@ -81,7 +81,11 @@ Two templates, both drawn from real data only:
 `ANTHROPIC_API_KEY`, model `COPILOT_MODEL`) gets only real facts: the trade, the candles before and during it (entry
 and exit marked), his journal comment and context columns. It returns the tell (mystery) or the two one-line reasons
 (Me vs Algo), the YouTube title / description / tags and the Instagram caption, saved as `shorts/<id>/text.json`.
-Anything he typed is used instead of Claude's tell / reasons. The mystery's ticker is kept out of every public text
+Anything he typed is used instead of Claude's tell / reasons. Reach rules in the prompt: title max 55 characters with
+the hook in the first 40 (phones cut the rest), searchable words where natural, one easy comment question, the first
+line of the description (100 chars) and caption (125 chars) carry the hook, YouTube exactly 3 hashtags (#shorts first),
+Instagram 3-5. Instagram allows **5 hashtags at most**: `capHashtags` drops extras from Claude's caption and from his
+edits. The mystery's ticker is kept out of every public text
 (it is the reveal), and that is enforced in code too. If Claude fails, the short is still made, just without text.
 
 Generate saves a spec to S3 (`shorts/<id>/spec.json`) and starts **Render short** (`.github/workflows/shorts-render.yml`,
@@ -89,7 +93,31 @@ needs `GH_DISPATCH_TOKEN` like the backtest). The job runs `scripts/shorts/rende
 uploads `short.mp4` + `poster.jpg` and marks `status.json` done. The job's AWS key (repo secrets, same as the backtest)
 needs read/write on `shorts/`. The page polls and shows the preview.
 
-## How posting will work
-- YouTube: uploaded right away as private with `publishAt`; YouTube makes it public at that time.
-- Instagram: the API has no publish-at option, so tradereye creates the Reel container at the chosen time (containers
-  expire after 24 hours), waits for FINISHED, then publishes.
+## Scheduling (each finished short: Schedule / Edit schedule)
+The editor opens above the shorts: Claude's YouTube title, description, tags and Instagram caption (all editable), a
+YouTube date/time and "Same time as YouTube" for Instagram (untick to give Instagram its own time, or untick a platform
+to skip it). Times are IST. A short not scheduled yet is offered the next free **Mon / Wed / Fri 18:30 IST** slot,
+oldest short first (`lib/shorts/slots.ts`). The plan for every short is one S3 file, `shorts/posts.json`
+(`lib/shorts/posts.ts` rules, `lib/shorts/publish.ts` work); each card shows Scheduled / Live (link) / Failed.
+- **YouTube:** uploaded when Schedule is pressed, private with `publishAt`; YouTube itself makes it public at that time,
+  whatever tradereye is doing. A new time or new words change the upload; Unschedule removes it. Changing or removing
+  needs the `youtube.force-ssl` scope: a channel connected before it was added shows "Connect again once".
+- **Instagram:** the API cannot schedule or post privately, so tradereye publishes it, woken by **EventBridge
+  Scheduler** (`lib/social/scheduler.ts`, signed with `lib/aws/sigv4.ts`). Each waiting Reel has exactly one one-time
+  wake-up (`tr-ig-<short>-<minute>`, default group, deleted by AWS after it runs) at its next step. It invokes the Lambda
+  **tradereye-social-timer** (`infra/social-timer/index.mjs`), which calls `POST /api/social/tick` with `CRON_SECRET`:
+  20 minutes before the slot the video is handed to Meta (processed ahead, nothing visible), at the slot it is
+  published once Meta says FINISHED (not yet: another wake-up 2 minutes later). Three failed tries in a row, or over 90
+  minutes late, marks it Failed with **Post now** (publish at once, also the retry). Unscheduling or a new time removes
+  the old wake-up. If a wake-up cannot be set, the post says "Timer not set" with AWS's reason.
+  Cost: Scheduler 14M invocations / month free, Lambda 1M requests / month free; this uses ~30.
+- A scheduled short cannot be deleted until it is unscheduled. Anything already public is never touched.
+- Env (Vercel): `CRON_SECRET` (24+ random characters, same value in the Lambda), `SOCIAL_TIMER_LAMBDA_ARN`,
+  `SOCIAL_TIMER_ROLE_ARN`. The S3 AWS key also needs `scheduler:CreateSchedule` / `scheduler:DeleteSchedule` on
+  `schedule/default/tr-*` and `iam:PassRole` on the timer role. Lambda env: `TICK_URL`, `CRON_SECRET`.
+
+## Posting view (Socials page, second tab)
+Every short with a posting plan: **Needs attention** (failed, rejected by YouTube, timer not set), **Upcoming**
+(soonest first, with a countdown), **Published, last 7 days** (with links). Each row has Edit (same editor). YouTube rows
+are checked with YouTube itself (`videos.list`): public = live, rejected / failed / deleted = needs attention, still
+private well after its time = flagged. `GET /api/shorts/posts`.

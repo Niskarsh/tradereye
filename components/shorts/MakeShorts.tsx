@@ -3,6 +3,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TradeCharts } from '@/components/journal/TradeCharts';
+import { PostStatus, ScheduleEditor } from '@/components/shorts/SchedulePanel';
+import { blocksDelete, takenSlots, type PostPlan } from '@/lib/shorts/posts';
+import { istLabel, nextSlots } from '@/lib/shorts/slots';
 
 /**
  * "Make a short" on the Socials page. Pick up to 3 shorts in total from either tab (any mix: 3 mystery charts, 2 + 1,
@@ -26,7 +29,7 @@ interface Week {
   frozenAt?: number; rescoredAt?: number; drift?: boolean; now?: { me: Side; algo: Side; winner: Winner };
 }
 interface SocialText { tell?: string; notes?: { me: string; algo: string }; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
-interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string } }
+interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string }; post?: PostPlan }
 
 type Pick =
   | { key: number; kind: 'mystery'; trade: MysteryTrade; tell: string; state?: 'sending' | 'sent' | string }
@@ -60,11 +63,14 @@ export default function MakeShorts() {
   const [err, setErr] = useState('');
   const [ai, setAi] = useState(true);              // Claude writes the tell / reasons, titles and captions
   const [textOpen, setTextOpen] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);  // the short being scheduled
+  const [posting, setPosting] = useState<string | null>(null);  // "Post now" on Instagram
+  const [now, setNow] = useState(() => Date.now());
 
   const loadShorts = useCallback(async () => {
     const r = await fetch('/api/shorts/list', { cache: 'no-store' }).catch(() => null);
     const j = await r?.json().catch(() => null);
-    if (r?.ok && j?.shorts) setShorts(j.shorts);
+    if (r?.ok && j?.shorts) { setShorts(j.shorts); setNow(j.now ?? Date.now()); }
   }, []);
   useEffect(() => { void loadShorts(); }, [loadShorts]);
   const working = shorts.some((s) => s.status.state === 'queued' || s.status.state === 'rendering');
@@ -127,9 +133,27 @@ export default function MakeShorts() {
 
   const remove = async (id: string) => {
     if (!window.confirm('Delete this short?')) return;
-    await fetch('/api/shorts/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null);
+    const r = await fetch('/api/shorts/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null);
+    const j = await r?.json().catch(() => ({}));
+    if (!r?.ok) setErr(j?.message ?? 'Could not delete it.');
     void loadShorts();
   };
+
+  /** Instagram right now (also the retry after a failure) */
+  const postNow = async (id: string) => {
+    if (!window.confirm('Publish this Reel on Instagram now?')) return;
+    setPosting(id);
+    const r = await fetch('/api/shorts/post-now', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null);
+    const j = await r?.json().catch(() => ({}));
+    if (!r?.ok) setErr(j?.message ?? 'Could not post it.');
+    setPosting(null); void loadShorts();
+  };
+
+  // default slots for shorts not scheduled yet: the next free Mon / Wed / Fri 18:30 IST, oldest short first
+  const waiting = shorts.filter((s) => s.status.state === 'done' && !s.post).sort((a, b) => a.createdAt - b.createdAt);
+  const slots = nextSlots(waiting.length, now, takenSlots(Object.fromEntries(shorts.filter((s) => s.post).map((s) => [s.id, s.post!])), now));
+  const defaultAt = new Map(waiting.map((s, i) => [s.id, slots[i]]));
+  const editingShort = shorts.find((s) => s.id === editing);
 
   const tab = (k: Kind, label: string) => (
     <button onClick={() => setKind(k)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${kind === k ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>{label}</button>
@@ -147,7 +171,7 @@ export default function MakeShorts() {
   );
 
   return (
-    <section className="mt-8">
+    <section className="mt-4">
       <h2 className="text-xl font-semibold text-white">Make shorts</h2>
       <p className="mt-1 text-sm text-ink-3">Pick up to {MAX_PICKS} in total from either tab. Open a row to see the trade on its chart. Rendering takes a few minutes on GitHub; each short shows below when ready.</p>
 
@@ -291,7 +315,13 @@ export default function MakeShorts() {
       </div>
 
       {shorts.length > 0 && (
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div id="shorts-grid" className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {editingShort && (
+            <ScheduleEditor key={editingShort.id} id={editingShort.id} label={editingShort.label} poster={editingShort.poster}
+              text={editingShort.text && 'youtube' in editingShort.text ? editingShort.text : undefined}
+              post={editingShort.post} defaultAt={defaultAt.get(editingShort.id)} now={now}
+              onClose={() => setEditing(null)} onSaved={() => void loadShorts()} />
+          )}
           {shorts.map((s) => (
             <div key={s.id} className="overflow-hidden rounded-2xl border border-line-strong bg-brand-card">
               <div className="flex aspect-[9/16] items-center justify-center bg-black">
@@ -304,7 +334,8 @@ export default function MakeShorts() {
               <div className="p-3">
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-xs leading-5 text-ink-2">{s.label}</p>
-                  <button onClick={() => remove(s.id)} aria-label="Delete" className="text-ink-4 hover:text-data-red-text"><Trash2 className="size-4" /></button>
+                  <button onClick={() => remove(s.id)} disabled={blocksDelete(s.post, now)} aria-label="Delete" title={blocksDelete(s.post, now) ? 'Unschedule it first' : 'Delete'}
+                    className="text-ink-4 hover:text-data-red-text disabled:opacity-30"><Trash2 className="size-4" /></button>
                 </div>
                 {s.text && 'error' in s.text && <p className="mt-1 text-[11px] text-data-red-text">No text: {s.text.error}</p>}
                 {s.text && 'youtube' in s.text && (
@@ -321,6 +352,13 @@ export default function MakeShorts() {
                       </div>
                     )}
                   </>
+                )}
+                <PostStatus post={s.post} now={now} busy={posting === s.id} onPostNow={() => postNow(s.id)} />
+                {s.status.state === 'done' && (
+                  <button onClick={() => { setEditing(s.id); document.getElementById('shorts-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+                    className="mt-2 inline-flex h-8 items-center rounded-full border border-brand-accent/70 px-3 text-xs font-semibold text-brand-accent hover:bg-brand-accent hover:text-brand-bg">
+                    {s.post ? 'Edit schedule' : `Schedule${defaultAt.get(s.id) ? ` · ${istLabel(defaultAt.get(s.id)!)}` : ''}`}
+                  </button>
                 )}
               </div>
             </div>

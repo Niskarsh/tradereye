@@ -7,6 +7,7 @@ export const PUBLIC_API = new Set([
   '/api/analytics',      // public view = this month's P&L totals only (the route trims everything else)
   '/api/live/postback',  // Dhan's webhook, protected by its own POSTBACK_SECRET
   '/api/instagram/deauthorize', '/api/instagram/data-deletion',  // Meta's callbacks, accepted only when signed with IG_APP_SECRET
+  '/api/social/tick',    // the posting timer (GitHub Actions), protected by its own CRON_SECRET
 ]);
 export const PUBLIC_PAGES = new Set(['/', '/privacy']); // /privacy: Google and Meta need a public privacy policy for the YouTube/Instagram apps
 

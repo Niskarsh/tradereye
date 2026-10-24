@@ -2,10 +2,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, XCircle } from 'lucide-react';
 import MakeShorts from '@/components/shorts/MakeShorts';
+import PostingBoard from '@/components/shorts/PostingBoard';
 
 /**
  * Socials tab: connect YouTube and Instagram once (and test each pipe), then make shorts from real trades.
- * Titles, captions and scheduling come next on this same page.
+ * Two views below the connections: Make shorts (pick, generate, schedule) and Posting (what is still to go live,
+ * what needs attention, what went live in the last 7 days).
  */
 
 type Platform = 'youtube' | 'instagram';
@@ -32,6 +34,8 @@ export default function SocialsPage() {
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState<Platform | null>(null);
   const [tests, setTests] = useState<Partial<Record<Platform, TestResult>>>({});
+  const [view, setView] = useState<'make' | 'posting'>('make');
+  const [counts, setCounts] = useState({ upcoming: 0, attention: 0 });
 
   const load = useCallback(async () => {
     try {
@@ -104,7 +108,18 @@ export default function SocialsPage() {
           testLabel="Test upload (not published)" onTest={() => test('instagram')} onCheck={(id) => test('instagram', id)} onDisconnect={() => disconnect('instagram')} />
       </div>
 
-      <MakeShorts />
+      <div className="mt-8 inline-flex gap-1 rounded-full border border-line-strong p-1">
+        {(['make', 'posting'] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${view === v ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>
+            {v === 'make' ? 'Make shorts' : 'Posting'}
+            {v === 'posting' && counts.upcoming > 0 && <span className="ml-1.5 opacity-80">{counts.upcoming}</span>}
+            {v === 'posting' && counts.attention > 0 && <span className="ml-1.5 rounded-full bg-data-red px-1.5 text-[11px] text-white">{counts.attention}</span>}
+          </button>
+        ))}
+      </div>
+      {/* both stay mounted so the Posting count is right while making shorts */}
+      <div className={view === 'make' ? '' : 'hidden'}><MakeShorts /></div>
+      <div className={view === 'posting' ? '' : 'hidden'}><PostingBoard onCounts={setCounts} active={view === 'posting'} /></div>
     </main>
   );
 }

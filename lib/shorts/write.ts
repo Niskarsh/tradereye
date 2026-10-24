@@ -1,6 +1,7 @@
 import { jsonClaude, type ClaudeOptions } from '../copilot/claude';
 import type { PanelSpec } from './spec';
 import type { ShortTrade, WeekScore } from './trades';
+import { capHashtags } from './posts';
 
 /**
  * Claude writes a short's words in ONE call, when Generate is pressed: the tell drawn into a mystery video (or the
@@ -28,7 +29,24 @@ Hard rules:
 - Use only the facts given. Never invent prices, times, events, indicators or results that are not in the data.
 - No investment advice: no buy/sell calls, no "you should", no promises of returns, no "guaranteed", no "easy money".
 - Plain English, Indian retail-trader audience. At most 2 emoji in a caption, none in the title.
-- Every description and caption carries one line: "Real trade, real money. Not investment advice."`;
+- Every description and caption carries one line: "Real trade, real money. Not investment advice."
+
+Reach rules (write for the feed, but never promise what the video doesn't show):
+- Title: max 55 characters, and the hook must sit in the first 40: most phones cut the rest. Concrete tension (a
+  decision, a stake, an R number, a contrast), not vague hype. Use words people search for where they fit naturally
+  ("intraday", "NSE", "chart", "trade", "stop loss").
+- Hook patterns that work: a direct question to the viewer ("Long or short here?"), an honest confession ("I lost on
+  this one"), a contrast ("My bot did nothing and still won"), a stake ("-1R or +3R: you decide"). Pick the one that fits
+  the facts.
+- The first line of the YouTube description (the only line shown under the video, max 100 characters) restates the
+  hook or asks the comment question.
+- The first line of the Instagram caption (max 125 characters, shown before "more") is the hook, with searchable words in
+  it (Instagram search reads captions).
+- Ask ONE specific, easy-to-answer question that invites a comment (one word answers are best: long / short / wait,
+  me / bot).
+- Hashtags: YouTube description ends with exactly 3 (#shorts first; YouTube shows them above the title). Instagram
+  caption ends with 3-5 (Instagram allows 5 at most), specific over generic (#intradaytrading beats #money).
+- Never: "smash like", "link in bio", fake urgency, all caps words, "guaranteed", made-up numbers.`;
 
 const MYSTERY_CORE = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
 "Long, short, or wait?", shows HIS call ("MY CALL: LONG"), plays the trade and finally reveals the stock.
@@ -49,11 +67,11 @@ If his journal comment explains the trade, use it only where the 10-minute candl
 const MYSTERY_WIN = `OUTCOME: A WIN.
 - tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 10-minute
   candles BEFORE the entry that the trade was based on.
-- youtube.title: max 70 characters, a curiosity hook built around the decision; do not give the answer away.
+- youtube.title: a curiosity hook built around the decision; do not give the answer away.
 - youtube.description: 3-5 short lines: the hook, "Answer and the stock revealed at the end.", the not-advice line,
-  then 4-6 hashtags on the last line (#shorts first).
+  then the 3 hashtags on the last line.
 - instagram.caption: max 600 characters: hook line, "Long, short or wait? Comment before the reveal 👇", the not-advice
-  line, then 6-10 hashtags.`;
+  line, then 3-5 hashtags.`;
 
 const MYSTERY_LOSS = `OUTCOME: A LOSS. Be honest and plain about it: no excuses, no spin, no "it was still a good trade" unless the
 facts clearly show a valid setup that simply failed.
@@ -61,12 +79,12 @@ facts clearly show a valid setup that simply failed.
   was visible on the 10-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
   high: buyers were already fading"). If no such sign is visible on those candles, say so plainly instead of inventing
   one, e.g. "Nothing on the 10-min chart warned. The stop did its job."
-- youtube.title: max 70 characters, honest that it is a losing trade, built around the decision (e.g. "I lost on this
-  one. Would you have taken it?"); do not reveal the stock.
+- youtube.title: honest that it is a losing trade, built around the decision (e.g. "I lost on this one. Would you
+  take it?"); do not reveal the stock.
 - youtube.description: 3-5 short lines: the hook, "The stock and what I missed, revealed at the end.", the not-advice
-  line, then 4-6 hashtags on the last line (#shorts first).
+  line, then the 3 hashtags on the last line.
 - instagram.caption: max 600 characters: an honest hook about the loss, "What would you have done? Comment below 👇",
-  the not-advice line, then 6-10 hashtags.`;
+  the not-advice line, then 3-5 hashtags.`;
 
 const VS_TASK = `This is a ME vs ALGO short: one week of his own trades against his trading bot's (Algo Live), each side's
 biggest trade replayed, the week's totals in R, and the season score. Tickers are never shown.
@@ -79,11 +97,11 @@ biggest trade replayed, the week's totals in R, and the season score. Tickers ar
   The marks must show exactly what that side's reason says. Empty array when that side had no trade.
   The charts show ONLY the 10-minute candles listed; never point at something only a 1-minute chart would show.
 - No stock names or tickers anywhere.
-- youtube.title: max 70 characters, the rivalry and the result of the week (who won), no answer-spoiling numbers needed.
+- youtube.title: the rivalry and the result of the week (who won).
 - youtube.description: 3-5 short lines: what this series is, this week's result, "New round every Monday.", the
-  not-advice line, then 4-6 hashtags (#shorts first).
+  not-advice line, then the 3 hashtags.
 - youtube.tags: 8-15 lowercase tags (no #).
-- instagram.caption: max 600 characters, ending with a question that invites comments, the not-advice line, 6-10 hashtags.
+- instagram.caption: max 600 characters, ending with a question that invites comments, the not-advice line, 3-5 hashtags.
 - tell: empty string. marks: empty array.`;
 
 const MARKS_SCHEMA = {
@@ -190,7 +208,7 @@ export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs')
       ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] }
       : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) }, vsMarks: { me: vm.me ?? [], algo: vm.algo ?? [] } }),
     youtube: { title: clip(yt.title, 100), description: clip(yt.description, 4500), tags },
-    instagram: { caption: clip(ig.caption, 2000) },
+    instagram: { caption: capHashtags(clip(ig.caption, 2000)) },
   };
 }
 
