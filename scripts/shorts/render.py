@@ -65,14 +65,38 @@ def fmt_result(value, unit, decimals=1):
     return f"{value:+.2f}%".replace("-", "−")
 
 
+def minute_path(o, h, l, c):
+    """The path traced inside one minute: a green minute dips to its low before its high, a red one the reverse
+    (only O, H, L, C are known; the order of H and L inside the minute is the usual assumption)."""
+    return (o, l, h, c) if c >= o else (o, h, l, c)
+
+
+def path_at(o, h, l, c, f):
+    """(price, high so far, low so far) at fraction f of the minute."""
+    pts = minute_path(o, h, l, c)
+    f = max(0.0, min(1.0, f)); seg = f * 3; j = min(2, int(seg)); k = seg - j
+    price = lerp(pts[j], pts[j + 1], k)
+    seen = pts[: j + 1] + (price,)
+    return price, max(seen), min(seen)
+
+
 class Chart:
-    """One candle panel. Candles are [t, o, h, l, c]; `upto` may be fractional (the last candle forms gradually)."""
+    """One panel. `candles` are 1-minute [t, o, h, l, c]; they are drawn as `tf`-minute candles that FORM LIVE:
+    `upto` is a time in minutes (fractional), and the open candle's body and wicks follow the price as it moves
+    through each minute, until its `tf` minutes are over and the next one starts."""
+
+    OPEN = 9 * 3600 + 15 * 60
 
     def __init__(self, box, panel):
         self.box = box
         self.p = panel
         self.cs = panel["candles"]
         self.n = len(self.cs)
+        self.tf = max(1, int(panel.get("tf", 10)))
+        ist = lambda t: (t + 19800) % 86400
+        first = (ist(self.cs[0][0]) - self.OPEN) // (self.tf * 60)
+        self.slot = [int((ist(c[0]) - self.OPEN) // (self.tf * 60) - first) for c in self.cs]
+        self.slots = self.slot[-1] + 1
 
     def yrange(self, i0=0, i1=None, extra=()):
         cs = self.cs[i0:i1 if i1 is not None else self.n]
@@ -82,7 +106,30 @@ class Chart:
         pad = (hi - lo) * 0.08 or hi * 0.002
         return lo - pad, hi + pad
 
-    def draw(self, d, upto, yr, labels=True):
+    def state(self, upto):
+        """The candles drawn at `upto`: finished ones whole, the forming one live; plus the current price."""
+        upto = max(0.0, min(float(self.n), upto))
+        k = int(upto); f = upto - k
+        bars = {}
+        for i in range(min(k, self.n)):
+            t, o, h, l, c = self.cs[i]
+            s = self.slot[i]
+            if s in bars:
+                b = bars[s]; b[1] = max(b[1], h); b[2] = min(b[2], l); b[3] = c
+            else:
+                bars[s] = [o, h, l, c]
+        price = self.cs[k - 1][4] if k > 0 else self.cs[0][1]
+        if k < self.n and f > 0:
+            t, o, h, l, c = self.cs[k]
+            price, hi, lo = path_at(o, h, l, c, f)
+            s = self.slot[k]
+            if s in bars:
+                b = bars[s]; b[1] = max(b[1], hi); b[2] = min(b[2], lo); b[3] = price
+            else:
+                bars[s] = [o, hi, lo, price]
+        return bars, price
+
+    def draw(self, d, upto, yr, labels=True, live=True):
         x0, y0, x1, y1 = self.box
         d.rectangle([u(x0), u(y0), u(x1), u(y1)], fill=PANEL)
         lo, hi = yr
@@ -91,29 +138,30 @@ class Chart:
             p = lo + (hi - lo) * g / 5; y = py(p)
             d.line([(u(x0), u(y)), (u(x1), u(y))], fill=GRID, width=1)
             if labels: T(d, (x1 - 6, y - 10), f"{p:.2f}", F("Medium", 15), MUTED, "rm")
-        sw = (x1 - x0) / self.n; bw = max(2.0, sw * 0.62)
-        full = int(upto); frac = upto - full
-        for i in range(min(self.n, full + 1)):
-            t, o, h, l, c = self.cs[i]
-            if i == full:
-                if frac <= 0: break
-                c = o + (c - o) * frac
-                h = max(o, c, lerp(max(o, c), h, frac)); l = min(o, c, lerp(min(o, c), l, frac))
+        sw = (x1 - x0) / self.slots; bw = max(3.0, sw * 0.62)
+        bars, price = self.state(upto)
+        for s, (o, h, l, c) in bars.items():
             col = EM if c >= o else RED
-            cx = x0 + sw * (i + 0.5)
-            yt, yb = py(max(o, c)), py(min(o, c))
+            cx = x0 + sw * (s + 0.5)
             yh, yl = max(y0, py(h)), min(y1, py(l))
-            if yh < yl: d.line([(u(cx), u(yh)), (u(cx), u(yl))], fill=col, width=max(1, u(bw / 4)))
-            yt, yb = max(y0, yt), min(y1, yb)
+            if yh < yl: d.line([(u(cx), u(yh)), (u(cx), u(yl))], fill=col, width=max(1, u(max(1.5, bw / 7))))
+            yt, yb = max(y0, py(max(o, c))), min(y1, py(min(o, c)))
             if yb - yt < 2: yb = yt + 2
             d.rectangle([u(cx - bw / 2), u(yt), u(cx + bw / 2), u(yb)], fill=col)
-        return py, (lambda i: x0 + sw * (i + 0.5))
+        if live and 0 < upto < self.n:
+            y = py(price)
+            if y0 <= y <= y1:
+                dashed(d, x0, x1 - 64, y, MUTED, 1.5, 6, 6)
+                d.rounded_rectangle([u(x1 - 62), u(y - 11), u(x1 - 2), u(y + 11)], radius=u(4), fill=(48, 46, 40))
+                T(d, (x1 - 32, y), f"{price:.2f}", F("Bold", 14), TXT)
+        return py, (lambda i: x0 + sw * (self.slot[max(0, min(self.n - 1, int(i)))] + 0.5))
 
     def price_at(self, upto):
-        full = min(int(upto), self.n - 1); frac = upto - int(upto)
-        t, o, h, l, c = self.cs[full]
-        if frac <= 0 and full > 0: return self.cs[full - 1][4]
-        return o + (c - o) * frac
+        return self.state(upto)[1]
+
+    def half(self):
+        """half a drawn candle's width (design units)"""
+        return max(3.0, (self.box[2] - self.box[0]) / self.slots * 0.62) / 2
 
     def clock(self, upto):
         i = max(0, min(self.n - 1, int(upto)))
@@ -130,15 +178,19 @@ def live_result(panel, price):
     return move / e * 100, "%"
 
 
-def draw_fills(d, panel, py, px, upto, show_in=True):
+def draw_fills(d, panel, py, px, upto, half=0.0, show_in=True):
+    """Fill markers beside the candle they happened in: entries on its left pointing in, exits on its right."""
+    r = 8
     for f in panel["fills"]:
         if f["idx"] > upto: continue
         if f["kind"] == "in" and not show_in: continue
-        x, y = px(f["idx"]), py(f["price"])
-        col = GOLD if f["kind"] == "in" else TXT
-        r = 8
-        d.polygon([(u(x - r), u(y)), (u(x + r), u(y - r * 0.7)), (u(x + r), u(y + r * 0.7))], fill=col) if f["kind"] == "out" else \
-            d.polygon([(u(x + r), u(y)), (u(x - r), u(y - r * 0.7)), (u(x - r), u(y + r * 0.7))], fill=col)
+        cx, y = px(f["idx"]), py(f["price"])
+        if f["kind"] == "in":
+            x = cx - half - r - 2
+            d.polygon([(u(x + r), u(y)), (u(x - r), u(y - r * 0.7)), (u(x - r), u(y + r * 0.7))], fill=GOLD)
+        else:
+            x = cx + half + r + 2
+            d.polygon([(u(x - r), u(y)), (u(x + r), u(y - r * 0.7)), (u(x + r), u(y + r * 0.7))], fill=TXT)
 
 
 def header_common(d):
@@ -244,7 +296,7 @@ def render_mystery(spec, out, poster):
             if p.get("stop"):
                 dashed(d, ex, box[2], py(p["stop"]), RED, 3)
                 T(d, (box[0] + 8, py(p["stop"]) + 16), f"STOP {p['stop']:.2f}", F("Bold", 19), RED, "lm")
-            draw_fills(d, p, py, px, up)
+            draw_fills(d, p, py, px, up, ch.half())
             val, unit = live_result(p, ch.price_at(up) if t < t_play else p["exit"])
             if t < t_play:
                 pulse = 1 - ease((t - t_rev) / 0.5)
@@ -360,7 +412,7 @@ def render_vs(spec, out, poster):
             dashed(d, px(e) - 6, bx[2], py(v["entry"]), GOLD, 3)
             if v.get("stop"): dashed(d, px(e) - 6, bx[2], py(v["stop"]), RED, 3)
             pill(d, bx[0] + 150, bx[1] - 30, 110, 38, v["side"], EM if v["side"] == "LONG" else RED, F("Black", 20))
-            draw_fills(d, v, py, px, up)
+            draw_fills(d, v, py, px, up, ch.half())
             done = up >= x + 1
             if done:
                 res = v["result"]; good = res["value"] >= 0
@@ -443,8 +495,8 @@ def main():
     if len(sys.argv) != 4:
         raise SystemExit("usage: render.py spec.json out.mp4 poster.jpg")
     spec = json.load(open(sys.argv[1]))
-    if spec.get("v") != 1:
-        raise SystemExit(f"unsupported spec version {spec.get('v')}")
+    if spec.get("v") != 2:
+        raise SystemExit(f"unsupported spec version {spec.get('v')} (2 = 1-minute candles drawn as live 10-minute candles)")
     kind = spec["content"]["kind"]
     if kind == "mystery": render_mystery(spec, sys.argv[2], sys.argv[3])
     elif kind == "vs": render_vs(spec, sys.argv[2], sys.argv[3])

@@ -40,8 +40,11 @@ render job each). Every row opens to the journal's own chart of that trade (Trad
 target), so an old trade can be recalled before writing its tell. Nothing blocks a trade or week from being used again.
 
 Two templates, both drawn from real data only:
-- **Mystery chart:** one of his trades, replayed from the trade day's saved 1-minute candles (grouped into 2/3/5/10-min
-  candles when the trade is long). Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
+- **Chart in both templates:** the trade day's saved 1-minute candles, from 09:15 (or two hours before a late entry)
+  to the 10-minute candle after the exit, drawn as **10-minute candles that form live**: price moves through each
+  minute (a green minute dips to its low before its high, a red one the reverse; only O/H/L/C are known), the open
+  candle's body and wicks follow it, with a live price tag, until its 10 minutes are over. Finished candles are exact.
+- **Mystery chart:** one of his trades, replayed. Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
   trade plays out with a live R counter (price R from his first stop), then the result (the journal's R after charges,
   or the % move when no risk was logged), a drum-roll build-up, and the ticker reveal: the symbol slams onto a
   full-width gold band and stays on screen (the header switches to it too) through the optional one-line "tell". Only trades over

@@ -70,14 +70,19 @@ export const TEXT_SCHEMA = {
 
 const hhmm = (sec: number) => new Date((sec + 19800) * 1000).toISOString().slice(11, 16);
 
-/** The panel's candles as text: "09:41 o h l c", the lead-up and the trade, marking entry and exit. */
-export function candleLines(p: PanelSpec, maxLines = 70): string {
-  const step = Math.max(1, Math.ceil(p.candles.length / maxLines));
+/** The panel's candles as text, grouped into its drawn timeframe: "09:40 o h l c", marking the entry and exit candles. */
+export function candleLines(p: PanelSpec): string {
+  const tfSec = p.tf * 60, open = 9 * 3600 + 15 * 60;
+  const ist = (t: number) => ((t + 19800) % 86400 + 86400) % 86400;
+  const slot = (i: number) => Math.floor((ist(p.candles[i][0]) - open) / tfSec);
   const out: string[] = [];
-  for (let i = 0; i < p.candles.length; i += step) {
-    const [t, o, h, l, c] = p.candles[i];
-    const tag = i <= p.entryIdx && p.entryIdx < i + step ? '  <- ENTRY' : i <= p.exitIdx && p.exitIdx < i + step ? '  <- EXIT' : '';
-    out.push(`${hhmm(t)} ${o} ${h} ${l} ${c}${tag}`);
+  for (let i = 0; i < p.candles.length;) {
+    const s = slot(i); let j = i;
+    let [t, o, h, l, c] = p.candles[i];
+    while (j + 1 < p.candles.length && slot(j + 1) === s) { j++; h = Math.max(h, p.candles[j][2]); l = Math.min(l, p.candles[j][3]); c = p.candles[j][4]; }
+    const tags = [p.entryIdx >= i && p.entryIdx <= j ? 'ENTRY' : '', p.exitIdx >= i && p.exitIdx <= j ? 'EXIT' : ''].filter(Boolean);
+    out.push(`${hhmm(t)} ${o} ${h} ${l} ${c}${tags.length ? `  <- ${tags.join(' + ')}` : ''}`);
+    i = j + 1;
   }
   return out.join('\n');
 }
