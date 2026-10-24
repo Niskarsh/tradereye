@@ -1,10 +1,11 @@
 "use client";
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, XCircle } from 'lucide-react';
+import MakeShorts from '@/components/shorts/MakeShorts';
 
 /**
- * YouTube tab. For now: connect YouTube and Instagram once, and test that each pipe works.
- * Generating, previewing and scheduling shorts comes next on this same page.
+ * YouTube tab: connect YouTube and Instagram once (and test each pipe), then make shorts from real trades.
+ * Titles, captions and scheduling come next on this same page.
  */
 
 type Platform = 'youtube' | 'instagram';
@@ -102,6 +103,8 @@ export default function YouTubePage() {
           note="Log in as candlesbeforecubicles. The test sends a video to Instagram without publishing it."
           testLabel="Test upload (not published)" onTest={() => test('instagram')} onCheck={(id) => test('instagram', id)} onDisconnect={() => disconnect('instagram')} />
       </div>
+
+      <MakeShorts />
     </main>
   );
 }
