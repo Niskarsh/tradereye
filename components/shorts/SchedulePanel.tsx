@@ -3,6 +3,7 @@ import React, { useEffect, useState, type ReactNode } from 'react';
 import { Check, ExternalLink, Loader2, X } from 'lucide-react';
 import { fromIstInput, istLabel, toIstInput } from '@/lib/shorts/slots';
 import ThumbPicker from '@/components/shorts/ThumbPicker';
+import { fitTags, TAG_BUDGET, tagChars } from '@/lib/social/youtube';
 import { hashtagCount, IG_MAX_HASHTAGS, type PlatformPost, type PostPlan } from '@/lib/shorts/posts';
 
 /**
@@ -182,7 +183,7 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
                         </div>
                       )}
                   </div>
-                  <p className="mt-3 text-[11px] leading-4 text-ink-4">Set on every upload: not made for kids · no altered or synthetic (AI) content · category People &amp; Blogs · English (US). A SEBI risk disclaimer is added to the description and caption if missing.</p>
+                  <p className="mt-3 text-[11px] leading-4 text-ink-4">Set on every upload: not made for kids · no altered or synthetic (AI) content · no paid promotion · category People &amp; Blogs · English (US). A SEBI risk disclaimer is added to the description and caption if missing.</p>
                 </>
               )}
             </div>
@@ -204,10 +205,10 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
               <label className="block text-xs text-ink-3">YouTube title <span className={title.length > 55 ? 'text-data-caution' : 'text-ink-4'}>({title.length}/100{title.length > 55 ? ': phones show about 50' : ''})</span>
                 <input value={title} maxLength={100} disabled={busy || ytLive} onChange={(e) => setTitle(e.target.value)} className={input} />
               </label>
-              <label className="block text-xs text-ink-3">YouTube description
+              <label className="block text-xs text-ink-3">YouTube description <span className="text-ink-4">({description.length}/4500; the first ~100 show under the video)</span>
                 <textarea value={description} rows={6} disabled={busy || ytLive} onChange={(e) => setDescription(e.target.value)} className={input} />
               </label>
-              <label className="block text-xs text-ink-3">Tags (comma separated)
+              <label className="block text-xs text-ink-3">Tags (comma separated) <span className="text-ink-4">· {tagChars(fitTags(tags.split(',').map((t) => t.trim()).filter(Boolean)))}/{TAG_BUDGET} characters with the channel name added; extras are dropped</span>
                 <input value={tags} disabled={busy || ytLive} onChange={(e) => setTags(e.target.value)} className={input} />
               </label>
             </div>

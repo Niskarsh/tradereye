@@ -4,7 +4,7 @@ import { fromIstInput, istDay, istLabel, nextSlotPairs, nextSlots, toIstInput } 
 import { blocksDelete, igStep, LATE_MS, nextWake, PREPARE_MS, RETRY_MS, takenSlots, youtubeState, type PlatformPost } from '../lib/shorts/posts';
 import { atExpression, createWake, deleteWake, schedulerConfig, wakeName } from '../lib/social/scheduler';
 import { signRequest } from '../lib/aws/sigv4';
-import { addToPlaylist, setThumbnail, canManage, deleteVideo, removeFromPlaylist, updateVideo, YOUTUBE_SCOPES, MANAGE_SCOPE } from '../lib/social/youtube';
+import { addToPlaylist, fitTags, tagChars, setThumbnail, canManage, deleteVideo, removeFromPlaylist, updateVideo, YOUTUBE_SCOPES, MANAGE_SCOPE } from '../lib/social/youtube';
 import { gate } from '../lib/auth/gate';
 
 const IST = (s: string) => fromIstInput(s);
@@ -61,6 +61,8 @@ test('YouTube: change and unschedule need force-ssl; update keeps it private wit
   await updateVideo('tok', 'vid1', { title: 'A <b> title', privacy: 'private', publishAt: '2026-10-26T13:00:00.000Z' }, fake);
   const body = JSON.parse(String(calls[0].init?.body));
   assert.equal(calls[0].init?.method, 'PUT');
+  assert.match(calls[0].url, /part=snippet,status,paidProductPlacementDetails/);
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)).paidProductPlacementDetails, { hasPaidProductPlacement: false });
   assert.equal(body.id, 'vid1');
   assert.equal(body.snippet.title, 'A b title');
   assert.deepEqual(body.status, { privacyStatus: 'private', selfDeclaredMadeForKids: false, containsSyntheticMedia: false, publishAt: '2026-10-26T13:00:00.000Z' });
@@ -118,6 +120,7 @@ test('EventBridge Scheduler: one-time wake-up calling the Lambda, deleted after 
   assert.equal(body.ScheduleExpressionTimezone, 'UTC');
   assert.equal(body.ActionAfterCompletion, 'DELETE');
   assert.deepEqual(body.FlexibleTimeWindow, { Mode: 'OFF' });
+  assert.match(body.ClientToken, /^[a-zA-Z0-9-_]{1,64}$/);   // the plain API refuses an empty one
   assert.equal(body.Target.Arn, env.SOCIAL_TIMER_LAMBDA_ARN);
   assert.equal(body.Target.RoleArn, env.SOCIAL_TIMER_ROLE_ARN);
   assert.match(String((calls[0].init?.headers as Record<string, string>).authorization), /\/ap-south-1\/scheduler\/aws4_request/);
@@ -189,4 +192,13 @@ test('cover frame: YouTube gets the JPEG as the thumbnail; Instagram gets it as 
   assert.equal(body.get('cover_url'), 'https://img');
   assert.equal(body.get('thumb_offset'), '12346');
   assert.equal(body.get('media_type'), 'REELS');
+});
+
+test('YouTube tags: channel name first, no duplicates or quotes, within the 450-character budget', () => {
+  const many = Array.from({ length: 60 }, (_, i) => `intraday trading idea ${i}`);
+  const t = fitTags(['Intraday Trading', 'intraday trading', 'stock "market"', ...many]);
+  assert.deepEqual(t.slice(0, 4), ['candles before cubicles', 'candlesbeforecubicles', 'intraday trading', 'stock market']);
+  assert.ok(tagChars(t) <= 450);
+  assert.ok(t.length > 10);
+  assert.equal(tagChars(['a b', 'c']), 7);   // "a b" counts its quotes, plus one comma
 });

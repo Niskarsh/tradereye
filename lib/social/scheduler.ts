@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { signRequest } from '../aws/sigv4';
 
 /**
@@ -34,7 +35,7 @@ export const atExpression = (at: number) => `at(${new Date(Math.ceil(at / 1000) 
 
 async function call(method: 'POST' | 'DELETE', name: string, body: unknown, fetchImpl: typeof fetch, env?: Record<string, string | undefined>) {
   const c = schedulerConfig(env);
-  const url = `https://scheduler.${c.region}.amazonaws.com/schedules/${encodeURIComponent(name)}`;
+  const url = `https://scheduler.${c.region}.amazonaws.com/schedules/${encodeURIComponent(name)}${method === 'DELETE' ? `?clientToken=${randomUUID()}` : ''}`;
   const text = body === undefined ? '' : JSON.stringify(body);
   const headers = signRequest({ method, url, region: c.region, service: 'scheduler', creds: c.creds, body: text, headers: text ? { 'content-type': 'application/json' } : {} });
   const res = await fetchImpl(url, { method, headers, body: text || undefined, cache: 'no-store' });
@@ -54,6 +55,7 @@ export async function createWake(name: string, at: number, input: Record<string,
   const when = Math.max(at, now + 60_000);
   const cfg = schedulerConfig(env);
   const body = {
+    ClientToken: randomUUID(),  // required by the plain HTTPS API (the AWS SDKs add one themselves)
     ScheduleExpression: atExpression(when), ScheduleExpressionTimezone: 'UTC', FlexibleTimeWindow: { Mode: 'OFF' },
     ActionAfterCompletion: 'DELETE', State: 'ENABLED', Description: 'tradereye: Instagram posting step',
     Target: { Arn: cfg.lambdaArn, RoleArn: cfg.roleArn, Input: JSON.stringify(input), RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 900 } },

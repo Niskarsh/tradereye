@@ -3,6 +3,7 @@ import type { PanelSpec } from './spec';
 import type { ShortTrade, WeekScore } from './trades';
 import { capHashtags } from './posts';
 import { withDisclaimer } from './disclaimer';
+import { fitTags } from '../social/youtube';
 
 /**
  * Claude writes a short's words in ONE call, when Generate is pressed: the tell drawn into a mystery video (or the
@@ -48,61 +49,70 @@ Reach rules (write for the feed, but never promise what the video doesn't show):
   me / bot).
 - Hashtags: YouTube description ends with exactly 3 (#shorts first; YouTube shows them above the title). Instagram
   caption ends with 3-5 (Instagram allows 5 at most), specific over generic (#intradaytrading beats #money).
-- Never: "smash like", "link in bio", fake urgency, all caps words, "guaranteed", made-up numbers.`;
+- Never: "smash like", "link in bio", fake urgency, all caps words, "guaranteed", made-up numbers.
+- youtube.description (search and "show more" readers): 700-1500 characters of real content, no padding or keyword
+  lists. Line 1: the hook / comment question (max 100 characters). Then a short paragraph telling this trade's story
+  from the facts (the setup on the 5-minute chart, the decision, what made it hard), using the words people search for
+  naturally (intraday, NSE, price action, stop loss, risk, R multiple...). Then one line on what the series is. Then
+  "Subscribe to Candles Before Cubicles: real trades, every week." Then the not-advice line, then the hashtags.
+- youtube.tags: 20-30 lowercase tags, the phrases people actually type into YouTube search for this kind of video:
+  mix broad ("intraday trading", "stock market india", "day trading") and specific long-tail ("nse intraday chart
+  analysis", "price action trading strategy", "how to set stop loss intraday", "trading psychology"). Never another
+  channel's, creator's or person's name, never a stock name or ticker, nothing the video is not about. The channel's own
+  name is added automatically.`;
 
 const MYSTERY_CORE = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
 "Long, short, or wait?", shows HIS call ("MY CALL: LONG"), plays the trade and finally reveals the stock.
-The video shows ONLY the 10-minute candles listed below, so anything you point at must be visible on THOSE candles: e.g.
+The video shows ONLY the 5-minute candles listed below, so anything you point at must be visible on THOSE candles: e.g.
 a higher low, a lower high, a long wick, a close back above or below a level, a tight base. Name the candle by its time
 when that helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show.
-If his journal comment explains the trade, use it only where the 10-minute candles back it up.
+If his journal comment explains the trade, use it only where the 5-minute candles back it up.
 - marks: after the reveal the chart comes back with the ticker named, and the candles your tell talks about are marked on
-  it. Give 1-3 marks, each pointing at a 10-minute candle by its time exactly as listed ("09:45"): kind "high" or "low"
+  it. Give 1-3 marks, each pointing at a 5-minute candle by its time exactly as listed ("09:45"): kind "high" or "low"
   rings that candle's high or low (two or more highs, or lows, are joined by a line: e.g. falling highs), "close" rings
   its close, "level" draws a horizontal line at "price" (a level the tell names, inside the chart's range; for other
   kinds set price to 0). label: max 24 characters ("lower high", "held the low"). The marks must show exactly what the
   tell says.
 - The stock's name and ticker are the reveal: never put them in title, description, tags or caption.
-- youtube.tags: 8-15 lowercase tags (no #), general trading terms only.
 - notes: leave both empty.`;
 
 const MYSTERY_WIN = `OUTCOME: A WIN.
-- tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 10-minute
+- tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 5-minute
   candles BEFORE the entry that the trade was based on.
 - youtube.title: a curiosity hook built around the decision; do not give the answer away.
-- youtube.description: 3-5 short lines: the hook, "Answer and the stock revealed at the end.", the not-advice line,
-  then the 3 hashtags on the last line.
+- youtube.description: as in the reach rules; the story must not give away my call or the result ("my call and the
+  stock are revealed at the end").
 - instagram.caption: max 600 characters: hook line, "Long, short or wait? Comment before the reveal 👇", the not-advice
   line, then 3-5 hashtags.`;
 
 const MYSTERY_LOSS = `OUTCOME: A LOSS. Be honest and plain about it: no excuses, no spin, no "it was still a good trade" unless the
 facts clearly show a valid setup that simply failed.
 - tell (shown as "WHAT I MISSED"): one sentence, max 80 characters (two short lines on screen): the warning sign that
-  was visible on the 10-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
+  was visible on the 5-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
   high: buyers were already fading"). If no such sign is visible on those candles, say so plainly instead of inventing
-  one, e.g. "Nothing on the 10-min chart warned. The stop did its job."
+  one, e.g. "Nothing on the 5-min chart warned. The stop did its job."
 - youtube.title: honest that it is a losing trade, built around the decision (e.g. "I lost on this one. Would you
   take it?"); do not reveal the stock.
-- youtube.description: 3-5 short lines: the hook, "The stock and what I missed, revealed at the end.", the not-advice
-  line, then the 3 hashtags on the last line.
+- youtube.description: as in the reach rules; honest that it was a loss, without revealing the stock ("the stock and
+  what I missed are revealed at the end").
 - instagram.caption: max 600 characters: an honest hook about the loss, "What would you have done? Comment below 👇",
   the not-advice line, then 3-5 hashtags.`;
 
 const VS_TASK = `This is a ME vs ALGO short: one week of his own trades against his trading bot's (Algo Live), each side's
 biggest trade replayed, the week's totals in R, and the season score. Tickers are never shown.
 - notes.me / notes.algo: max 40 characters each: why that side's trade was taken, from the facts (for the algo, describe
-  it mechanically, e.g. "Short on a 10-min breakdown"). Empty string when that side had no trade. A losing side's
+  it mechanically, e.g. "Short on a 5-min breakdown"). Empty string when that side had no trade. A losing side's
   reason is still why it was taken: no excuses, no spin.
 - vs_marks.me / vs_marks.algo: after both trades play, each side's reason is shown and the candles it refers to are
-  marked on that side's chart. 1-2 marks per side, same format as below: time of a 10-minute candle exactly as listed
+  marked on that side's chart. 1-2 marks per side, same format as below: time of a 5-minute candle exactly as listed
   for THAT side, kind "high" | "low" | "close" | "level" (price only for a level, else 0), label max 24 characters.
   The marks must show exactly what that side's reason says. Empty array when that side had no trade.
-  The charts show ONLY the 10-minute candles listed; never point at something only a 1-minute chart would show.
+  The charts show ONLY the 5-minute candles listed; never point at something only a 1-minute chart would show.
 - No stock names or tickers anywhere.
 - youtube.title: the rivalry and the result of the week (who won).
-- youtube.description: 3-5 short lines: what this series is, this week's result, "New round every Monday.", the
-  not-advice line, then the 3 hashtags.
-- youtube.tags: 8-15 lowercase tags (no #).
+- youtube.description: as in the reach rules: the week's story (each side's trade, why it was taken, how it ended,
+  the totals in R and the season score), then "New round every Monday." Algo-trading search words fit here (algo
+  trading, trading bot, automated trading).
 - instagram.caption: max 600 characters, ending with a question that invites comments, the not-advice line, 3-5 hashtags.
 - tell: empty string. marks: empty array.`;
 
@@ -204,7 +214,7 @@ export function scrubTicker(x: SocialText, ticker: string): SocialText {
 export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs'): SocialText {
   const yt = (j.youtube ?? {}) as Record<string, unknown>, ig = (j.instagram ?? {}) as Record<string, unknown>, n = (j.notes ?? {}) as Record<string, unknown>;
   const vm = (j.vs_marks ?? {}) as { me?: unknown; algo?: unknown };
-  const tags = Array.isArray(yt.tags) ? yt.tags.map((t) => clip(t, 40).replace(/^#/, '').toLowerCase()).filter(Boolean).slice(0, 15) : [];
+  const tags = Array.isArray(yt.tags) ? fitTags(yt.tags.map((t) => clip(t, 60).replace(/^#/, ''))) : [];  // channel name first, 450-char budget
   return {
     ...(kind === 'mystery'
       ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] }

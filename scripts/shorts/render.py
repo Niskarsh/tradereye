@@ -81,7 +81,7 @@ def path_at(o, h, l, c, f):
 
 
 class Chart:
-    """One panel. `candles` are 1-minute [t, o, h, l, c]; they are drawn as `tf`-minute candles that FORM LIVE:
+    """One panel. `candles` are 1-minute [t, o, h, l, c]; they are drawn as `tf`-minute candles (5) that FORM LIVE:
     `upto` is a time in minutes (fractional), and the open candle's body and wicks follow the price as it moves
     through each minute, until its `tf` minutes are over and the next one starts."""
 
@@ -92,18 +92,20 @@ class Chart:
         self.p = panel
         self.cs = panel["candles"]
         self.n = len(self.cs)
-        self.tf = max(1, int(panel.get("tf", 10)))
+        self.tf = max(1, int(panel.get("tf", 5)))
         ist = lambda t: (t + 19800) % 86400
         first = (ist(self.cs[0][0]) - self.OPEN) // (self.tf * 60)
         self.slot = [int((ist(c[0]) - self.OPEN) // (self.tf * 60) - first) for c in self.cs]
         self.slots = self.slot[-1] + 1
+        self.cols = self.slots + 1   # one empty column on the right: the exit marker and price tag never hang off the edge
+        self.first = int(first)      # slot of the first candle, counted from 09:15
 
     def yrange(self, i0=0, i1=None, extra=()):
         cs = self.cs[i0:i1 if i1 is not None else self.n]
         lo = min(c[3] for c in cs); hi = max(c[2] for c in cs)
         for x in extra:
             if x: lo = min(lo, x); hi = max(hi, x)
-        pad = (hi - lo) * 0.08 or hi * 0.002
+        pad = (hi - lo) * 0.12 or hi * 0.002
         return lo - pad, hi + pad
 
     def state(self, upto):
@@ -129,16 +131,34 @@ class Chart:
                 bars[s] = [o, hi, lo, price]
         return bars, price
 
+    AXIS = 30  # the time axis strip at the bottom of every panel
+
+    def slot_time(self, s):
+        m = 9 * 60 + 15 + (self.first + s) * self.tf
+        return m, f"{m // 60:02d}:{m % 60:02d}"
+
     def draw(self, d, upto, yr, labels=True, live=True):
-        x0, y0, x1, y1 = self.box
-        d.rectangle([u(x0), u(y0), u(x1), u(y1)], fill=PANEL)
+        x0, y0, x1, yb = self.box
+        d.rectangle([u(x0), u(y0), u(x1), u(yb)], fill=PANEL)
+        y1 = yb - self.AXIS   # candles above the time axis
         lo, hi = yr
         py = lambda p: y1 - (p - lo) / (hi - lo) * (y1 - y0)
+        # vertical grid + time labels: every 15 / 30 / 60 minutes depending on how much of the day is shown
+        span = self.slots * self.tf
+        step = 15 if span <= 90 else 30 if span <= 240 else 60
+        d.line([(u(x0), u(y1)), (u(x1), u(y1))], fill=GRID, width=1)
+        for sl in range(self.slots):
+            m, label = self.slot_time(sl)
+            if m % step: continue
+            x = self.slot_x(sl)
+            d.line([(u(x), u(y0)), (u(x), u(y1))], fill=GRID, width=1)
+            if x0 + 24 < x < x1 - 24:
+                T(d, (x, y1 + self.AXIS / 2), label, F("Medium", 15), MUTED)
         for g in range(1, 5):
             p = lo + (hi - lo) * g / 5; y = py(p)
             d.line([(u(x0), u(y)), (u(x1), u(y))], fill=GRID, width=1)
             if labels: T(d, (x1 - 6, y - 10), f"{p:.2f}", F("Medium", 15), MUTED, "rm")
-        sw = (x1 - x0) / self.slots; bw = max(3.0, sw * 0.62)
+        sw = (x1 - x0) / self.cols; bw = max(3.0, sw * 0.62)
         bars, price = self.state(upto)
         for s, (o, h, l, c) in bars.items():
             col = EM if c >= o else RED
@@ -161,11 +181,11 @@ class Chart:
 
     def slot_x(self, s):
         x0, _, x1, _ = self.box
-        return x0 + (x1 - x0) / self.slots * (s + 0.5)
+        return x0 + (x1 - x0) / self.cols * (s + 0.5)
 
     def half(self):
         """half a drawn candle's width (design units)"""
-        return max(3.0, (self.box[2] - self.box[0]) / self.slots * 0.62) / 2
+        return max(3.0, (self.box[2] - self.box[0]) / self.cols * 0.62) / 2
 
     def clock(self, upto):
         i = max(0, min(self.n - 1, int(upto)))
@@ -198,7 +218,7 @@ def draw_fills(d, panel, py, px, upto, half=0.0, show_in=True):
 
 
 def draw_marks(d, ch, py, marks, t, t0, step, bg=PANEL, label_size=19):
-    """Marks appearing one by one from t0 (step apart): rings on 10-min highs / lows / closes (same kind joined by a
+    """Marks appearing one by one from t0 (step apart): rings on 5-min highs / lows / closes (same kind joined by a
     line, e.g. falling highs) or a level line, each with a small gold label."""
     box = ch.box
     shown = [m for i, m in enumerate(marks) if t >= t0 + i * step]
@@ -220,7 +240,7 @@ def draw_marks(d, ch, py, marks, t, t0, step, bg=PANEL, label_size=19):
             if prev and prev["kind"] != "level" and abs(ch.slot_x(prev["slot"]) - x) < 150:
                 below = not below  # a neighbour's label is right there: put this one on the other side
             lx, ly, anchor = x, (y + 36 if below else y - 36), "mm"
-        ly = min(max(ly, box[1] + 16), box[3] - 16)
+        ly = min(max(ly, box[1] + 16), box[3] - Chart.AXIS - 16)  # labels stay above the time axis
         if m.get("label"):
             f = F("Bold", label_size); w = f.getlength(m["label"]) / K + 18
             cx = lx + w / 2 if anchor == "lm" else min(max(lx, box[0] + w / 2 + 4), box[2] - w / 2 - 4)
@@ -328,7 +348,7 @@ def render_mystery(spec, out, poster):
     e, x = p["entryIdx"], p["exitIdx"]
     end = ch.n
     full_yr = ch.yrange(0, None, (p["entry"], p.get("stop"), p["exit"]))
-    trade_yr = ch.yrange(max(0, e - 3), None, (p["entry"], p.get("stop"), p["exit"]))
+    trade_yr = full_yr  # stays zoomed out on the whole window: no candle is ever clipped, the day's context stays
     lead = max(1, e)
     t_ff = min(10.0, max(5.0, lead * 0.22)); t_q = t_ff + 1.2; t_rev = t_q + DECIDE_S + 1.0
     play_s = min(11.0, max(6.0, (end - e) * 0.13))
@@ -559,7 +579,7 @@ def render_vs(spec, out, poster):
         ch = charts[key]; e, x = v["entryIdx"], v["exitIdx"]
         up = ch.n * prog(t)
         yr = ch.yrange(0, None, (v["entry"], v.get("stop"), v["exit"]))
-        yr = (yr[0] - (yr[1] - yr[0]) * 0.3, yr[1])  # room at the bottom for the reason, so it never covers a mark
+        yr = (yr[0] - (yr[1] - yr[0]) * 0.5, yr[1])  # room at the bottom for the reason (above the time axis), so it never covers a mark
         py, px = ch.draw(d, up, yr, labels=False)
         T(d, (bx[2], bx[1] - 30), ch.clock(up), F("Bold", 24), MUTED, "rm")
         if v.get("symbol"):  # only on trades over 3 months old (SEBI); shown from the start, no reveal
@@ -589,15 +609,16 @@ def render_vs(spec, out, poster):
                 draw_marks(d, ch, py, vmarks[key], t, start, WHY_STEP)
                 if v.get("note"):
                     k = ease((t - t_why) / 0.35); f = F("Bold", 24); w = min(640, f.getlength(f"“{v['note']}”") / K + 28)
-                    d.rounded_rectangle([u(360 - w / 2), u(bx[3] - 46), u(360 + w / 2), u(bx[3] - 10)], radius=u(10), fill=mix(PANEL, (36, 32, 22), k))
-                    T(d, (360, bx[3] - 28), f"“{v['note']}”", f, mix(PANEL, TXT, k))
-            elif v.get("note"): T(d, (bx[0] + 12, bx[3] - 22), f"“{v['note']}”", F("SemiBold", 21), TXT, "lm")
+                    nb = bx[3] - Chart.AXIS  # above the time axis
+                    d.rounded_rectangle([u(360 - w / 2), u(nb - 46), u(360 + w / 2), u(nb - 10)], radius=u(10), fill=mix(PANEL, (36, 32, 22), k))
+                    T(d, (360, nb - 28), f"“{v['note']}”", f, mix(PANEL, TXT, k))
+            elif v.get("note"): T(d, (bx[0] + 12, bx[3] - Chart.AXIS - 22), f"“{v['note']}”", F("SemiBold", 21), TXT, "lm")
 
     def frame(f):
         t = f / FPS
         img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
         d.rounded_rectangle([u(20), u(24), u(700), u(150)], radius=u(18), fill=(30, 28, 22))
-        tf = (me or algo or {}).get("tf", 10)
+        tf = (me or algo or {}).get("tf", 5)
         T(d, (360, 50), f"ME vs ALGO  ·  {c['weekLabel'].upper()}  ·  {tf}-MIN CHARTS", F("Bold", 20), GOLD)
         k = ease((t - t_score) / 0.5) if t >= t_score else 0
         s = c["after"] if k > 0.5 else c["before"]
@@ -671,7 +692,7 @@ def main():
         raise SystemExit("usage: render.py spec.json out.mp4 poster.jpg")
     spec = json.load(open(sys.argv[1]))
     if spec.get("v") != 2:
-        raise SystemExit(f"unsupported spec version {spec.get('v')} (2 = 1-minute candles drawn as live 10-minute candles)")
+        raise SystemExit(f"unsupported spec version {spec.get('v')} (2 = 1-minute candles drawn as live candles of the spec's tf)")
     kind = spec["content"]["kind"]
     if kind == "mystery": render_mystery(spec, sys.argv[2], sys.argv[3])
     elif kind == "vs": render_vs(spec, sys.argv[2], sys.argv[3])

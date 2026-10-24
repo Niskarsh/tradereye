@@ -26,7 +26,7 @@ export async function POST(req: Request) {
   if ((await statusOf(id)).state !== 'done') return bad('The video is not ready yet.');
   const text: PostText = {
     title: String(b.text?.title ?? '').trim().slice(0, 100),
-    description: String(b.text?.description ?? '').slice(0, 4400),
+    description: String(b.text?.description ?? '').slice(0, 4000),  // + the disclaimer, under YouTube's 4500
     tags: (Array.isArray(b.text?.tags) ? b.text!.tags : []).map((x) => String(x).trim().replace(/^#/, '')).filter(Boolean).slice(0, 20),
     caption: capHashtags(String(b.text?.caption ?? '').slice(0, 2200)),  // Instagram allows 5 hashtags
   };
