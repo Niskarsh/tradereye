@@ -41,6 +41,14 @@ export function PostStatus({ post, now, onPostNow, busy, youtubeCheck, bare }: {
         : state === 'failed'
           ? <span className="text-data-red-text">Failed: {p.error ?? 'unknown error'}</span>
           : <span className="text-white">{istLabel(p.at)} ({countdown(p.at, now)}) · {state === 'processing' ? 'ready at Meta, waiting for its time' : 'scheduled'}{p.error && <span className="text-data-caution"> (retrying: {p.error})</span>}</span>}
+      {/* YouTube already has the (private) video: links to it, so each upload can be matched (only he can open them) */}
+      {p.videoId && state !== 'live' && (
+        <span className="block">
+          <a href={p.url ?? `https://youtube.com/shorts/${p.videoId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-accent underline">private video<ExternalLink className="size-3" /></a>
+          {' · '}
+          <a href={`https://studio.youtube.com/video/${p.videoId}/edit`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-accent underline">Studio<ExternalLink className="size-3" /></a>
+        </span>
+      )}
       {p.wakeError && pendingState(state) && <span className="block text-data-red-text">Timer not set: {p.wakeError}</span>}
       {extra}
     </p>

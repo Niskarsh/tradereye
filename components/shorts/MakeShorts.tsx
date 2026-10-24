@@ -49,7 +49,7 @@ function Chart({ c, token }: { c: ChartInfo; token: string }) {
   );
 }
 
-export default function MakeShorts() {
+export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => void } = {}) {
   const { token } = useAuth();
   const [kind, setKind] = useState<Kind>('mystery');
   const [trades, setTrades] = useState<MysteryTrade[] | null>(null);
@@ -181,6 +181,7 @@ export default function MakeShorts() {
   const defaultAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.youtube]));
   const defaultIgAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.instagram]));
   const editingShort = shorts.find((s) => s.id === editing);
+  const drafts = shorts.filter((s) => !s.post);  // not scheduled yet (scheduled ones are in the Posting tab)
 
   const tab = (k: Kind, label: string) => (
     <button onClick={() => setKind(k)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${kind === k ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>{label}</button>
@@ -353,7 +354,14 @@ export default function MakeShorts() {
         </div>
       </div>
 
-      {(shorts.length > 0 || ghosts.length > 0) && (
+      {/* once a short has a posting plan it lives in the Posting tab; here are only the ones still to schedule */}
+      {shorts.some((s) => s.post) && (
+        <p className="mt-6 text-sm text-ink-3">
+          {shorts.filter((s) => s.post).length} scheduled or posted{' '}
+          <button onClick={onOpenPosting} className="font-semibold text-brand-accent hover:underline">see Posting</button>
+        </p>
+      )}
+      {(drafts.length > 0 || ghosts.length > 0 || editingShort) && (
         <div id="shorts-grid" className="mt-6 grid scroll-mt-24 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {editingShort && (
             <ScheduleEditor key={editingShort.id} id={editingShort.id} kind={editingShort.kind} label={editingShort.label} poster={editingShort.poster}
@@ -362,7 +370,7 @@ export default function MakeShorts() {
               onClose={() => setEditing(null)} onSaved={() => void loadShorts()} />
           )}
           {ghosts.map((g) => <SkeletonCard key={g.key} label={g.label} step={g.step} />)}
-          {shorts.map((s) => (
+          {drafts.map((s) => (
             <div key={s.id} className={`relative overflow-hidden rounded-2xl border border-line-strong bg-brand-card transition-all duration-300 ${deleting[s.id] === 'gone' ? 'scale-90 opacity-0' : deleting[s.id] ? 'pointer-events-none' : ''}`}>
               {deleting[s.id] && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-brand-bg/70 text-sm font-semibold text-white backdrop-blur-[2px]">

@@ -118,7 +118,7 @@ export default function SocialsPage() {
         ))}
       </div>
       {/* both stay mounted so the Posting count is right while making shorts */}
-      <div className={view === 'make' ? '' : 'hidden'}><MakeShorts /></div>
+      <div className={view === 'make' ? '' : 'hidden'}><MakeShorts onOpenPosting={() => setView('posting')} /></div>
       <div className={view === 'posting' ? '' : 'hidden'}><PostingBoard onCounts={setCounts} active={view === 'posting'} /></div>
     </main>
   );
