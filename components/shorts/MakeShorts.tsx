@@ -4,7 +4,7 @@ import { Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 /**
- * "Make a short" on the YouTube page: pick a real trade (Mystery chart) or a finished week (Me vs Algo), Generate,
+ * "Make a short" on the Socials page: pick a real trade (Mystery chart) or a finished week (Me vs Algo), Generate,
  * and the video is rendered on GitHub Actions in a few minutes. Every short shows here with its preview.
  */
 

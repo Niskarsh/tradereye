@@ -1,6 +1,6 @@
 # YouTube and Instagram (Shorts and Reels)
 
-The **YouTube** page (`/youtube`, signed in only) connects the Candles Before Cubicles YouTube channel and Instagram
+The **Socials** page (`/socials`, signed in only; `/youtube` redirects there) connects the Candles Before Cubicles YouTube channel and Instagram
 account once, then posts Shorts and Reels from tradereye. This first part covers connecting and testing; generating
 and scheduling shorts are built on the same page next.
 
@@ -34,7 +34,7 @@ app id and secret from Meta's "API setup with Instagram login" page, not the Fac
 - **Test upload (not published)** sends the same video to Instagram and waits until Meta has processed it, without
   publishing (Reels cannot be private). The unpublished upload expires on its own within 24 hours.
 
-## Making shorts (Make a short, on the YouTube page)
+## Making shorts (Make a short, on the Socials page)
 Two templates, both drawn from real data only:
 - **Mystery chart:** one of his trades, replayed from the trade day's saved 1-minute candles (grouped into 2/3/5/10-min
   candles when the trade is long). Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the

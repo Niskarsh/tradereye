@@ -95,10 +95,10 @@ test('Meta signed_request: accepted only with the app secret\'s signature', () =
   assert.equal(parseSignedRequest(`${sig}.${payload}`, ''), undefined);
 });
 
-test('gate: Meta\'s two callbacks are public; connecting, testing and the YouTube page are owner-only', () => {
+test('gate: Meta\'s two callbacks are public; connecting, testing and the Socials page are owner-only', () => {
   assert.equal(gate('/api/instagram/deauthorize', false), 'allow');
   assert.equal(gate('/api/instagram/data-deletion', false), 'allow');
   for (const p of ['/api/youtube/oauth/login', '/api/youtube/oauth/callback', '/api/instagram/oauth/login', '/api/instagram/oauth/callback', '/api/social/status', '/api/social/test', '/api/social/disconnect'])
     assert.equal(gate(p, false), 'deny-api', p);
-  assert.equal(gate('/youtube', false), 'redirect-home');
+  assert.equal(gate('/socials', false), 'redirect-home');
 });

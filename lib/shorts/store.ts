@@ -7,7 +7,7 @@ import type { ShortSpec, Template } from './spec';
 /**
  * Where the shorts live in S3 (same bucket as everything else):
  *
- *   shorts/index.json              every short made, newest first (the YouTube page lists these)
+ *   shorts/index.json              every short made, newest first (the Socials page lists these)
  *   shorts/<id>/spec.json          what the video shows (written here, read by the GitHub job)
  *   shorts/<id>/status.json        queued -> rendering -> done / failed (the job updates it)
  *   shorts/<id>/short.mp4          the video (1080x1920)

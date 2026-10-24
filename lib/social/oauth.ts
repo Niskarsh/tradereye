@@ -36,9 +36,9 @@ export async function checkState(req: Request, p: Platform, returned: string | n
   return st;
 }
 
-/** Back to the YouTube page with a short result code (?connected=youtube or ?error=...), clearing the state cookie. */
+/** Back to the Socials page with a short result code (?connected=youtube or ?error=...), clearing the state cookie. */
 export function backToPage(req: Request, p: Platform, q: Record<string, string>): NextResponse {
-  const r = NextResponse.redirect(new URL(`/youtube?${new URLSearchParams(q)}`, req.url));
+  const r = NextResponse.redirect(new URL(`/socials?${new URLSearchParams(q)}`, req.url));
   r.cookies.set(cookieName(p), '', { httpOnly: true, secure: true, sameSite: 'lax', path: cookiePath(p), maxAge: 0 });
   return r;
 }
