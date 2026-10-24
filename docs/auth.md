@@ -17,7 +17,7 @@ calls Claude, writes the sheet, uploads to S3 or talks to Dhan) needs the owner'
 
 ## Two locks
 - `proxy.ts` (Next 16's request gate) runs before every page and API. Public: `/`, `/privacy` (the privacy policy Google and Meta link to), the four `/api/auth/google|me|logout`
-  routes, `/api/analytics` (trimmed to P&L totals when signed out) and `/api/live/postback` (its own secret).
+  routes, `/api/analytics` (trimmed to P&L totals when signed out), `/api/live/postback` (its own secret) and Meta's `/api/instagram/deauthorize` + `/api/instagram/data-deletion` (signed with `IG_APP_SECRET`).
   Everything else: pages redirect to Home with a sign-in prompt, APIs answer 401. New routes are private by default.
 - Every private route checks the session again itself (`guard()` in `lib/live/guard.ts`, `ownerRequired` elsewhere),
   so a mistake in the proxy's list still could not open the AI, the sheet or S3.

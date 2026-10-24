@@ -31,7 +31,7 @@ const ANALYSIS: Item[] = [
     { name: 'Reversal Study', href: '/study' },
     { name: 'Algo Lab', href: '/algo' },
 ];
-const YOUTUBE = 'https://www.youtube.com/@CandlesBeforeCubicles?sub_confirmation=1';
+const YOUTUBE = '/youtube'; // connect YouTube / Instagram and schedule shorts (signed in only)
 
 function classNames(...classes: (string | false | undefined)[]) {
     return classes.filter(Boolean).join(' ')
@@ -132,7 +132,7 @@ export default function Header() {
                                         {group('My Performance', PERFORMANCE)}
                                         {group('My Live Trading', LIVE_TRADING)}
                                         {group('My Analysis', ANALYSIS)}
-                                        <a href={YOUTUBE} target="_blank" rel="noopener noreferrer" className={classNames(link, idle)}>Youtube</a>
+                                        <a href={YOUTUBE} aria-current={isActive(YOUTUBE) ? 'page' : undefined} className={classNames(link, isActive(YOUTUBE) ? on : idle)}>YouTube</a>
                                         <Menu as="div" className="relative ml-2">
                                             <MenuButton className="flex items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/60" aria-label="Account">
                                                 <Avatar picture={owner?.picture} name={owner?.name} />
@@ -169,7 +169,7 @@ export default function Header() {
                                     </DisclosureButton>
                                 ))}
                                 {signedIn && (
-                                    <DisclosureButton as="a" href={YOUTUBE} target="_blank" rel="noopener noreferrer" className={classNames(idle, 'block rounded-md px-3 py-2 text-base font-medium')}>Youtube</DisclosureButton>
+                                    <DisclosureButton as="a" href={YOUTUBE} aria-current={isActive(YOUTUBE) ? 'page' : undefined} className={classNames(isActive(YOUTUBE) ? on : idle, 'block rounded-md px-3 py-2 text-base font-medium')}>YouTube</DisclosureButton>
                                 )}
                                 <div className="mt-2 border-t border-brand-card/60 pt-3">
                                     {status === 'loading' ? null : signedIn ? (
