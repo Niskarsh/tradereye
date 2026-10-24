@@ -51,7 +51,8 @@ Two templates, both drawn from real data only:
   STOCK WAS" + drum roll, the ticker pops onto a gold band with the result above it, the tell box (max 2 lines, even
   padding), and a YouTube-style SUBSCRIBE button with @CandlesBeforeCubicles.
   **Losing trades** are shown just as fully, but nothing may suggest the call was right: the reveal pill always says
-  "MY CALL: LONG/SHORT" (never "the answer"); the dip message becomes "The stop stays where it is."; the box is
+  "MY CALL: LONG/SHORT" (never "the answer"); the dip message becomes "The stop stays where it is." (or "No panic exit.
+  Holding." when the journal has no InitialStop, so no stop line is drawn); the box is
   "WHAT I MISSED" (the warning sign visible on the 5-min candles before entry, or plainly "nothing warned" when there
   was none) instead of "THE TELL"; the closing line asks "Would you have taken it?". Claude's titles say it was a loss.
   **Recap** (when there is a tell): after the end card has been read, the tell box slides to the top, the result and
@@ -59,8 +60,10 @@ Two templates, both drawn from real data only:
   under it, and 1-3 marks drawn one by one: rings on 5-minute highs / lows / closes (same kind joined by a line, e.g.
   falling highs) or a level line. Claude picks the candles (`marks` in its answer); `toMarks` keeps only candles on the
   chart and takes every price from the candles themselves. Comment + Subscribe never move once shown. The live R counter is price R
-  from his first stop; the result is the journal's R after charges (or the % move when no risk was logged). Only trades
-  over 92 days old are offered: the ticker is shown, and SEBI wants price data in market education to be 3+ months old.
+  from his first stop; the result is the journal's R after charges (or the % move when no risk was logged). The stop line is only a stop he really had (`stopFor`): his InitialStop, or, when
+  none was logged but a stop order closed the trade (ExitType STOP), where it sat (LastStop, else the fill). A manual
+  exit is never drawn as a stop, and the journal's "1R (2 ATR)" yardstick is not a stop. The picker marks trades with
+  neither as NO STOP. Only trades over 92 days old are offered: the ticker is shown, and SEBI wants price data in market education to be 3+ months old.
 - **Me vs Algo:** one finished week (Mon-Fri) since Algo Live started. A trade is the algo's when an Algo Live order
   for that day, stock and side filled within 5 minutes of the journal trade's entry; everything else is his. Each side
   is scored by the journal's R (net after charges / RiskInr; the algo's order risk when RiskInr is missing). Trades with

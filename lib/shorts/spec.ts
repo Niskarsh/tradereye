@@ -15,7 +15,7 @@ export interface PanelSpec {
   candles: [number, number, number, number, number][]; // 1-minute candles [unix sec, o, h, l, c]
   entryIdx: number; exitIdx: number;            // minute index of the first entry fill / last exit fill
   side: 'LONG' | 'SHORT';
-  entry: number; exit: number; stop: number | null;
+  entry: number; exit: number; stop: number | null;   // see stopFor: only a stop he really had
   fills: { idx: number; price: number; kind: 'in' | 'out' }[];
   result: { value: number; unit: 'R' | '%' };
   holdMin: number;
@@ -77,6 +77,17 @@ function idxAt(cs: [number, number, number, number, number][], hhmmss: string): 
   return k;
 }
 
+/**
+ * The stop drawn on the chart, only one he really had: his InitialStop from the journal; or, when none was logged but
+ * the trade was closed BY a stop order (ExitType STOP), where that stop sat (LastStop, else the exit price the stop
+ * filled at). Never invented: a manual exit is not a stop, and the journal's "1R (2 ATR)" is a yardstick, not a stop.
+ */
+export function stopFor(t: Pick<ShortTrade, 'stop' | 'lastStop' | 'exitType' | 'avgExit'>): number | null {
+  if (t.stop) return t.stop;
+  if (t.exitType === 'STOP') return t.lastStop ?? t.avgExit ?? null;
+  return null;
+}
+
 /** Display timeframe: the video draws 5-minute candles that form live from the 1-minute candles inside them. */
 export const DISPLAY_TF = 5;
 /** at most this much of the day before the entry (a late entry starts the chart later than 09:15) */
@@ -101,7 +112,7 @@ export function buildPanel(day: Candles, t: ShortTrade): PanelSpec {
   const cs = all.slice(from, to + 1);
   return {
     tf: DISPLAY_TF, candles: cs.map((k) => [k[0], r2(k[1]), r2(k[2]), r2(k[3]), r2(k[4])]),
-    entryIdx: e - from, exitIdx: x - from, side: t.dir, entry: t.avgEntry, exit: t.avgExit, stop: t.stop ?? null,
+    entryIdx: e - from, exitIdx: x - from, side: t.dir, entry: t.avgEntry, exit: t.avgExit, stop: stopFor(t),
     fills: t.fills.map((f) => ({ idx: idxAt(all, f.time) - from, price: f.price, kind: f.kind })).filter((f) => f.idx >= 0 && f.idx < cs.length),
     result: resultOf(t), holdMin: t.holdMin, exitType: t.exitType,
   };

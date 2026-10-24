@@ -378,7 +378,8 @@ def render_mystery(spec, out, poster):
     ans = p["side"]
     # a losing trade is shown just as fully, but nothing on screen may suggest his call was the right one
     lost = p["result"]["value"] < 0
-    msg_dip = "The stop stays where it is." if lost else "Most people bail right here."
+    # only talk about the stop when there is one on the chart (journal InitialStop); otherwise the line would point at nothing
+    msg_dip = ("The stop stays where it is." if p.get("stop") else "No panic exit. Holding.") if lost else "Most people bail right here."
     box_label = "WHAT I MISSED" if lost else "THE TELL"
     cta = "Would you have taken it? Comment below" if lost else "New mystery chart every week"
 
