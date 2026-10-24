@@ -1,24 +1,44 @@
 "use client";
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { TradeCharts } from '@/components/journal/TradeCharts';
 
 /**
- * "Make a short" on the Socials page: pick a real trade (Mystery chart) or a finished week (Me vs Algo), Generate,
- * and the video is rendered on GitHub Actions in a few minutes. Every short shows here with its preview.
+ * "Make a short" on the Socials page. Pick up to 3 shorts in total from either tab (any mix: 3 mystery charts, 2 + 1,
+ * the same week twice...), each with its own tell / notes, then Generate them all. Every row opens to the journal's own
+ * chart of that trade (entries, adds, exits, stop, target), so an old trade can be recalled before writing its tell.
+ * Rendering runs on GitHub Actions; each short shows below when ready. Nothing stops a trade or week being used again.
  */
+
+const MAX_PICKS = 3;
 
 type Kind = 'mystery' | 'vs';
 interface Result { value: number; unit: 'R' | '%' }
-interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result }
+interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; securityId?: string; initialStop?: string; lastStop?: string; target?: string; fills: { time: string; side: 'BUY' | 'SELL'; qty: number; price: number }[] }
+interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo }
 interface Side { r: number; n: number; uncounted: number }
-interface Week { week: string; label: string; me: Side; algo: Side; winner: 'me' | 'algo' | 'tie' | 'none'; meTrade?: { symbol: string; r?: number }; algoTrade?: { symbol: string; r?: number } }
+interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
+interface Week { week: string; label: string; me: Side; algo: Side; winner: 'me' | 'algo' | 'tie' | 'none'; meTrade?: WeekTrade; algoTrade?: WeekTrade }
 interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string }
+
+type Pick =
+  | { key: number; kind: 'mystery'; trade: MysteryTrade; tell: string; state?: 'sending' | 'sent' | string }
+  | { key: number; kind: 'vs'; week: Week; notes: { me: string; algo: string }; state?: 'sending' | 'sent' | string };
 
 const fmt = (r: Result) => `${r.value > 0 ? '+' : ''}${r.value}${r.unit}`;
 const fmtR = (x?: number) => (x === undefined ? '–' : `${x > 0 ? '+' : ''}${x.toFixed(1)}R`);
 const tone = (x: number) => (x >= 0 ? 'text-data-green' : 'text-data-red-text');
 const dateFmt = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const input = 'mt-1 w-full rounded-lg border border-line-strong bg-brand-bg px-3 py-2 text-sm text-white placeholder:text-ink-4 disabled:opacity-40';
+
+/** The journal's chart for one trade (same component as My Journal). */
+function Chart({ c, token }: { c: ChartInfo; token: string }) {
+  return (
+    <TradeCharts symbol={c.symbol} date={c.date} direction={c.dir} token={token} securityId={c.securityId}
+      initialStop={c.initialStop} lastStop={c.lastStop} target={c.target} fills={c.fills} />
+  );
+}
 
 export default function MakeShorts() {
   const { token } = useAuth();
@@ -26,9 +46,9 @@ export default function MakeShorts() {
   const [trades, setTrades] = useState<MysteryTrade[] | null>(null);
   const [cutoff, setCutoff] = useState('');
   const [weeks, setWeeks] = useState<Week[] | null>(null);
-  const [pick, setPick] = useState('');
-  const [tell, setTell] = useState('');
-  const [notes, setNotes] = useState({ me: '', algo: '' });
+  const [open, setOpen] = useState<string | null>(null);        // the expanded row
+  const [picks, setPicks] = useState<Pick[]>([]);
+  const [chartFor, setChartFor] = useState<number | null>(null); // the pick whose chart is shown in the tray
   const [shorts, setShorts] = useState<Short[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -38,9 +58,7 @@ export default function MakeShorts() {
     const j = await r?.json().catch(() => null);
     if (r?.ok && j?.shorts) setShorts(j.shorts);
   }, []);
-
   useEffect(() => { void loadShorts(); }, [loadShorts]);
-  // while anything is rendering, check every 10 s
   const working = shorts.some((s) => s.status.state === 'queued' || s.status.state === 'rendering');
   useEffect(() => {
     if (!working) return;
@@ -49,7 +67,7 @@ export default function MakeShorts() {
   }, [working, loadShorts]);
 
   useEffect(() => {
-    setPick(''); setErr('');
+    setOpen(null); setErr('');
     if (kind === 'mystery' && !trades) {
       fetch('/api/shorts/candidates?kind=mystery', { cache: 'no-store' }).then(async (r) => {
         const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
@@ -64,18 +82,28 @@ export default function MakeShorts() {
     }
   }, [kind, trades, weeks]);
 
+  const full = picks.length >= MAX_PICKS;
+  const addMystery = (t: MysteryTrade) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'mystery', trade: t, tell: '' }]);
+  const addWeek = (w: Week) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'vs', week: w, notes: { me: '', algo: '' } }]);
+  const update = (key: number, f: (p: Pick) => Pick) => setPicks((ps) => ps.map((p) => (p.key === key ? f(p) : p)));
+  const removePick = (key: number) => setPicks((ps) => ps.filter((p) => p.key !== key));
+
+  /** one request per pick, in order; a failed pick stays in the tray with its reason */
   const generate = async () => {
     setBusy(true); setErr('');
-    try {
-      const body = kind === 'mystery'
-        ? (() => { const t = trades?.find((x) => x.id === pick); return { kind, tradeId: t?.id, date: t?.date, tell }; })()
-        : { kind, week: pick, notes };
-      const r = await fetch('/api/shorts/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': token ?? '' }, body: JSON.stringify(body) });
-      const j = await r.json();
-      if (!r.ok) setErr(j.message ?? `HTTP ${r.status}`);
-      else { setPick(''); setTell(''); setNotes({ me: '', algo: '' }); }
-      await loadShorts();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    const left: Pick[] = [];
+    for (const p of picks) {
+      update(p.key, (x) => ({ ...x, state: 'sending' }));
+      const body = p.kind === 'mystery' ? { kind: 'mystery', tradeId: p.trade.id, date: p.trade.date, tell: p.tell } : { kind: 'vs', week: p.week.week, notes: p.notes };
+      try {
+        const r = await fetch('/api/shorts/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': token ?? '' }, body: JSON.stringify(body) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) left.push({ ...p, state: j.message ?? `HTTP ${r.status}` });
+      } catch (e) { left.push({ ...p, state: (e as Error).message }); }
+    }
+    setPicks(left); setChartFor(null); setBusy(false);
+    if (left.length) setErr(`${left.length} of them could not start; the reason is on each.`);
+    void loadShorts();
   };
 
   const remove = async (id: string) => {
@@ -84,15 +112,25 @@ export default function MakeShorts() {
     void loadShorts();
   };
 
-  const week = weeks?.find((w) => w.week === pick);
   const tab = (k: Kind, label: string) => (
     <button onClick={() => setKind(k)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${kind === k ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>{label}</button>
+  );
+  const addBtn = (onClick: () => void) => (
+    <button onClick={onClick} disabled={full}
+      className="inline-flex h-8 items-center gap-1 rounded-full border border-line-strong px-3 text-xs font-semibold text-ink-2 hover:border-brand-accent hover:text-white disabled:opacity-30">
+      <Plus className="size-3.5" />Add
+    </button>
+  );
+  const chevron = (id: string) => (
+    <button onClick={() => setOpen(open === id ? null : id)} aria-label={open === id ? 'Hide chart' : 'Show chart'} className="text-ink-3 hover:text-white">
+      {open === id ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+    </button>
   );
 
   return (
     <section className="mt-8">
-      <h2 className="text-xl font-semibold text-white">Make a short</h2>
-      <p className="mt-1 text-sm text-ink-3">Drawn from your real trades and candles. Rendering takes a few minutes on GitHub; it shows below when ready.</p>
+      <h2 className="text-xl font-semibold text-white">Make shorts</h2>
+      <p className="mt-1 text-sm text-ink-3">Pick up to {MAX_PICKS} in total from either tab. Open a row to see the trade on its chart. Rendering takes a few minutes on GitHub; each short shows below when ready.</p>
 
       <div className="mt-4 rounded-2xl border border-line-strong bg-brand-card p-4">
         <div className="mb-4 inline-flex gap-1 rounded-full border border-line-strong p-1">
@@ -103,67 +141,111 @@ export default function MakeShorts() {
           <>
             <p className="mb-2 text-xs text-ink-3">Trades from {cutoff ? dateFmt(cutoff) : '…'} or earlier: the ticker is revealed at the end, so only trades over 3 months old (SEBI).</p>
             {!trades ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !trades.length ? <p className="text-sm text-ink-3">No trades that old yet.</p> : (
-              <div className="max-h-72 overflow-y-auto rounded-xl border border-line">
+              <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-line">
                 {trades.map((t) => (
-                  <label key={t.id} className={`flex cursor-pointer items-center gap-3 border-b border-line px-3 py-2 text-sm last:border-0 ${pick === t.id ? 'bg-white/5' : ''}`}>
-                    <input type="radio" name="trade" checked={pick === t.id} onChange={() => setPick(t.id)} className="accent-[var(--color-brand-accent)]" />
-                    <span className="w-24 text-ink-3">{dateFmt(t.date)}</span>
-                    <span className="w-28 font-semibold text-white">{t.symbol}</span>
-                    <span className={`w-14 text-xs font-bold ${t.dir === 'LONG' ? 'text-data-green' : 'text-data-red-text'}`}>{t.dir}</span>
-                    <span className="w-14 text-ink-3">{t.entryTime}</span>
-                    <span className="w-16 text-ink-3">{t.holdMin} min</span>
-                    <span className={`ml-auto font-semibold ${tone(t.result.value)}`}>{fmt(t.result)}</span>
-                  </label>
+                  <div key={t.id} className="border-b border-line last:border-0">
+                    <div className={`flex items-center gap-3 px-3 py-2 text-sm ${open === t.id ? 'bg-white/5' : ''}`}>
+                      {chevron(t.id)}
+                      <span className="w-24 text-ink-3">{dateFmt(t.date)}</span>
+                      <span className="w-28 font-semibold text-white">{t.symbol}</span>
+                      <span className={`w-14 text-xs font-bold ${t.dir === 'LONG' ? 'text-data-green' : 'text-data-red-text'}`}>{t.dir}</span>
+                      <span className="hidden w-14 text-ink-3 sm:inline">{t.entryTime}</span>
+                      <span className="hidden w-16 text-ink-3 sm:inline">{t.holdMin} min</span>
+                      <span className={`ml-auto w-16 text-right font-semibold ${tone(t.result.value)}`}>{fmt(t.result)}</span>
+                      {addBtn(() => addMystery(t))}
+                    </div>
+                    {open === t.id && <div className="bg-zinc-950/30 px-1 pb-3"><Chart c={t.chart} token={token} /></div>}
+                  </div>
                 ))}
               </div>
             )}
-            <label className="mt-3 block text-sm text-ink-2">
-              The tell <span className="text-ink-4">(optional, one line shown at the end: what gave the trade away)</span>
-              <input value={tell} onChange={(e) => setTell(e.target.value.slice(0, 90))} placeholder="e.g. Three tests of the same low, each wick longer"
-                className="mt-1 w-full rounded-lg border border-line-strong bg-brand-bg px-3 py-2 text-sm text-white placeholder:text-ink-4" />
-            </label>
           </>
         )}
 
         {kind === 'vs' && (
-          <>
-            {!weeks ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !weeks.length ? <p className="text-sm text-ink-3">No finished week since Algo Live started yet.</p> : (
-              <div className="rounded-xl border border-line">
-                {weeks.map((w) => (
-                  <label key={w.week} className={`flex cursor-pointer flex-wrap items-center gap-3 border-b border-line px-3 py-2 text-sm last:border-0 ${pick === w.week ? 'bg-white/5' : ''}`}>
-                    <input type="radio" name="week" checked={pick === w.week} onChange={() => setPick(w.week)} className="accent-[var(--color-brand-accent)]" />
+          !weeks ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !weeks.length ? <p className="text-sm text-ink-3">No finished week since Algo Live started yet.</p> : (
+            <div className="rounded-xl border border-line">
+              {weeks.map((w) => (
+                <div key={w.week} className="border-b border-line last:border-0">
+                  <div className={`flex flex-wrap items-center gap-3 px-3 py-2 text-sm ${open === w.week ? 'bg-white/5' : ''}`}>
+                    {chevron(w.week)}
                     <span className="w-36 font-semibold text-white">{w.label}</span>
                     <span>Me <b className={tone(w.me.r)}>{fmtR(w.me.r)}</b> <span className="text-ink-4">({w.me.n})</span></span>
                     <span>Algo <b className={tone(w.algo.r)}>{fmtR(w.algo.r)}</b> <span className="text-ink-4">({w.algo.n})</span></span>
                     <span className="ml-auto text-xs font-bold uppercase text-brand-accent">{w.winner === 'none' ? 'no trades' : w.winner === 'tie' ? 'tie' : `${w.winner} wins`}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-            {week && (
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {(['me', 'algo'] as const).map((side) => {
-                  const t = side === 'me' ? week.meTrade : week.algoTrade;
-                  return (
-                    <label key={side} className="block text-sm text-ink-2">
-                      {side === 'me' ? 'Your' : 'Algo\'s'} trade of the week: <b className="text-white">{t ? `${t.symbol} ${fmtR(t.r)}` : 'none'}</b>
-                      <input value={notes[side]} disabled={!t} onChange={(e) => setNotes((n) => ({ ...n, [side]: e.target.value.slice(0, 40) }))} placeholder="One-line reason (optional)"
-                        className="mt-1 w-full rounded-lg border border-line-strong bg-brand-bg px-3 py-2 text-sm text-white placeholder:text-ink-4 disabled:opacity-40" />
-                    </label>
-                  );
-                })}
-                {(week.me.uncounted > 0 || week.algo.uncounted > 0) && <p className="text-xs text-ink-4 md:col-span-2">Trades without a logged stop aren&apos;t scored (me {week.me.uncounted}, algo {week.algo.uncounted}).</p>}
-              </div>
-            )}
-          </>
+                    {addBtn(() => addWeek(w))}
+                  </div>
+                  {open === w.week && (
+                    <div className="space-y-3 bg-zinc-950/30 px-1 pb-3">
+                      {(['me', 'algo'] as const).map((side) => {
+                        const t = side === 'me' ? w.meTrade : w.algoTrade;
+                        return (
+                          <div key={side}>
+                            <p className="px-2 pt-2 text-xs text-ink-3">{side === 'me' ? 'Your' : 'Algo’s'} trade of the week: <b className="text-white">{t ? `${t.symbol} · ${dateFmt(t.date)} · ${fmtR(t.r)}` : 'none'}</b></p>
+                            {t && <Chart c={t.chart} token={token} />}
+                          </div>
+                        );
+                      })}
+                      {(w.me.uncounted > 0 || w.algo.uncounted > 0) && <p className="px-2 text-xs text-ink-4">Trades without a logged stop aren&apos;t scored (me {w.me.uncounted}, algo {w.algo.uncounted}).</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
         )}
 
-        <div className="mt-4 flex items-center gap-3">
-          <button onClick={generate} disabled={!pick || busy}
-            className="inline-flex h-10 items-center gap-2 rounded-full bg-brand-accent px-5 text-sm font-semibold text-brand-bg hover:bg-brand-accent-hover disabled:opacity-40">
-            {busy && <Loader2 className="size-4 animate-spin" />}Generate
-          </button>
-          {err && <span className="text-sm text-data-red-text">{err}</span>}
+        {/* the tray: up to 3 picks, each with its own tell / notes */}
+        <div className="mt-5 border-t border-line pt-4">
+          <p className="text-sm font-semibold text-white">Selected {picks.length} / {MAX_PICKS}</p>
+          {!picks.length && <p className="mt-1 text-xs text-ink-4">Use Add on any row. The same trade or week can be added again.</p>}
+          <div className="mt-2 space-y-3">
+            {picks.map((p, i) => (
+              <div key={p.key} className="rounded-xl border border-line p-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="flex size-6 items-center justify-center rounded-full bg-brand-accent text-xs font-black text-brand-bg">{i + 1}</span>
+                  <span className="font-semibold text-white">
+                    {p.kind === 'mystery' ? `Mystery: ${p.trade.symbol} · ${dateFmt(p.trade.date)} · ${fmt(p.trade.result)}` : `Me vs Algo · ${p.week.label}`}
+                  </span>
+                  {p.kind === 'mystery' && (
+                    <button onClick={() => setChartFor(chartFor === p.key ? null : p.key)} className="text-xs text-brand-accent hover:underline">{chartFor === p.key ? 'Hide chart' : 'Chart'}</button>
+                  )}
+                  <button onClick={() => removePick(p.key)} disabled={busy} aria-label="Remove" className="ml-auto text-ink-4 hover:text-data-red-text disabled:opacity-30"><X className="size-4" /></button>
+                </div>
+                {p.state && p.state !== 'sending' && p.state !== 'sent' && <p className="mt-1 text-xs text-data-red-text">{p.state}</p>}
+                {p.kind === 'mystery' ? (
+                  <>
+                    {chartFor === p.key && <div className="mt-2"><Chart c={p.trade.chart} token={token} /></div>}
+                    <label className="mt-2 block text-xs text-ink-3">
+                      The tell (optional): what gave the trade away, shown at the end
+                      <input value={p.tell} disabled={busy} onChange={(e) => { const v = e.target.value.slice(0, 90); update(p.key, (x) => ({ ...x, tell: v } as Pick)); }}
+                        placeholder="e.g. Three tests of the same low, each wick longer" className={input} />
+                    </label>
+                  </>
+                ) : (
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    {(['me', 'algo'] as const).map((side) => {
+                      const t = side === 'me' ? p.week.meTrade : p.week.algoTrade;
+                      return (
+                        <label key={side} className="block text-xs text-ink-3">
+                          {side === 'me' ? 'Your' : 'Algo’s'} one-line reason (optional){t ? '' : ': no trade'}
+                          <input value={p.notes[side]} disabled={busy || !t} placeholder={t ? `${t.symbol} ${fmtR(t.r)}` : ''}
+                            onChange={(e) => { const v = e.target.value.slice(0, 40); update(p.key, (x) => (x.kind === 'vs' ? { ...x, notes: { ...x.notes, [side]: v } } : x)); }} className={input} />
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button onClick={generate} disabled={!picks.length || busy}
+              className="inline-flex h-10 items-center gap-2 rounded-full bg-brand-accent px-5 text-sm font-semibold text-brand-bg hover:bg-brand-accent-hover disabled:opacity-40">
+              {busy && <Loader2 className="size-4 animate-spin" />}Generate {picks.length || ''} {picks.length === 1 ? 'short' : 'shorts'}
+            </button>
+            {err && <span className="text-sm text-data-red-text">{err}</span>}
+          </div>
         </div>
       </div>
 

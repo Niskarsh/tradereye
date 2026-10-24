@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { errorResponse, ownerGuard } from '@/lib/live/guard';
-import { mysteryCandidates, season } from '@/lib/shorts/source';
+import { chartInfo, mysteryCandidates, season } from '@/lib/shorts/source';
 import { mysteryCutoff, scoreR, type ShortTrade } from '@/lib/shorts/trades';
 import { dateLabel } from '@/lib/shorts/spec';
 
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     if (kind === 'vs') {
       const s = await season();
       const brief = (t?: ShortTrade & { orderRisk?: number }) =>
-        t ? { symbol: t.symbol, date: t.date, dir: t.dir, r: scoreR(t) } : undefined;
+        t ? { symbol: t.symbol, date: t.date, dir: t.dir, r: scoreR(t), chart: chartInfo(t) } : undefined;
       return NextResponse.json({
         weeks: s.weeks.map((w) => ({ week: w.week, label: `Week of ${dateLabel(w.week)}`, me: w.me, algo: w.algo, winner: w.winner, meTrade: brief(w.meTrade), algoTrade: brief(w.algoTrade) })).reverse(),
       });

@@ -184,7 +184,9 @@ def render_mystery(spec, out, poster):
     trade_yr = ch.yrange(max(0, e - 3), None, (p["entry"], p.get("stop"), p["exit"]))
     lead = max(1, e)
     t_ff = min(10.0, max(4.0, lead * 0.22)); t_q = t_ff + 1.2; t_rev = t_q + 3.0 + 1.2
-    t_play = t_rev + min(10.0, max(5.0, (end - e) * 0.12)); total = t_play + 5.5
+    t_play = t_rev + min(10.0, max(5.0, (end - e) * 0.12))
+    # result -> build-up -> ticker reveal (held) -> tell + follow
+    t_reveal = t_play + 2.6; t_end_card = t_reveal + 2.2; total = t_end_card + 3.6
     ans = p["side"]
 
     def upto_at(t):
@@ -202,7 +204,7 @@ def render_mystery(spec, out, poster):
         t = f / FPS
         img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
         up = upto_at(t)
-        T(d, (32, 70), "MYSTERY STOCK", F("Black", 40), TXT, "lm")
+        T(d, (32, 70), c["symbol"] if t >= t_reveal else "MYSTERY STOCK", F("Black", 40), GOLD if t >= t_reveal else TXT, "lm")
         T(d, (32, 114), f"NSE  ·  {p['tf']}-min chart", F("Medium", 23), MUTED, "lm")
         T(d, (688, 70), ch.clock(up if t < t_play else end - 1), F("Bold", 44), GOLD, "rm")
         speed = "FAST" if t < t_ff else ("PAUSED" if t < t_rev else ("PLAY" if t < t_play else "DONE"))
@@ -255,29 +257,51 @@ def render_mystery(spec, out, poster):
             else:
                 xx = px(x)
                 d.ellipse([u(xx - 9), u(py(p["exit"]) - 9), u(xx + 9), u(py(p["exit"]) + 9)], fill=GOLD)
-                k = ease((t - t_play) / 0.5)
-                img = dim(img, 0.82 * k); d = ImageDraw.Draw(img)
-                res = p["result"]
-                col = EM if res["value"] >= 0 else RED
-                T(d, (360, 360), fmt_result(res["value"], res["unit"]), F("Black", 140), mix(BG, col, k))
+                res = p["result"]; col = EM if res["value"] >= 0 else RED
                 sub = f"in {p['holdMin']} minutes" + ("  ·  after charges" if res["unit"] == "R" else "")
-                T(d, (360, 455), sub, F("Bold", 32), mix(BG, TXT, k))
-                T(d, (360, 525), f"It was {c['symbol']}  ·  {c['dateLabel']}", F("Black", 34), mix(BG, GOLD, k))
-                y = 600
-                if c.get("tell"):
-                    d.rounded_rectangle([u(50), u(y - 10), u(670), u(y + 120)], radius=u(18), fill=mix(BG, (36, 32, 22), k))
-                    T(d, (360, y + 22), "THE TELL", F("Black", 24), mix(BG, GOLD, k))
-                    words = c["tell"].split(); lines = [""]
-                    for wd in words:
-                        if len(lines[-1]) + len(wd) + 1 > 34: lines.append(wd)
-                        else: lines[-1] = (lines[-1] + " " + wd).strip()
-                    for li, line in enumerate(lines[:2]):
-                        T(d, (360, y + 62 + li * 38), line, F("Bold", 29), mix(BG, TXT, k))
-                    y += 150
-                if t > t_play + 1.2:
-                    k2 = ease((t - t_play - 1.2) / 0.4)
-                    T(d, (360, y + 60), "New mystery chart every week.", F("Black", 32), mix(BG, TXT, k2))
-                    pill(d, 360, y + 150, 360, 80, "FOLLOW", mix(BG, RED, k2), F("Black", 36))
+                if t < t_reveal:
+                    # 1) the result, big
+                    k = ease((t - t_play) / 0.5)
+                    img = dim(img, 0.82 * k); d = ImageDraw.Draw(img)
+                    T(d, (360, 470), fmt_result(res["value"], res["unit"]), F("Black", 150), mix(BG, col, k))
+                    T(d, (360, 570), sub, F("Bold", 34), mix(BG, TXT, k))
+                    if t > t_reveal - 1.3:  # the build-up to the reveal
+                        k2 = ease((t - (t_reveal - 1.3)) / 0.4)
+                        T(d, (360, 700), "So what was the stock?", F("Black", 38), mix(BG, GOLD, k2))
+                else:
+                    # 2) the reveal: the ticker slams in on a full-width band, and stays
+                    img = dim(img, 0.9); d = ImageDraw.Draw(img)
+                    T(d, (360, 255), fmt_result(res["value"], res["unit"]), F("Black", 72), col)
+                    T(d, (360, 315), sub, F("Bold", 26), TXT)
+                    T(d, (360, 410), "THE STOCK WAS", F("Black", 30), GOLD)
+                    ks = ease((t - t_reveal) / 0.28)
+                    flash = max(0.0, 1 - (t - t_reveal) / 0.45)
+                    band_h = 150 * (0.4 + 0.6 * ks)
+                    d.rectangle([0, u(530 - band_h / 2), W, u(530 + band_h / 2)], fill=mix(GOLD, (255, 250, 235), flash))
+                    sym = c["symbol"]
+                    size = 118
+                    while size > 50 and F("Black", size).getlength(sym) > u(640): size -= 4
+                    size = int(size * (1.0 + 0.7 * (1 - ks)))
+                    T(d, (360, 532), sym, F("Black", size), BG)
+                    if t > t_reveal + 0.35:
+                        k3 = ease((t - t_reveal - 0.35) / 0.4)
+                        T(d, (360, 650), f"NSE  ·  {c['dateLabel']}", F("Bold", 32), mix(BG, TXT, k3))
+                    y = 730
+                    if t > t_end_card and c.get("tell"):
+                        k4 = ease((t - t_end_card) / 0.4)
+                        d.rounded_rectangle([u(50), u(y - 10), u(670), u(y + 120)], radius=u(18), fill=mix(BG, (36, 32, 22), k4))
+                        T(d, (360, y + 22), "THE TELL", F("Black", 24), mix(BG, GOLD, k4))
+                        words = c["tell"].split(); lines = [""]
+                        for wd in words:
+                            if len(lines[-1]) + len(wd) + 1 > 34: lines.append(wd)
+                            else: lines[-1] = (lines[-1] + " " + wd).strip()
+                        for li, line in enumerate(lines[:2]):
+                            T(d, (360, y + 62 + li * 38), line, F("Bold", 29), mix(BG, TXT, k4))
+                        y += 150
+                    if t > t_end_card + 0.8:
+                        k5 = ease((t - t_end_card - 0.8) / 0.4)
+                        T(d, (360, y + 40), "New mystery chart every week.", F("Black", 30), mix(BG, TXT, k5))
+                        pill(d, 360, y + 120, 340, 76, "FOLLOW", mix(BG, RED, k5), F("Black", 34))
         return img
 
     nf = int(total * FPS)
@@ -291,6 +315,13 @@ def render_mystery(spec, out, poster):
     place(buf, tone(660, 0.4, 0.3, 6), t_rev); place(buf, tone(990, 0.5, 0.25, 5), t_rev + 0.08)
     win = p["result"]["value"] >= 0
     for kk, fr in enumerate([523, 659, 784, 1047] if win else [392, 330, 262]): place(buf, tone(fr, 0.6, 0.25, 4), t_play + kk * 0.09)
+    roll = t_reveal - 1.3
+    n = 0
+    while roll < t_reveal - 0.05:
+        place(buf, tone(180 + n * 6, 0.06, 0.12 + n * 0.006, 30), roll)
+        n += 1; roll += max(0.035, 0.13 - n * 0.006)
+    place(buf, tone(70, 0.9, 0.7, 3.5), t_reveal); place(buf, tone(140, 0.6, 0.4, 5), t_reveal)
+    for kk, fr in enumerate([784, 1047, 1319]): place(buf, tone(fr, 0.7, 0.22, 4), t_reveal + 0.05 + kk * 0.06)
     finish(frame, nf, buf, out, poster, poster_t=t_q + 0.5)  # the question, never the answer
 
 

@@ -13,6 +13,7 @@ export interface ShortTrade {
   entryTime: string; exitTime: string;          // HH:mm:ss
   avgEntry: number; avgExit: number;
   stop?: number;                                 // the first stop he placed (InitialStop), when logged
+  lastStop?: number; target?: number; securityId?: string; // for the journal chart in the picker
   fills: Fill[];
   net: number;                                   // ₹ after charges
   risk?: number;                                 // RiskInr, when logged
@@ -60,7 +61,9 @@ export function journalShortTrades(headers: string[], rows: { cells: string[] }[
     const stop = num(o.InitialStop) > 0 ? num(o.InitialStop) : undefined;
     out.push({
       id, date, symbol: o.Symbol.trim().toUpperCase(), dir, entryTime, exitTime, avgEntry: r2(avgEntry), avgExit: r2(avgExit),
-      stop, fills, net: r2(net), risk, netR: risk ? r2(net / risk) : undefined,
+      stop, lastStop: num(o.LastStop) > 0 ? num(o.LastStop) : undefined, target: num(o.TpLast) > 0 ? num(o.TpLast) : undefined,
+      securityId: /^\d+$/.test(String(o.SecurityId ?? '').trim()) ? String(o.SecurityId).trim() : undefined,
+      fills, net: r2(net), risk, netR: risk ? r2(net / risk) : undefined,
       movePct: r2(((dir === 'LONG' ? avgExit - avgEntry : avgEntry - avgExit) / avgEntry) * 100),
       holdMin: Math.max(1, Math.round((secOfDay(exitTime) - secOfDay(entryTime)) / 60)),
       exitType: String(o.ExitType ?? '').trim().toUpperCase() || 'UNKNOWN',

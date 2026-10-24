@@ -34,12 +34,17 @@ app id and secret from Meta's "API setup with Instagram login" page, not the Fac
 - **Test upload (not published)** sends the same video to Instagram and waits until Meta has processed it, without
   publishing (Reels cannot be private). The unpublished upload expires on its own within 24 hours.
 
-## Making shorts (Make a short, on the Socials page)
+## Making shorts (Make shorts, on the Socials page)
+Pick up to 3 shorts in total across both tabs (any mix), each with its own tell / notes, then Generate them all (one
+render job each). Every row opens to the journal's own chart of that trade (TradeCharts: entries, adds, exits, stop,
+target), so an old trade can be recalled before writing its tell. Nothing blocks a trade or week from being used again.
+
 Two templates, both drawn from real data only:
 - **Mystery chart:** one of his trades, replayed from the trade day's saved 1-minute candles (grouped into 2/3/5/10-min
   candles when the trade is long). Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
   trade plays out with a live R counter (price R from his first stop), then the result (the journal's R after charges,
-  or the % move when no risk was logged), the ticker and date, and an optional one-line "tell". Only trades over
+  or the % move when no risk was logged), a drum-roll build-up, and the ticker reveal: the symbol slams onto a
+  full-width gold band and stays on screen (the header switches to it too) through the optional one-line "tell". Only trades over
   92 days old are offered: the ticker is shown, and SEBI wants price data in market education to be 3+ months old.
 - **Me vs Algo:** one finished week (Mon-Fri) since Algo Live started. A trade is the algo's when an Algo Live order
   for that day, stock and side filled within 5 minutes of the journal trade's entry; everything else is his. Each side
