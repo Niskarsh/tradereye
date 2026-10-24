@@ -123,7 +123,7 @@ test('Claude text: the mystery ticker never reaches the public texts, and every 
   assert.equal(t.tell?.length, 90);
   assert.equal(t.notes, undefined);
   for (const s of [t.youtube.title, t.youtube.description, t.instagram.caption]) assert.ok(!/angelone/i.test(s), s);
-  assert.deepEqual(t.youtube.tags, ['day trading', 'nse']);
+  assert.deepEqual(t.youtube.tags, ['candles before cubicles', 'candlesbeforecubicles', 'day trading', 'nse']);
   assert.match(t.youtube.title, /this stock/);
   // a ticker inside a longer word is left alone
   assert.equal(scrubTicker(toSocialText({ ...raw, youtube: { ...raw.youtube, title: 'SCI vs SCIENCE' } }, 'mystery'), 'SCI').youtube.title, 'this stock vs SCIENCE');

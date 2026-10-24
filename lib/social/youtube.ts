@@ -106,6 +106,29 @@ export interface UploadMeta {
  * realistic altered or synthetic (AI) content (the videos are drawn from real trade data by code).
  */
 export const AUDIENCE = { selfDeclaredMadeForKids: false, containsSyntheticMedia: false } as const;
+/** Studio's "Paid promotion" question: no paid product placement, sponsorship or endorsement. */
+export const NO_PAID_PROMOTION = { hasPaidProductPlacement: false } as const;
+const PARTS = 'snippet,status,paidProductPlacementDetails';
+
+/** The channel's own name, always among the tags (people search it after seeing a Short). */
+export const CHANNEL_TAGS = ['candles before cubicles', 'candlesbeforecubicles'];
+/** YouTube allows 500 characters of tags (a tag with spaces counts its quotes, plus a comma between tags); we stay under 450. */
+export const TAG_BUDGET = 450;
+const tagCost = (t: string) => t.length + (/\s/.test(t) ? 2 : 0);
+export const tagChars = (tags: string[]) => tags.reduce((n, t) => n + tagCost(t), 0) + Math.max(0, tags.length - 1);
+
+/** Channel tags first, then his / Claude's in order; duplicates and anything YouTube rejects removed; within budget. */
+export function fitTags(tags: string[], budget = TAG_BUDGET): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of [...CHANNEL_TAGS, ...tags]) {
+    const t = raw.replace(/[<>",#]/g, '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 100);
+    if (!t || seen.has(t)) continue;
+    if (tagChars([...out, t]) > budget) continue;
+    seen.add(t); out.push(t);
+  }
+  return out;
+}
 
 /** Resumable upload in two calls: start a session with the details, then send the bytes. Returns the video id. */
 export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: UploadMeta, fetchImpl: typeof fetch = fetch): Promise<{ id: string; url: string }> {
@@ -113,8 +136,9 @@ export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: 
   const body = {
     snippet: snippetOf(meta),
     status: { privacyStatus: meta.privacy, ...AUDIENCE, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+    paidProductPlacementDetails: NO_PAID_PROMOTION,
   };
-  const start = await fetchImpl(`${UPLOAD}?uploadType=resumable&part=snippet,status`, {
+  const start = await fetchImpl(`${UPLOAD}?uploadType=resumable&part=${PARTS}`, {
     method: 'POST', cache: 'no-store',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json; charset=UTF-8', 'x-upload-content-type': 'video/mp4', 'x-upload-content-length': String(bytes.byteLength) },
     body: JSON.stringify(body),
@@ -142,7 +166,7 @@ export const LANGUAGE = 'en-US';
 
 function snippetOf(meta: UploadMeta) {
   return {
-    title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? ''), tags: meta.tags ?? [],
+    title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? '').slice(0, 4500), tags: fitTags(meta.tags ?? []),
     categoryId: meta.categoryId ?? CATEGORY_PEOPLE_BLOGS, defaultLanguage: LANGUAGE, defaultAudioLanguage: LANGUAGE,
   };
 }
@@ -153,8 +177,9 @@ export async function updateVideo(accessToken: string, id: string, meta: UploadM
   const body = {
     id, snippet: snippetOf(meta),
     status: { privacyStatus: meta.privacy, ...AUDIENCE, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+    paidProductPlacementDetails: NO_PAID_PROMOTION,
   };
-  const res = await fetchImpl(`${API}/videos?part=snippet,status`, {
+  const res = await fetchImpl(`${API}/videos?part=${PARTS}`, {
     method: 'PUT', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json; charset=UTF-8' }, body: JSON.stringify(body),
   });
   if (!res.ok) throw await apiError(res, 'Changing the YouTube video');

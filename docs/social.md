@@ -100,7 +100,11 @@ to skip it). Times are IST. A short not scheduled yet is offered the next free *
 first: **Instagram 11:00, YouTube 15:30 IST** (`nextSlotPairs`, `lib/shorts/slots.ts`).
 YouTube extras on every upload: not made for kids (`selfDeclaredMadeForKids: false`), no altered / synthetic content
 (`containsSyntheticMedia: false`), category **People & Blogs (22)** (a personal trade journal; deliberately not
-Education), title / description / audio language English (US). **Risk disclaimer** (`lib/shorts/disclaimer.ts`): every
+Education), title / description / audio language English (US), no paid promotion (`paidProductPlacementDetails`). Tags: the
+channel name first, then Claude's / his, fitted under 450 of YouTube's 500 tag characters (`fitTags`); descriptions
+700-1500 characters of real content (YouTube says title, thumbnail and description matter more than tags). Never
+other channels' names as tags (misleading metadata). Fixed settings carry a version (`META_V`): a video uploaded
+before a change is updated on its next save. **Risk disclaimer** (`lib/shorts/disclaimer.ts`): every
 YouTube description and Instagram caption gets a SEBI risk disclaimer (not a registered adviser, not advice, high risk
 of loss; mystery shorts add that prices are 3+ months old), inserted once above the closing hashtags, by code: on
 Claude's text and again on every save, so edits cannot drop it. **Playlists:** the editor lists the channel's playlists

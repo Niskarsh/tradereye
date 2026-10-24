@@ -51,19 +51,20 @@ export async function scheduleYouTube(id: string, at: number, t: PostText, old: 
   const samePlaylists = sameSet(want, (old?.playlists ?? []).map((x) => x.id));
   const thumb = await loadThumb(id);
   const sameThumb = !thumb?.image || old?.thumbMs === thumb.ms;
-  if (old?.videoId && state === 'scheduled' && sameTime && wordsSame && samePlaylists && sameThumb) return { post: old, problems: [] };  // nothing to change
+  const sameMeta = old?.metaV === META_V;   // uploaded before a fixed setting changed (e.g. paid promotion): send it again
+  if (old?.videoId && state === 'scheduled' && sameTime && wordsSame && samePlaylists && sameThumb && sameMeta) return { post: old, problems: [] };  // nothing to change
   if (!sameTime && at < now + MIN_LEAD_MS) throw new YouTubeError('Pick a YouTube time at least 15 minutes from now.');
   const { conn, accessToken } = await liveYouTube();
   let post: PlatformPost;
   if (old?.videoId && state === 'scheduled') {
     if (!canManage(conn.scope)) throw new YouTubeError('Connect YouTube again (top of this page) to allow changing a scheduled video, then save again.');
-    if (!sameTime || !wordsSame) await updateVideo(accessToken, old.videoId, meta(t, at));
-    post = { ...old, at, updatedAt: now, error: undefined };
+    if (!sameTime || !wordsSame || !sameMeta) await updateVideo(accessToken, old.videoId, meta(t, at));
+    post = { ...old, at, updatedAt: now, error: undefined, metaV: META_V };
   } else {
     const bytes = await store.get(videoKey(id));
     if (!bytes) throw new YouTubeError('The video file is missing. Generate the short again.');
     const v = await uploadVideo(accessToken, bytes, meta(t, at));
-    post = { at, state: 'scheduled', updatedAt: now, videoId: v.id, url: v.url, playlists: [] };
+    post = { at, state: 'scheduled', updatedAt: now, videoId: v.id, url: v.url, playlists: [], metaV: META_V };
   }
   const synced = await syncPlaylists(accessToken, post.videoId!, post.playlists ?? [], want);
   post = { ...post, playlists: synced.items };
@@ -82,6 +83,9 @@ export async function scheduleYouTube(id: string, at: number, t: PostText, old: 
   }
   return { post, problems };
 }
+
+/** Version of the fixed upload settings (kids, AI, paid promotion, category, language, tag rules). Bump on change. */
+export const META_V = 2;
 
 export const loadThumb = (id: string) => getJson<ThumbMeta>(store, thumbMetaKey(id));
 
