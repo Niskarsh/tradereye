@@ -227,3 +227,12 @@ test('season ledger: a week freezes with every earlier one, never drifts, and ch
   assert.equal(r.weeks['2026-10-19'].frozenAt, 1000);
   assert.equal(r.weeks['2026-10-19'].history?.[0].winner, 'me');
 });
+
+test('stop line: only a stop he really had (InitialStop, or the stop order that closed it); never invented', async () => {
+  const { stopFor } = await import('../lib/shorts/spec');
+  assert.equal(stopFor({ stop: 99.5, exitType: 'MANUAL', avgExit: 99 }), 99.5);
+  assert.equal(stopFor({ stop: undefined, exitType: 'STOP', lastStop: 272.4, avgExit: 272.34 }), 272.4);  // the trailed stop that hit
+  assert.equal(stopFor({ stop: undefined, exitType: 'STOP', avgExit: 272.34 }), 272.34);                // where the stop order filled
+  assert.equal(stopFor({ stop: undefined, exitType: 'MANUAL', avgExit: 272.34 }), null);               // a manual exit is not a stop
+  assert.equal(stopFor({ stop: undefined, exitType: 'UNKNOWN', avgExit: 272.34 }), null);
+});

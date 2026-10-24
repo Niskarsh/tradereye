@@ -230,7 +230,7 @@ export default function MakeShorts() {
                       <span className="hidden w-14 text-ink-3 sm:inline">{t.entryTime}</span>
                       <span className="hidden w-16 text-ink-3 sm:inline">{t.holdMin} min</span>
                       {t.hasStop === false && (
-                        <span title="No InitialStop in the journal: the video has no stop line and shows the result in %, not R"
+                        <span title="No InitialStop in the journal and not closed by a stop order: the video has no stop line"
                           className="rounded-md border border-data-caution/50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-data-caution">no stop</span>
                       )}
                       <span className={`ml-auto w-16 text-right font-semibold ${tone(t.result.value)}`}>{fmt(t.result)}</span>
