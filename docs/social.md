@@ -143,7 +143,7 @@ is shown on the card, the video keeps YouTube's frame). **Instagram:** the image
 as `thumb_offset`) when the Reel container is made; a frame picked after that remakes the container on save.
 
 ## Posting view (Socials page, second tab)
-Every short with a posting plan: **Needs attention** (failed, rejected by YouTube, timer not set), **Upcoming**
+A short leaves the Make shorts grid once it has a posting plan (a line there links to Posting). Every short with a posting plan: **Needs attention** (failed, rejected by YouTube, timer not set), **Upcoming**
 (soonest first, with a countdown), **Published, last 7 days** (with links). Each row has Edit (same editor). YouTube rows
 are checked with YouTube itself (`videos.list`): public = live, rejected / failed / deleted = needs attention, still
 private well after its time = flagged. `GET /api/shorts/posts`.
