@@ -10,7 +10,7 @@ import { CheckCircle2, ExternalLink, Loader2, XCircle } from 'lucide-react';
 type Platform = 'youtube' | 'instagram';
 interface ConnStatus { connected: boolean; account?: string; title?: string; connectedAt?: number; expiresAt?: number; problem?: string }
 interface Status { youtube: ConnStatus; instagram: ConnStatus }
-interface TestResult { ok: boolean; message: string; url?: string }
+interface TestResult { ok: boolean; message: string; url?: string; pending?: boolean; id?: string }
 
 const CHANNEL_URL = 'https://www.youtube.com/@CandlesBeforeCubicles';
 const fmtDate = (ms?: number) => (ms ? new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : '');
@@ -62,12 +62,13 @@ export default function YouTubePage() {
     setBusy(null); void load();
   };
 
-  const test = async (p: Platform) => {
+  const test = async (p: Platform, checkId?: string) => {
     setBusy(p); setTests((t) => ({ ...t, [p]: undefined }));
     try {
-      const r = await fetch('/api/social/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: p }) });
+      const payload = checkId ? { platform: 'instagram-status', id: checkId } : { platform: p };
+      const r = await fetch('/api/social/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
       const j = await r.json();
-      setTests((t) => ({ ...t, [p]: r.ok ? { ok: true, message: j.message, url: j.url } : { ok: false, message: j.message ?? `HTTP ${r.status}` } }));
+      setTests((t) => ({ ...t, [p]: { ok: r.ok && j.ok === true, pending: j.pending === true, message: j.message ?? `HTTP ${r.status}`, url: j.url, id: j.id } }));
     } catch (e) {
       setTests((t) => ({ ...t, [p]: { ok: false, message: (e as Error).message } }));
     } finally { setBusy(null); }
@@ -99,7 +100,7 @@ export default function YouTubePage() {
           testLabel="Test upload (private)" onTest={() => test('youtube')} onDisconnect={() => disconnect('youtube')} />
         <ConnCard platform="instagram" name="Instagram" s={status?.instagram} busy={busy === 'instagram'} result={tests.instagram}
           note="Log in as candlesbeforecubicles. The test sends a video to Instagram without publishing it."
-          testLabel="Test upload (not published)" onTest={() => test('instagram')} onDisconnect={() => disconnect('instagram')} />
+          testLabel="Test upload (not published)" onTest={() => test('instagram')} onCheck={(id) => test('instagram', id)} onDisconnect={() => disconnect('instagram')} />
       </div>
     </main>
   );
@@ -107,7 +108,7 @@ export default function YouTubePage() {
 
 function ConnCard(p: {
   platform: Platform; name: string; s?: ConnStatus; busy: boolean; result?: TestResult; note: string; testLabel: string;
-  onTest: () => void; onDisconnect: () => void;
+  onTest: () => void; onDisconnect: () => void; onCheck?: (id: string) => void;
 }) {
   const s = p.s;
   const daysLeft = s?.expiresAt ? Math.max(0, Math.round((s.expiresAt - Date.now()) / 86400_000)) : undefined;
@@ -151,9 +152,12 @@ function ConnCard(p: {
       </div>
 
       {p.result && (
-        <div className={`mt-4 rounded-xl border px-3 py-2 text-sm ${p.result.ok ? 'border-data-green/50 text-data-green' : 'border-data-red/50 text-data-red-text'}`}>
+        <div className={`mt-4 rounded-xl border px-3 py-2 text-sm ${p.result.ok ? 'border-data-green/50 text-data-green' : p.result.pending ? 'border-brand-accent/50 text-brand-accent' : 'border-data-red/50 text-data-red-text'}`}>
           {p.result.message}
           {p.result.url && <> <a href={p.result.url} target="_blank" rel="noopener noreferrer" className="underline">Open it</a></>}
+          {p.result.pending && p.result.id && p.onCheck && (
+            <button onClick={() => p.onCheck!(p.result!.id!)} disabled={p.busy} className="ml-2 underline disabled:opacity-50">Check status</button>
+          )}
         </div>
       )}
     </section>
