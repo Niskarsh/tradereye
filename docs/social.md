@@ -69,6 +69,12 @@ Two templates, both drawn from real data only:
   actually hit), CUT (a loss closed earlier). **Why beat:** once both trades are done, each side's one-line reason is
   shown and the candles it refers to are marked on that side's chart (Claude picks them, `toMarks` checks them), held
   5 s, before the week's totals and the season score.
+  **Season ledger** (`lib/shorts/season.ts`, S3 `shorts/season.json`): the first time a short uses a week, that week and
+  every earlier finished week are frozen (both sides' R, trade counts, winner). The video's week totals and season score
+  come only from frozen weeks, so a score shown to viewers never drifts when the journal changes later. The Me vs Algo
+  tab shows each week as Frozen / Not frozen, the season so far, and warns when today's data would score a frozen week
+  differently; **Re-score week** (`POST /api/shorts/season`) is the only way to change it, and keeps the old result in
+  that week's history.
 
 **Claude writes the words (optional, on by default):** at Generate, one Claude call per short (`lib/shorts/write.ts`,
 `ANTHROPIC_API_KEY`, model `COPILOT_MODEL`) gets only real facts: the trade, the candles before and during it (entry

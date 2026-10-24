@@ -201,3 +201,29 @@ test('Me vs Algo shows a ticker only when the trade is over 3 months old (SEBI)'
   assert.equal(vsPanel(t, day, '', Date.parse('2026-10-24T10:00:00Z')).symbol, 'ANGELONE');
   assert.equal(vsPanel(t, day, '', Date.parse('2026-08-01T10:00:00Z')).symbol, undefined);
 });
+
+test('season ledger: a week freezes with every earlier one, never drifts, and changes only on a deliberate re-score', async () => {
+  const { emptyLedger, freezeThrough, mergedWeeks, drifted, rescore } = await import('../lib/shorts/season');
+  const wk = (week: string, me: number, algo: number) => scoreWeek(week, me ? [T({ netR: me })] : [], algo ? [T({ netR: algo })] : []);
+  const computed = [wk('2026-10-19', 1, -1), wk('2026-10-26', -1, 2), wk('2026-11-02', 0.5, 0.2)];
+  // generating week 2 freezes weeks 1 and 2, not week 3
+  const { ledger, changed } = freezeThrough(emptyLedger(), computed, '2026-10-26', 1000);
+  assert.equal(changed, true);
+  assert.deepEqual(Object.keys(ledger.weeks).sort(), ['2026-10-19', '2026-10-26']);
+  assert.equal(freezeThrough(ledger, computed, '2026-10-26', 2000).changed, false);
+  // the journal changes later: week 1 would now be an algo win; the ledger still shows the frozen result
+  const later = [wk('2026-10-19', -2, -1), computed[1], computed[2]];
+  const merged = mergedWeeks(ledger, later);
+  assert.equal(merged[0].winner, 'me');
+  assert.equal(merged[0].frozenAt, 1000);
+  assert.equal(merged[2].frozenAt, undefined);           // week 3: not frozen, shown as computed
+  assert.deepEqual(seasonScore(merged, '2026-10-26'), { me: 1, algo: 1 });
+  assert.equal(drifted(ledger.weeks['2026-10-19'], later[0]), true);
+  assert.equal(drifted(ledger.weeks['2026-10-26'], later[1]), false);
+  // a deliberate re-score: new result, old one kept in history
+  const r = rescore(ledger, later[0], 3000);
+  assert.equal(r.weeks['2026-10-19'].winner, 'algo');
+  assert.equal(r.weeks['2026-10-19'].rescoredAt, 3000);
+  assert.equal(r.weeks['2026-10-19'].frozenAt, 1000);
+  assert.equal(r.weeks['2026-10-19'].history?.[0].winner, 'me');
+});

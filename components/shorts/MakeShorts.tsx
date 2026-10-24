@@ -19,7 +19,12 @@ interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; secur
 interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo }
 interface Side { r: number; n: number; uncounted: number }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
-interface Week { week: string; label: string; me: Side; algo: Side; winner: 'me' | 'algo' | 'tie' | 'none'; meTrade?: WeekTrade; algoTrade?: WeekTrade }
+type Winner = 'me' | 'algo' | 'tie' | 'none';
+interface Week {
+  week: string; label: string; me: Side; algo: Side; winner: Winner; meTrade?: WeekTrade; algoTrade?: WeekTrade;
+  /** the season ledger: frozen the first time a short uses the week; `drift` = today's data would score it differently */
+  frozenAt?: number; rescoredAt?: number; drift?: boolean; now?: { me: Side; algo: Side; winner: Winner };
+}
 interface SocialText { tell?: string; notes?: { me: string; algo: string }; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
 interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string } }
 
@@ -105,9 +110,19 @@ export default function MakeShorts() {
         else if (j.textError) setErr(`Made, but Claude could not write the text: ${j.textError}`);
       } catch (e) { left.push({ ...p, state: (e as Error).message }); }
     }
+    if (picks.some((p) => p.kind === 'vs')) setWeeks(null); // a Me vs Algo short freezes weeks: show them frozen
     setPicks(left); setChartFor(null); setBusy(false);
     if (left.length) setErr(`${left.length} of them could not start; the reason is on each.`);
     void loadShorts();
+  };
+
+  /** a deliberate correction: the week is scored again from today's data (the old result stays in its history) */
+  const rescoreWeek = async (w: Week) => {
+    if (!window.confirm(`Re-score ${w.label} from today's data? Shorts made from now on will show the corrected season; videos already posted keep the old score.`)) return;
+    const r = await fetch('/api/shorts/season', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ week: w.week }) }).catch(() => null);
+    const j = await r?.json().catch(() => ({}));
+    if (!r?.ok) { setErr(j?.message ?? 'Could not re-score that week.'); return; }
+    setWeeks(null); // reload with the new result
   };
 
   const remove = async (id: string) => {
@@ -168,6 +183,11 @@ export default function MakeShorts() {
 
         {kind === 'vs' && (
           !weeks ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !weeks.length ? <p className="text-sm text-ink-3">No finished week since Algo Live started yet.</p> : (
+            <>
+            <p className="mb-2 text-xs text-ink-3">
+              Season ledger: a week&apos;s result is frozen the first time a short uses it (with every earlier week), so the score in the videos never changes on its own.
+              {' '}Season so far: <b className="text-white">Me {weeks.filter((w) => w.frozenAt && w.winner === 'me').length} – {weeks.filter((w) => w.frozenAt && w.winner === 'algo').length} Algo</b> (frozen weeks).
+            </p>
             <div className="rounded-xl border border-line">
               {weeks.map((w) => (
                 <div key={w.week} className="border-b border-line last:border-0">
@@ -177,8 +197,18 @@ export default function MakeShorts() {
                     <span>Me <b className={tone(w.me.r)}>{fmtR(w.me.r)}</b> <span className="text-ink-4">({w.me.n})</span></span>
                     <span>Algo <b className={tone(w.algo.r)}>{fmtR(w.algo.r)}</b> <span className="text-ink-4">({w.algo.n})</span></span>
                     <span className="ml-auto text-xs font-bold uppercase text-brand-accent">{w.winner === 'none' ? 'no trades' : w.winner === 'tie' ? 'tie' : `${w.winner} wins`}</span>
+                    <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase ${w.frozenAt ? 'border-brand-accent/50 text-brand-accent' : 'border-line-strong text-ink-4'}`}
+                      title={w.frozenAt ? 'Locked: later shorts always show this result' : 'Freezes when its first short is made'}>
+                      {w.frozenAt ? `${w.rescoredAt ? 'Re-scored' : 'Frozen'} ${new Date(w.rescoredAt ?? w.frozenAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })}` : 'Not frozen'}
+                    </span>
                     {addBtn(() => addWeek(w))}
                   </div>
+                  {w.drift && w.now && (
+                    <div className="flex flex-wrap items-center gap-2 px-3 pb-2 text-xs text-data-caution">
+                      <span>The journal changed since this week was frozen. Scored today: me {fmtR(w.now.me.r)} ({w.now.me.n}), algo {fmtR(w.now.algo.r)} ({w.now.algo.n}), {w.now.winner === 'none' ? 'no trades' : w.now.winner === 'tie' ? 'tie' : `${w.now.winner} wins`}.</span>
+                      <button onClick={() => rescoreWeek(w)} className="rounded-full border border-data-caution/60 px-2.5 py-0.5 font-semibold hover:bg-white/5">Re-score week</button>
+                    </div>
+                  )}
                   {open === w.week && (
                     <div className="space-y-3 bg-zinc-950/30 px-1 pb-3">
                       {(['me', 'algo'] as const).map((side) => {
@@ -196,6 +226,7 @@ export default function MakeShorts() {
                 </div>
               ))}
             </div>
+            </>
           )
         )}
 
