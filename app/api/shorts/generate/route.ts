@@ -8,6 +8,7 @@ import { addShort, setStatus, store, textKey } from '@/lib/shorts/store';
 import { putJson } from '@/lib/setups/store';
 import { mysteryMessage, vsMessage, writeText, type WrittenText } from '@/lib/shorts/write';
 import { mysteryEligible, MYSTERY_MIN_AGE_DAYS } from '@/lib/shorts/trades';
+import { freezeThrough, loadLedger, mergedWeeks, saveLedger } from '@/lib/shorts/season';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
@@ -53,18 +54,30 @@ export async function POST(req: Request) {
         w.meTrade ? tradeDay(w.meTrade, g.dhan).then((day) => vsPanel(w.meTrade!, day, String(notes.me ?? ''))) : undefined,
         w.algoTrade ? tradeDay(w.algoTrade, g.dhan).then((day) => vsPanel(w.algoTrade!, day, String(notes.algo ?? ''))) : undefined,
       ]);
-      const score = seasonBeforeAfter(s.weeks, w.week);
-      spec = vsSpec(newId('vs'), { week: { week: w.week, me: w.me, algo: w.algo, winner: w.winner }, ...score, me, algo });
+      // the season ledger: this week and every earlier one are frozen now (if not already), and the video's week
+      // totals and season score come only from frozen weeks, so they can never drift from what was shown before
+      const frozen = freezeThrough(await loadLedger(), s.weeks, w.week);
+      if (frozen.changed) await saveLedger(frozen.ledger);
+      const weeks = mergedWeeks(frozen.ledger, s.weeks);
+      const fw = weeks.find((x) => x.week === w.week)!;
+      const score = seasonBeforeAfter(weeks, w.week);
+      spec = vsSpec(newId('vs'), { week: { week: fw.week, me: fw.me, algo: fw.algo, winner: fw.winner }, ...score, me, algo });
       label = `Me vs Algo · Week of ${dateLabel(w.week)}`;
       if (ai) {
         const msg = vsMessage({
-          weekNo: s.weeks.findIndex((x) => x.week === w.week) + 1, weekLabel: label, week: w, after: score.after,
+          weekNo: weeks.findIndex((x) => x.week === w.week) + 1, weekLabel: label, week: fw, after: score.after,
           me: me && w.meTrade ? { t: w.meTrade, p: me } : undefined, algo: algo && w.algoTrade ? { t: w.algoTrade, p: algo } : undefined,
+          ownNotes: { me: me?.note, algo: algo?.note },
         });
         text = await writeText('vs', msg).catch((e) => ({ error: (e as Error).message }));
         if ('notes' in text && text.notes) {
           if (me && !me.note) me.note = text.notes.me;
           if (algo && !algo.note) algo.note = text.notes.algo;
+        }
+        if ('youtube' in text && text.vsMarks) {  // only candles on each side's chart, real prices
+          if (me) me.marks = toMarks(text.vsMarks.me, me);
+          if (algo) algo.marks = toMarks(text.vsMarks.algo, algo).slice(0, 2);
+          if (me?.marks) me.marks = me.marks.slice(0, 2);
         }
       }
     } else return bad('kind must be mystery or vs');

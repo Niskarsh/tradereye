@@ -181,3 +181,49 @@ test('recap marks: only candles on the chart, prices from the candles, levels in
   assert.equal(m[2].label.length, 24);
   assert.deepEqual(toMarks('nonsense', p), []);
 });
+
+test('Me vs Algo: Claude marks per side, and each panel knows how its trade ended', async () => {
+  const { toSocialText } = await import('../lib/shorts/write');
+  const t = toSocialText({ notes: { me: 'Higher low', algo: 'Short on a breakdown' }, vs_marks: { me: [{ time: '09:45', kind: 'low', price: 0, label: 'higher low' }], algo: [] },
+    youtube: { title: 't', description: 'd', tags: [] }, instagram: { caption: 'c' } }, 'vs');
+  assert.deepEqual(t.notes, { me: 'Higher low', algo: 'Short on a breakdown' });
+  assert.equal((t.vsMarks?.me as unknown[]).length, 1);
+  assert.equal(t.tell, undefined);
+  const day = session('2026-07-15', 375);
+  const p = buildPanel(day, T({ date: '2026-07-15', exitType: 'STOP', netR: -1, entryTime: '09:56:00', exitTime: '10:10:00', holdMin: 14 }));
+  assert.equal(p.exitType, 'STOP');
+});
+
+test('Me vs Algo shows a ticker only when the trade is over 3 months old (SEBI)', async () => {
+  const { vsPanel } = await import('../lib/shorts/spec');
+  const day = session('2026-07-15', 375);
+  const t = T({ date: '2026-07-15', symbol: 'ANGELONE', entryTime: '09:56:00', exitTime: '10:20:00', holdMin: 24 });
+  assert.equal(vsPanel(t, day, '', Date.parse('2026-10-24T10:00:00Z')).symbol, 'ANGELONE');
+  assert.equal(vsPanel(t, day, '', Date.parse('2026-08-01T10:00:00Z')).symbol, undefined);
+});
+
+test('season ledger: a week freezes with every earlier one, never drifts, and changes only on a deliberate re-score', async () => {
+  const { emptyLedger, freezeThrough, mergedWeeks, drifted, rescore } = await import('../lib/shorts/season');
+  const wk = (week: string, me: number, algo: number) => scoreWeek(week, me ? [T({ netR: me })] : [], algo ? [T({ netR: algo })] : []);
+  const computed = [wk('2026-10-19', 1, -1), wk('2026-10-26', -1, 2), wk('2026-11-02', 0.5, 0.2)];
+  // generating week 2 freezes weeks 1 and 2, not week 3
+  const { ledger, changed } = freezeThrough(emptyLedger(), computed, '2026-10-26', 1000);
+  assert.equal(changed, true);
+  assert.deepEqual(Object.keys(ledger.weeks).sort(), ['2026-10-19', '2026-10-26']);
+  assert.equal(freezeThrough(ledger, computed, '2026-10-26', 2000).changed, false);
+  // the journal changes later: week 1 would now be an algo win; the ledger still shows the frozen result
+  const later = [wk('2026-10-19', -2, -1), computed[1], computed[2]];
+  const merged = mergedWeeks(ledger, later);
+  assert.equal(merged[0].winner, 'me');
+  assert.equal(merged[0].frozenAt, 1000);
+  assert.equal(merged[2].frozenAt, undefined);           // week 3: not frozen, shown as computed
+  assert.deepEqual(seasonScore(merged, '2026-10-26'), { me: 1, algo: 1 });
+  assert.equal(drifted(ledger.weeks['2026-10-19'], later[0]), true);
+  assert.equal(drifted(ledger.weeks['2026-10-26'], later[1]), false);
+  // a deliberate re-score: new result, old one kept in history
+  const r = rescore(ledger, later[0], 3000);
+  assert.equal(r.weeks['2026-10-19'].winner, 'algo');
+  assert.equal(r.weeks['2026-10-19'].rescoredAt, 3000);
+  assert.equal(r.weeks['2026-10-19'].frozenAt, 1000);
+  assert.equal(r.weeks['2026-10-19'].history?.[0].winner, 'me');
+});
