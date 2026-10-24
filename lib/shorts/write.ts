@@ -12,6 +12,7 @@ import type { ShortTrade, WeekScore } from './trades';
 
 export interface SocialText {
   tell?: string;                                   // mystery
+  marks?: unknown;                                 // mystery: what to mark on the recap chart (checked by toMarks)
   notes?: { me: string; algo: string };            // me vs algo
   youtube: { title: string; description: string; tags: string[] };
   instagram: { caption: string };
@@ -34,6 +35,12 @@ The video shows ONLY the 10-minute candles listed below, so anything you point a
 a higher low, a lower high, a long wick, a close back above or below a level, a tight base. Name the candle by its time
 when that helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show.
 If his journal comment explains the trade, use it only where the 10-minute candles back it up.
+- marks: after the reveal the chart comes back with the ticker named, and the candles your tell talks about are marked on
+  it. Give 1-3 marks, each pointing at a 10-minute candle by its time exactly as listed ("09:45"): kind "high" or "low"
+  rings that candle's high or low (two or more highs, or lows, are joined by a line: e.g. falling highs), "close" rings
+  its close, "level" draws a horizontal line at "price" (a level the tell names, inside the chart's range; for other
+  kinds set price to 0). label: max 24 characters ("lower high", "held the low"). The marks must show exactly what the
+  tell says.
 - The stock's name and ticker are the reveal: never put them in title, description, tags or caption.
 - youtube.tags: 8-15 lowercase tags (no #), general trading terms only.
 - notes: leave both empty.`;
@@ -70,13 +77,19 @@ biggest trade replayed, the week's totals in R, and the season score. Tickers ar
   not-advice line, then 4-6 hashtags (#shorts first).
 - youtube.tags: 8-15 lowercase tags (no #).
 - instagram.caption: max 600 characters, ending with a question that invites comments, the not-advice line, 6-10 hashtags.
-- tell: empty string.`;
+- tell: empty string. marks: empty array.`;
 
 export const TEXT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['tell', 'notes', 'youtube', 'instagram'],
+  required: ['tell', 'marks', 'notes', 'youtube', 'instagram'],
   properties: {
     tell: { type: 'string' },
+    marks: {
+      type: 'array', items: {
+        type: 'object', additionalProperties: false, required: ['time', 'kind', 'price', 'label'],
+        properties: { time: { type: 'string' }, kind: { type: 'string', enum: ['high', 'low', 'close', 'level'] }, price: { type: 'number' }, label: { type: 'string' } },
+      },
+    },
     notes: { type: 'object', additionalProperties: false, required: ['me', 'algo'], properties: { me: { type: 'string' }, algo: { type: 'string' } } },
     youtube: {
       type: 'object', additionalProperties: false, required: ['title', 'description', 'tags'],
@@ -122,8 +135,9 @@ function tradeFacts(t: ShortTrade, p: PanelSpec, label: string): string {
 /** A loss is any trade whose shown result is below zero (R after charges, or the % move). */
 export const isLoss = (p: PanelSpec) => p.result.value < 0;
 
-export function mysteryMessage(t: ShortTrade, p: PanelSpec): string {
-  return `${MYSTERY_CORE}\n\n${isLoss(p) ? MYSTERY_LOSS : MYSTERY_WIN}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
+export function mysteryMessage(t: ShortTrade, p: PanelSpec, ownTell = ''): string {
+  const own = ownTell.trim() ? `\n\nHE WROTE THE TELL HIMSELF: "${ownTell.trim()}". Return it unchanged as tell, and make the marks show exactly that.` : '';
+  return `${MYSTERY_CORE}\n\n${isLoss(p) ? MYSTERY_LOSS : MYSTERY_WIN}${own}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
 }
 
 export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScore; after: { me: number; algo: number }; me?: { t: ShortTrade; p: PanelSpec }; algo?: { t: ShortTrade; p: PanelSpec } }): string {
@@ -156,7 +170,7 @@ export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs')
   const yt = (j.youtube ?? {}) as Record<string, unknown>, ig = (j.instagram ?? {}) as Record<string, unknown>, n = (j.notes ?? {}) as Record<string, unknown>;
   const tags = Array.isArray(yt.tags) ? yt.tags.map((t) => clip(t, 40).replace(/^#/, '').toLowerCase()).filter(Boolean).slice(0, 15) : [];
   return {
-    ...(kind === 'mystery' ? { tell: clip(j.tell, 90) } : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) } }),
+    ...(kind === 'mystery' ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] } : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) } }),
     youtube: { title: clip(yt.title, 100), description: clip(yt.description, 4500), tags },
     instagram: { caption: clip(ig.caption, 2000) },
   };

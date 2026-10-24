@@ -21,7 +21,13 @@ export interface PanelSpec {
   holdMin: number;
 }
 
-export interface MysterySpec { kind: 'mystery'; symbol: string; dateLabel: string; panel: PanelSpec; tell: string }
+/**
+ * A mark on the recap chart (the part after the reveal that shows what the tell talks about). Positions come from the
+ * real candles: `slot` is the 10-minute candle's index in the panel, `price` is that candle's own high / low / close
+ * (or, for a level, a price inside the chart's range). Claude only says which candle and which kind.
+ */
+export interface ChartMark { slot: number; kind: 'high' | 'low' | 'close' | 'level'; price: number; label: string }
+export interface MysterySpec { kind: 'mystery'; symbol: string; dateLabel: string; panel: PanelSpec; tell: string; marks?: ChartMark[] }
 export interface VsSpec {
   kind: 'vs'; weekLabel: string;
   before: { me: number; algo: number }; after: { me: number; algo: number };
@@ -96,6 +102,50 @@ export function buildPanel(day: Candles, t: ShortTrade): PanelSpec {
     fills: t.fills.map((f) => ({ idx: idxAt(all, f.time) - from, price: f.price, kind: f.kind })).filter((f) => f.idx >= 0 && f.idx < cs.length),
     result: resultOf(t), holdMin: t.holdMin,
   };
+}
+
+/** The panel's drawn (10-minute) candles: start time "HH:MM" and exact O/H/L/C, in order. */
+export function slots(p: PanelSpec): { time: string; o: number; h: number; l: number; c: number }[] {
+  const tfSec = p.tf * 60, open = 9 * 3600 + 15 * 60;
+  const out: { time: string; o: number; h: number; l: number; c: number; s: number }[] = [];
+  for (const [t, o, h, l, c] of p.candles) {
+    const sec = istSec(t);
+    const s = Math.floor((sec - open) / tfSec);
+    const last = out[out.length - 1];
+    if (last && last.s === s) { last.h = Math.max(last.h, h); last.l = Math.min(last.l, l); last.c = c; }
+    else {
+      const start = open + s * tfSec;
+      out.push({ s, time: `${String(Math.floor(start / 3600)).padStart(2, '0')}:${String(Math.floor(start / 60) % 60).padStart(2, '0')}`, o, h, l, c });
+    }
+  }
+  return out.map(({ s: _s, ...x }) => x); // eslint-disable-line @typescript-eslint/no-unused-vars
+}
+
+/**
+ * Claude's marks -> marks the renderer can trust: the candle must be on the chart, the price is taken from that
+ * candle (a level must lie inside the chart's range), at most 3, labels short. Anything else is dropped.
+ */
+export function toMarks(raw: unknown, p: PanelSpec): ChartMark[] {
+  if (!Array.isArray(raw)) return [];
+  const ss = slots(p);
+  const lo = Math.min(...ss.map((x) => x.l)), hi = Math.max(...ss.map((x) => x.h));
+  const out: ChartMark[] = [];
+  for (const m of raw as Record<string, unknown>[]) {
+    const kind = String(m?.kind ?? '') as ChartMark['kind'];
+    const slot = ss.findIndex((x) => x.time === String(m?.time ?? '').trim().slice(0, 5));
+    const label = String(m?.label ?? '').trim().slice(0, 24);
+    if (!['high', 'low', 'close', 'level'].includes(kind)) continue;
+    if (kind === 'level') {
+      const price = Number(m?.price);
+      if (!Number.isFinite(price) || price < lo || price > hi) continue;
+      out.push({ slot: Math.max(0, slot), kind, price: r2(price), label });
+    } else {
+      if (slot < 0) continue;
+      out.push({ slot, kind, price: r2(kind === 'high' ? ss[slot].h : kind === 'low' ? ss[slot].l : ss[slot].c), label });
+    }
+    if (out.length === 3) break;
+  }
+  return out;
 }
 
 const DATE_FMT = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
