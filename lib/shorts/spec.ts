@@ -3,17 +3,17 @@ import { resultOf, scoreR, secOfDay, type ShortTrade, type WeekScore } from './t
 
 /**
  * The "spec" handed to the renderer (scripts/shorts/render.py on GitHub Actions): everything the video shows, already
- * decided here, so the renderer only draws. Candles are the real 1-minute candles of the trade's day (grouped into
- * 2-, 3- or 5-minute candles when the trade is long, so a 60-second short stays readable).
+ * decided here, so the renderer only draws. Candles are the real 1-minute candles of the trade's day; the video shows
+ * them as 10-minute candles that form live (price moving through each minute), like a real-time chart.
  */
 
-export const SPEC_VERSION = 1;
+export const SPEC_VERSION = 2; // 2: candles are 1-minute, drawn as live-forming 10-minute candles
 export type Template = 'mystery' | 'vs';
 
 export interface PanelSpec {
-  tf: number;                                   // minutes per candle
-  candles: [number, number, number, number, number][]; // [unix sec, o, h, l, c]
-  entryIdx: number; exitIdx: number;            // candle index of the first entry fill / last exit fill
+  tf: number;                                   // minutes per DRAWN candle (10): the renderer builds them live
+  candles: [number, number, number, number, number][]; // 1-minute candles [unix sec, o, h, l, c]
+  entryIdx: number; exitIdx: number;            // minute index of the first entry fill / last exit fill
   side: 'LONG' | 'SHORT';
   entry: number; exit: number; stop: number | null;
   fills: { idx: number; price: number; kind: 'in' | 'out' }[];
@@ -31,7 +31,6 @@ export interface VsSpec {
 export interface ShortSpec { v: number; id: string; createdAt: number; handle: string; content: MysterySpec | VsSpec }
 
 const IST = 19800;
-const MAX_CANDLES = 120;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The day's candles only (IST date), in time order. */
@@ -69,28 +68,34 @@ function idxAt(cs: [number, number, number, number, number][], hhmmss: string): 
   return k;
 }
 
+/** Display timeframe: the video draws 10-minute candles that form live from the 1-minute candles inside them. */
+export const DISPLAY_TF = 10;
+/** at most this much of the day before the entry (a late entry starts the chart later than 09:15) */
+const MAX_LEAD_MIN = 120;
+
 /**
- * The window shown: some lead-up before the entry (the story the viewer reads), the whole trade, a few candles after.
- * The candle size grows until the window fits in MAX_CANDLES.
+ * The window shown, as 1-MINUTE candles (the renderer groups them into live-forming 10-minute candles): from 09:15
+ * (or at most two hours before the entry, on a 10-minute boundary) through the whole trade to the end of the
+ * 10-minute candle after the exit. Indexes (entry, exit, fills) are minute indexes into `candles`.
  */
 export function buildPanel(day: Candles, t: ShortTrade): PanelSpec {
   if (!day.t.length) throw new Error(`No candles saved for ${t.symbol} on ${t.date}.`);
-  for (const tf of [1, 2, 3, 5, 10]) {
-    const all = regroup(day, tf);
-    const e = idxAt(all, t.entryTime), x = idxAt(all, t.exitTime);
-    // 30-60 minutes of lead-up (the part the viewer reads before deciding), in candles of this size
-    const lead = Math.min(e, Math.round(Math.max(30, Math.min(60, t.holdMin * 0.6)) / tf));
-    const from = Math.max(0, e - lead), to = Math.min(all.length - 1, x + Math.max(2, Math.round(6 / tf)));
-    if (to - from + 1 > MAX_CANDLES && tf < 10) continue;
-    const cs = all.slice(from, to + 1);
-    return {
-      tf, candles: cs.map((k) => [k[0], r2(k[1]), r2(k[2]), r2(k[3]), r2(k[4])]),
-      entryIdx: e - from, exitIdx: x - from, side: t.dir, entry: t.avgEntry, exit: t.avgExit, stop: t.stop ?? null,
-      fills: t.fills.map((f) => ({ idx: idxAt(all, f.time) - from, price: f.price, kind: f.kind })).filter((f) => f.idx >= 0 && f.idx < cs.length),
-      result: resultOf(t), holdMin: t.holdMin,
-    };
-  }
-  throw new Error('Could not fit the trade into a short.');
+  const all = regroup(day, 1);
+  const e = idxAt(all, t.entryTime), x = idxAt(all, t.exitTime);
+  const open = 9 * 3600 + 15 * 60, tfSec = DISPLAY_TF * 60;
+  const slotStart = (sec: number) => open + Math.floor((sec - open) / tfSec) * tfSec;
+  const startSec = slotStart(Math.max(open, istSec(all[e][0]) - MAX_LEAD_MIN * 60));
+  const endSec = slotStart(istSec(all[x][0])) + 2 * tfSec; // the exit's candle and one more
+  const from = Math.max(0, all.findIndex((k) => istSec(k[0]) >= startSec));
+  let to = all.length - 1;
+  while (to > x && istSec(all[to][0]) >= endSec) to--;
+  const cs = all.slice(from, to + 1);
+  return {
+    tf: DISPLAY_TF, candles: cs.map((k) => [k[0], r2(k[1]), r2(k[2]), r2(k[3]), r2(k[4])]),
+    entryIdx: e - from, exitIdx: x - from, side: t.dir, entry: t.avgEntry, exit: t.avgExit, stop: t.stop ?? null,
+    fills: t.fills.map((f) => ({ idx: idxAt(all, f.time) - from, price: f.price, kind: f.kind })).filter((f) => f.idx >= 0 && f.idx < cs.length),
+    result: resultOf(t), holdMin: t.holdMin,
+  };
 }
 
 const DATE_FMT = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });

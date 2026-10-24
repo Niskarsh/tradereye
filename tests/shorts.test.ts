@@ -94,20 +94,53 @@ test('candles: only the trade day, grouped from 09:15 when the trade is long', (
   assert.equal(g5[0][4], day.c[4]);
 });
 
-test('panel: lead-up + whole trade + a little after, entry and exit on the right candles, fits a short', () => {
+test('panel: 1-minute candles from 09:15 (or 2 hours before a late entry) to the candle after the exit, drawn as 10-min', () => {
   const day = session('2026-07-15', 375);
   const t = T({ date: '2026-07-15', dir: 'LONG', entryTime: '09:56:16', exitTime: '11:00:18', holdMin: 64, stop: 99.5, netR: 2.41,
     fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' }, { time: '11:00:18', price: 101, qty: 50, kind: 'out' }] });
   const p = buildPanel(day, t);
-  assert.equal(p.tf, 1);
-  assert.ok(p.candles.length <= 120);
   const hhmm = (sec: number) => new Date((sec + 19800) * 1000).toISOString().slice(11, 16);
+  assert.equal(p.tf, 10);
+  assert.equal(hhmm(p.candles[0][0]), '09:15');
   assert.equal(hhmm(p.candles[p.entryIdx][0]), '09:56');
   assert.equal(hhmm(p.candles[p.exitIdx][0]), '11:00');
-  assert.ok(p.entryIdx >= 30, 'some lead-up before the entry');
+  assert.equal(hhmm(p.candles[p.candles.length - 1][0]), '11:14'); // the exit's 10-min candle (11:05) and one more
   assert.equal(p.fills.length, 2);
-  // a 3-hour hold groups into bigger candles
-  const long = buildPanel(day, { ...t, entryTime: '09:20:00', exitTime: '13:30:00', holdMin: 250 });
-  assert.ok(long.tf > 1 && long.candles.length <= 120);
+  // a late entry starts the chart two hours earlier, on a 10-minute boundary
+  const late = buildPanel(day, { ...t, entryTime: '13:47:00', exitTime: '14:10:00', holdMin: 23 });
+  assert.equal(hhmm(late.candles[0][0]), '11:45');
   assert.throws(() => buildPanel({ t: [], o: [], h: [], l: [], c: [], v: [] }, t), /No candles saved/);
+});
+
+test('Claude text: the mystery ticker never reaches the public texts, and every field is length-capped', async () => {
+  const { scrubTicker, toSocialText } = await import('../lib/shorts/write');
+  const raw = {
+    tell: 'x'.repeat(200), notes: { me: '', algo: '' },
+    youtube: { title: 'Would you long ANGELONE here?', description: 'ANGELONE at the open.\n#angelone #shorts', tags: ['#Day Trading', 'angelone', 'angelone share', 'nse'] },
+    instagram: { caption: 'Guess before the reveal: #ANGELONE' },
+  };
+  const t = scrubTicker(toSocialText(raw, 'mystery'), 'ANGELONE');
+  assert.equal(t.tell?.length, 90);
+  assert.equal(t.notes, undefined);
+  for (const s of [t.youtube.title, t.youtube.description, t.instagram.caption]) assert.ok(!/angelone/i.test(s), s);
+  assert.deepEqual(t.youtube.tags, ['day trading', 'nse']);
+  assert.match(t.youtube.title, /this stock/);
+  // a ticker inside a longer word is left alone
+  assert.equal(scrubTicker(toSocialText({ ...raw, youtube: { ...raw.youtube, title: 'SCI vs SCIENCE' } }, 'mystery'), 'SCI').youtube.title, 'this stock vs SCIENCE');
+});
+
+test('Claude gets the candles with the entry and exit marked, and his own journal words', async () => {
+  const { candleLines, mysteryMessage } = await import('../lib/shorts/write');
+  const day = session('2026-07-15', 375);
+  const t = T({ date: '2026-07-15', dir: 'LONG', entryTime: '09:56:16', exitTime: '11:00:18', holdMin: 64, stop: 99.5, netR: 2.41, comment: 'Held the morning low three times', context: { RvolAtEntry: '2.3' },
+    fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' }, { time: '11:00:18', price: 101, qty: 50, kind: 'out' }] });
+  const p = buildPanel(day, t);
+  const lines = candleLines(p).split('\n');
+  assert.equal(lines.length, 12); // 10-minute candles 09:15 .. 11:05
+  assert.match(lines.find((l) => l.includes('ENTRY')) ?? '', /^09:55/);
+  assert.match(lines.find((l) => l.includes('EXIT')) ?? '', /^10:55/);
+  const msg = mysteryMessage(t, p);
+  assert.match(msg, /Held the morning low three times/);
+  assert.match(msg, /RvolAtEntry=2.3/);
+  assert.match(msg, /never put them in title/);
 });

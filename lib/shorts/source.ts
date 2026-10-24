@@ -27,13 +27,22 @@ export async function journalTradesBetween(fromMonth: string, toMonth: string): 
   return reads.flatMap((r) => journalShortTrades(r.headers, r.rows));
 }
 
-export interface MysteryCandidate { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: { value: number; unit: 'R' | '%' } }
+/** What the picker needs to draw the trade with the journal's own chart (fills as BUY / SELL, stops, target). */
+export interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; securityId?: string; initialStop?: string; lastStop?: string; target?: string; fills: { time: string; side: 'BUY' | 'SELL'; qty: number; price: number }[] }
+export function chartInfo(t: ShortTrade): ChartInfo {
+  const inSide = t.dir === 'LONG' ? 'BUY' : 'SELL', outSide = t.dir === 'LONG' ? 'SELL' : 'BUY';
+  const s = (x?: number) => (x === undefined ? undefined : String(x));
+  return { symbol: t.symbol, date: t.date, dir: t.dir, securityId: t.securityId, initialStop: s(t.stop), lastStop: s(t.lastStop), target: s(t.target),
+    fills: t.fills.map((f) => ({ time: f.time, side: f.kind === 'in' ? inSide : outSide, qty: f.qty, price: f.price })) };
+}
+
+export interface MysteryCandidate { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: { value: number; unit: 'R' | '%' }; chart: ChartInfo }
 
 /** Trades old enough to show with their ticker, newest first. */
 export async function mysteryCandidates(now = Date.now()): Promise<MysteryCandidate[]> {
   const trades = await journalTradesBetween('2020-01', istToday(now).slice(0, 7));
   return trades.filter((t) => mysteryEligible(t, now)).reverse()
-    .map((t) => ({ id: t.id, date: t.date, symbol: t.symbol, dir: t.dir, entryTime: t.entryTime.slice(0, 5), holdMin: t.holdMin, result: resultOf(t) }));
+    .map((t) => ({ id: t.id, date: t.date, symbol: t.symbol, dir: t.dir, entryTime: t.entryTime.slice(0, 5), holdMin: t.holdMin, result: resultOf(t), chart: chartInfo(t) }));
 }
 
 export async function findTrade(id: string, date: string): Promise<ShortTrade | undefined> {

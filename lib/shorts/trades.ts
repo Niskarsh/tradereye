@@ -13,6 +13,7 @@ export interface ShortTrade {
   entryTime: string; exitTime: string;          // HH:mm:ss
   avgEntry: number; avgExit: number;
   stop?: number;                                 // the first stop he placed (InitialStop), when logged
+  lastStop?: number; target?: number; securityId?: string; // for the journal chart in the picker
   fills: Fill[];
   net: number;                                   // ₹ after charges
   risk?: number;                                 // RiskInr, when logged
@@ -20,7 +21,14 @@ export interface ShortTrade {
   movePct: number;                               // price move in his favour, entry to exit, %
   holdMin: number;
   exitType: string;
+  /** his own words and the backfilled context columns (only the ones filled), for Claude to write the tell from */
+  comment?: string;
+  context?: Record<string, string>;
 }
+
+/** journal columns worth giving Claude when it writes a short's text (the ones present are passed as they are) */
+export const CONTEXT_COLS = ['Setup', 'GapPct', 'ChgPrevClosePct', 'RvolAtEntry', 'VwapDistPct', 'EntryVsOr', 'OrHigh', 'OrLow',
+  'PullbackNo', 'VolTrend', 'Nifty500AtEntryPct', 'NiftyDayTrend', 'MfeR', 'MaeR', 'StopMoves', 'AddCount', 'CkVerdict', 'CkLines', 'AiReview'] as const;
 
 const rowToObject = (headers: string[], cells: string[]): Record<string, string> => Object.fromEntries(headers.map((h, i) => [h, cells[i] ?? '']));
 const num = (v: unknown) => { const x = parseFloat(String(v ?? '').replace(/,/g, '')); return Number.isFinite(x) ? x : NaN; };
@@ -60,10 +68,14 @@ export function journalShortTrades(headers: string[], rows: { cells: string[] }[
     const stop = num(o.InitialStop) > 0 ? num(o.InitialStop) : undefined;
     out.push({
       id, date, symbol: o.Symbol.trim().toUpperCase(), dir, entryTime, exitTime, avgEntry: r2(avgEntry), avgExit: r2(avgExit),
-      stop, fills, net: r2(net), risk, netR: risk ? r2(net / risk) : undefined,
+      stop, lastStop: num(o.LastStop) > 0 ? num(o.LastStop) : undefined, target: num(o.TpLast) > 0 ? num(o.TpLast) : undefined,
+      securityId: /^\d+$/.test(String(o.SecurityId ?? '').trim()) ? String(o.SecurityId).trim() : undefined,
+      fills, net: r2(net), risk, netR: risk ? r2(net / risk) : undefined,
       movePct: r2(((dir === 'LONG' ? avgExit - avgEntry : avgEntry - avgExit) / avgEntry) * 100),
       holdMin: Math.max(1, Math.round((secOfDay(exitTime) - secOfDay(entryTime)) / 60)),
       exitType: String(o.ExitType ?? '').trim().toUpperCase() || 'UNKNOWN',
+      comment: (o.Comment ?? '').trim().slice(0, 600) || undefined,
+      context: Object.fromEntries(CONTEXT_COLS.map((k) => [k, String(o[k] ?? '').trim().slice(0, 300)] as const).filter(([, v]) => v)),
     });
   }
   return out.sort((a, b) => (a.date === b.date ? a.entryTime.localeCompare(b.entryTime) : a.date < b.date ? -1 : 1));

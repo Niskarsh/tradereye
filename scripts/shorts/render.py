@@ -65,14 +65,38 @@ def fmt_result(value, unit, decimals=1):
     return f"{value:+.2f}%".replace("-", "−")
 
 
+def minute_path(o, h, l, c):
+    """The path traced inside one minute: a green minute dips to its low before its high, a red one the reverse
+    (only O, H, L, C are known; the order of H and L inside the minute is the usual assumption)."""
+    return (o, l, h, c) if c >= o else (o, h, l, c)
+
+
+def path_at(o, h, l, c, f):
+    """(price, high so far, low so far) at fraction f of the minute."""
+    pts = minute_path(o, h, l, c)
+    f = max(0.0, min(1.0, f)); seg = f * 3; j = min(2, int(seg)); k = seg - j
+    price = lerp(pts[j], pts[j + 1], k)
+    seen = pts[: j + 1] + (price,)
+    return price, max(seen), min(seen)
+
+
 class Chart:
-    """One candle panel. Candles are [t, o, h, l, c]; `upto` may be fractional (the last candle forms gradually)."""
+    """One panel. `candles` are 1-minute [t, o, h, l, c]; they are drawn as `tf`-minute candles that FORM LIVE:
+    `upto` is a time in minutes (fractional), and the open candle's body and wicks follow the price as it moves
+    through each minute, until its `tf` minutes are over and the next one starts."""
+
+    OPEN = 9 * 3600 + 15 * 60
 
     def __init__(self, box, panel):
         self.box = box
         self.p = panel
         self.cs = panel["candles"]
         self.n = len(self.cs)
+        self.tf = max(1, int(panel.get("tf", 10)))
+        ist = lambda t: (t + 19800) % 86400
+        first = (ist(self.cs[0][0]) - self.OPEN) // (self.tf * 60)
+        self.slot = [int((ist(c[0]) - self.OPEN) // (self.tf * 60) - first) for c in self.cs]
+        self.slots = self.slot[-1] + 1
 
     def yrange(self, i0=0, i1=None, extra=()):
         cs = self.cs[i0:i1 if i1 is not None else self.n]
@@ -82,7 +106,30 @@ class Chart:
         pad = (hi - lo) * 0.08 or hi * 0.002
         return lo - pad, hi + pad
 
-    def draw(self, d, upto, yr, labels=True):
+    def state(self, upto):
+        """The candles drawn at `upto`: finished ones whole, the forming one live; plus the current price."""
+        upto = max(0.0, min(float(self.n), upto))
+        k = int(upto); f = upto - k
+        bars = {}
+        for i in range(min(k, self.n)):
+            t, o, h, l, c = self.cs[i]
+            s = self.slot[i]
+            if s in bars:
+                b = bars[s]; b[1] = max(b[1], h); b[2] = min(b[2], l); b[3] = c
+            else:
+                bars[s] = [o, h, l, c]
+        price = self.cs[k - 1][4] if k > 0 else self.cs[0][1]
+        if k < self.n and f > 0:
+            t, o, h, l, c = self.cs[k]
+            price, hi, lo = path_at(o, h, l, c, f)
+            s = self.slot[k]
+            if s in bars:
+                b = bars[s]; b[1] = max(b[1], hi); b[2] = min(b[2], lo); b[3] = price
+            else:
+                bars[s] = [o, hi, lo, price]
+        return bars, price
+
+    def draw(self, d, upto, yr, labels=True, live=True):
         x0, y0, x1, y1 = self.box
         d.rectangle([u(x0), u(y0), u(x1), u(y1)], fill=PANEL)
         lo, hi = yr
@@ -91,29 +138,30 @@ class Chart:
             p = lo + (hi - lo) * g / 5; y = py(p)
             d.line([(u(x0), u(y)), (u(x1), u(y))], fill=GRID, width=1)
             if labels: T(d, (x1 - 6, y - 10), f"{p:.2f}", F("Medium", 15), MUTED, "rm")
-        sw = (x1 - x0) / self.n; bw = max(2.0, sw * 0.62)
-        full = int(upto); frac = upto - full
-        for i in range(min(self.n, full + 1)):
-            t, o, h, l, c = self.cs[i]
-            if i == full:
-                if frac <= 0: break
-                c = o + (c - o) * frac
-                h = max(o, c, lerp(max(o, c), h, frac)); l = min(o, c, lerp(min(o, c), l, frac))
+        sw = (x1 - x0) / self.slots; bw = max(3.0, sw * 0.62)
+        bars, price = self.state(upto)
+        for s, (o, h, l, c) in bars.items():
             col = EM if c >= o else RED
-            cx = x0 + sw * (i + 0.5)
-            yt, yb = py(max(o, c)), py(min(o, c))
+            cx = x0 + sw * (s + 0.5)
             yh, yl = max(y0, py(h)), min(y1, py(l))
-            if yh < yl: d.line([(u(cx), u(yh)), (u(cx), u(yl))], fill=col, width=max(1, u(bw / 4)))
-            yt, yb = max(y0, yt), min(y1, yb)
+            if yh < yl: d.line([(u(cx), u(yh)), (u(cx), u(yl))], fill=col, width=max(1, u(max(1.5, bw / 7))))
+            yt, yb = max(y0, py(max(o, c))), min(y1, py(min(o, c)))
             if yb - yt < 2: yb = yt + 2
             d.rectangle([u(cx - bw / 2), u(yt), u(cx + bw / 2), u(yb)], fill=col)
-        return py, (lambda i: x0 + sw * (i + 0.5))
+        if live and 0 < upto < self.n:
+            y = py(price)
+            if y0 <= y <= y1:
+                dashed(d, x0, x1 - 64, y, MUTED, 1.5, 6, 6)
+                d.rounded_rectangle([u(x1 - 62), u(y - 11), u(x1 - 2), u(y + 11)], radius=u(4), fill=(48, 46, 40))
+                T(d, (x1 - 32, y), f"{price:.2f}", F("Bold", 14), TXT)
+        return py, (lambda i: x0 + sw * (self.slot[max(0, min(self.n - 1, int(i)))] + 0.5))
 
     def price_at(self, upto):
-        full = min(int(upto), self.n - 1); frac = upto - int(upto)
-        t, o, h, l, c = self.cs[full]
-        if frac <= 0 and full > 0: return self.cs[full - 1][4]
-        return o + (c - o) * frac
+        return self.state(upto)[1]
+
+    def half(self):
+        """half a drawn candle's width (design units)"""
+        return max(3.0, (self.box[2] - self.box[0]) / self.slots * 0.62) / 2
 
     def clock(self, upto):
         i = max(0, min(self.n - 1, int(upto)))
@@ -130,15 +178,19 @@ def live_result(panel, price):
     return move / e * 100, "%"
 
 
-def draw_fills(d, panel, py, px, upto, show_in=True):
+def draw_fills(d, panel, py, px, upto, half=0.0, show_in=True):
+    """Fill markers beside the candle they happened in: entries on its left pointing in, exits on its right."""
+    r = 8
     for f in panel["fills"]:
         if f["idx"] > upto: continue
         if f["kind"] == "in" and not show_in: continue
-        x, y = px(f["idx"]), py(f["price"])
-        col = GOLD if f["kind"] == "in" else TXT
-        r = 8
-        d.polygon([(u(x - r), u(y)), (u(x + r), u(y - r * 0.7)), (u(x + r), u(y + r * 0.7))], fill=col) if f["kind"] == "out" else \
-            d.polygon([(u(x + r), u(y)), (u(x - r), u(y - r * 0.7)), (u(x - r), u(y + r * 0.7))], fill=col)
+        cx, y = px(f["idx"]), py(f["price"])
+        if f["kind"] == "in":
+            x = cx - half - r - 2
+            d.polygon([(u(x + r), u(y)), (u(x - r), u(y - r * 0.7)), (u(x - r), u(y + r * 0.7))], fill=GOLD)
+        else:
+            x = cx + half + r + 2
+            d.polygon([(u(x - r), u(y)), (u(x + r), u(y - r * 0.7)), (u(x + r), u(y + r * 0.7))], fill=TXT)
 
 
 def header_common(d):
@@ -174,6 +226,60 @@ def encode(frame_fn, nframes, wav, out):
 
 
 # =============== Mystery chart: long, short or wait? ===============
+MESSAGE_MIN_S = 5.0   # a message shown during the trade stays at least this long
+DECIDE_S = 5          # countdown for "Long, short, or wait?"
+
+
+def wrap_lines(text, font, max_w, max_lines):
+    """Word-wraps to at most max_lines lines that fit max_w pixels (None when it doesn't fit)."""
+    words = text.split(); lines = [""]
+    for wd in words:
+        trial = (lines[-1] + " " + wd).strip()
+        if font.getlength(trial) <= max_w: lines[-1] = trial
+        else:
+            if not lines[-1]: return None
+            lines.append(wd)
+            if len(lines) > max_lines: return None
+    return lines
+
+
+def fit_tell(text):
+    """The tell in at most 2 lines: the biggest font that fits, else trimmed with an ellipsis."""
+    for size in (29, 27, 25, 23):
+        lines = wrap_lines(text, F("Bold", size), u(580), 2)
+        if lines: return lines, size
+    words = text.split()
+    while words:
+        words.pop()
+        lines = wrap_lines(" ".join(words) + "…", F("Bold", 23), u(580), 2)
+        if lines: return lines, 23
+    return [text[:40]], 23
+
+
+def draw_tell(d, y, tell, k):
+    """THE TELL box: same padding above and below, height fixed by its (max 2) lines. Returns the box bottom."""
+    lines, size = fit_tell(tell)
+    pad, label_h, line_h = 20, 30, size + 10
+    h = pad + label_h + 8 + line_h * len(lines) + pad
+    d.rounded_rectangle([u(50), u(y), u(670), u(y + h)], radius=u(18), fill=mix(BG, (36, 32, 22), k))
+    T(d, (360, y + pad + label_h / 2), "THE TELL", F("Black", 24), mix(BG, GOLD, k))
+    for i, line in enumerate(lines):
+        T(d, (360, y + pad + label_h + 8 + line_h * (i + 0.5)), line, F("Bold", size), mix(BG, TXT, k))
+    return y + h
+
+
+def subscribe(d, y, k, line):
+    """The call to action: YouTube-style red SUBSCRIBE button with the channel name."""
+    T(d, (360, y), line, F("Bold", 27), mix(BG, TXT, k))
+    cy = y + 66
+    d.rounded_rectangle([u(170), u(cy - 36), u(550), u(cy + 36)], radius=u(36), fill=mix(BG, (204, 0, 0), k))
+    # play icon on a white rounded square, then the word
+    d.rounded_rectangle([u(204), u(cy - 17), u(246), u(cy + 17)], radius=u(8), fill=mix(BG, (255, 255, 255), k))
+    d.polygon([(u(219), u(cy - 9)), (u(219), u(cy + 9)), (u(235), u(cy))], fill=mix(BG, (204, 0, 0), k))
+    T(d, (390, cy), "SUBSCRIBE", F("Black", 34), mix(BG, (255, 255, 255), k))
+    T(d, (360, cy + 64), "@CandlesBeforeCubicles", F("Bold", 24), mix(BG, GOLD, k))
+
+
 def render_mystery(spec, out, poster):
     c = spec["content"]; p = c["panel"]
     box = (20, 250, 700, 860)
@@ -183,15 +289,33 @@ def render_mystery(spec, out, poster):
     full_yr = ch.yrange(0, None, (p["entry"], p.get("stop"), p["exit"]))
     trade_yr = ch.yrange(max(0, e - 3), None, (p["entry"], p.get("stop"), p["exit"]))
     lead = max(1, e)
-    t_ff = min(10.0, max(4.0, lead * 0.22)); t_q = t_ff + 1.2; t_rev = t_q + 3.0 + 1.2
-    t_play = t_rev + min(10.0, max(5.0, (end - e) * 0.12)); total = t_play + 5.5
+    t_ff = min(10.0, max(5.0, lead * 0.22)); t_q = t_ff + 1.2; t_rev = t_q + DECIDE_S + 1.0
+    play_s = min(11.0, max(6.0, (end - e) * 0.13))
+    v = (end - e) / play_s  # minutes of the trade per second of video
+
+    # "Most people bail right here.": from the first minute the trade is 0.3R (or 0.15%) under water. The message
+    # stays MESSAGE_MIN_S, and the replay runs in slow motion meanwhile, so those seconds show the dip, not the recovery.
+    def under_water(m):
+        val, unit = live_result(p, ch.price_at(m))
+        return (unit == "R" and val < -0.3) or (unit == "%" and val < -0.15)
+    m1 = next((e + i / 10 for i in range(int((end - e) * 10)) if under_water(e + i / 10)), None)
+    slow = 0.3
+    t_bail = t_rev + (m1 - e) / v if m1 is not None else None
+    t_play = t_rev + play_s + (MESSAGE_MIN_S * (1 - slow) if m1 is not None else 0)
+    if m1 is not None and m1 + v * slow * MESSAGE_MIN_S >= end:  # the dip runs into the exit: no catch-up needed
+        t_play = t_bail + (end - m1) / (v * slow)
+    bail = (t_bail, min(t_play, t_bail + MESSAGE_MIN_S)) if m1 is not None else None
+    # straight from the trade to "THE STOCK WAS" + drum roll, then the ticker pops in; tell and subscribe after it
+    t_reveal = t_play + 1.5; t_end_card = t_reveal + 1.6; total = t_end_card + 4.6
     ans = p["side"]
 
     def upto_at(t):
         if t < t_ff: return e * (t / t_ff)
         if t < t_rev: return e
-        if t < t_play: return e + (end - e) * ((t - t_rev) / (t_play - t_rev))
-        return end
+        if t >= t_play: return end
+        if bail is None or t < bail[0]: return min(end, e + v * (t - t_rev))
+        if t < bail[1]: return min(end, m1 + v * slow * (t - bail[0]))
+        return min(end, m1 + v * slow * (bail[1] - bail[0]) + v * (t - bail[1]))
 
     def yr_at(t):
         if t < t_rev: return full_yr
@@ -202,16 +326,17 @@ def render_mystery(spec, out, poster):
         t = f / FPS
         img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
         up = upto_at(t)
-        T(d, (32, 70), "MYSTERY STOCK", F("Black", 40), TXT, "lm")
+        T(d, (32, 70), c["symbol"] if t >= t_reveal else "MYSTERY STOCK", F("Black", 40), GOLD if t >= t_reveal else TXT, "lm")
         T(d, (32, 114), f"NSE  ·  {p['tf']}-min chart", F("Medium", 23), MUTED, "lm")
         T(d, (688, 70), ch.clock(up if t < t_play else end - 1), F("Bold", 44), GOLD, "rm")
-        speed = "FAST" if t < t_ff else ("PAUSED" if t < t_rev else ("PLAY" if t < t_play else "DONE"))
+        slowmo = bail is not None and bail[0] <= t < bail[1]
+        speed = "FAST" if t < t_ff else ("PAUSED" if t < t_rev else ("SLOW-MO" if slowmo else "PLAY" if t < t_play else "DONE"))
         pill(d, 622, 118, 116, 36, speed, (48, 46, 40), F("Bold", 18))
         header_common(d)
         py, px = ch.draw(d, up, yr_at(t))
 
-        if t < 2.6:  # hook
-            a = 1 - ease((t - 2.1) / 0.5) if t > 2.1 else 1
+        if t < MESSAGE_MIN_S:  # hook, held for MESSAGE_MIN_S
+            a = 1 - ease((t - (MESSAGE_MIN_S - 0.5)) / 0.5) if t > MESSAGE_MIN_S - 0.5 else 1
             d.rounded_rectangle([u(40), u(196), u(680), u(240)], radius=u(12), fill=mix(BG, DARKGOLD, a))
             T(d, (360, 218), "Would you take this trade?", F("Black", 30), mix(BG, GOLD, a))
 
@@ -220,17 +345,17 @@ def render_mystery(spec, out, poster):
             chg = (now - first) / first * 100
             T(d, (360, 930), f"{chg:+.2f}% since {hhmm(ch.cs[0][0])}".replace("-", "−"), F("Black", 46), EM if chg >= 0 else RED)
 
-        if t_ff <= t < t_rev:  # the question
+        if t_ff <= t < t_rev:  # the question, then a DECIDE_S countdown
             k = ease((t - t_ff) / 0.35)
             img = dim(img, 0.55 * k); d = ImageDraw.Draw(img)
             T(d, (360, 450), f"{hhmm(ch.cs[e][0])}. Your move?", F("Bold", 34), mix(BG, MUTED, k))
             T(d, (360, 520), "LONG, SHORT,", F("Black", 66), mix(BG, TXT, k))
             T(d, (360, 595), "OR WAIT?", F("Black", 66), mix(BG, TXT, k))
-            if t >= t_q and t < t_q + 3:
-                ph = (t - t_q) % 1; n = 3 - int(t - t_q)
+            if t_q <= t < t_q + DECIDE_S:
+                ph = (t - t_q) % 1; n = DECIDE_S - int(t - t_q)
                 T(d, (360, 730), str(max(1, n)), F("Black", int(150 - 40 * ease(ph))), mix(GOLD, BG, ease((ph - 0.6) / 0.4)))
                 T(d, (360, 840), "Comment your answer", F("SemiBold", 28), TXT)
-            if t >= t_q + 3:
+            if t >= t_q + DECIDE_S:
                 T(d, (360, 760), "Answer…", F("Black", 48), GOLD)
             for j, (lab, col) in enumerate([("LONG", EM), ("SHORT", RED), ("WAIT", GOLD)]):
                 pill(d, 140 + j * 220, 960, 190, 76, lab, mix(BG, col, k), F("Black", 32))
@@ -242,55 +367,69 @@ def render_mystery(spec, out, poster):
             if p.get("stop"):
                 dashed(d, ex, box[2], py(p["stop"]), RED, 3)
                 T(d, (box[0] + 8, py(p["stop"]) + 16), f"STOP {p['stop']:.2f}", F("Bold", 19), RED, "lm")
-            draw_fills(d, p, py, px, up)
-            val, unit = live_result(p, ch.price_at(up) if t < t_play else p["exit"])
+            draw_fills(d, p, py, px, up, ch.half())
             if t < t_play:
+                val, unit = live_result(p, ch.price_at(up))
                 pulse = 1 - ease((t - t_rev) / 0.5)
                 pill(d, 360, 935, 300, 88, ans, EM if ans == "LONG" else RED, F("Black", 44))
                 d.rounded_rectangle([u(210 - 8 * pulse), u(891 - 8 * pulse), u(510 + 8 * pulse), u(979 + 8 * pulse)], radius=u(48), outline=GOLD, width=u(3))
                 T(d, (360, 205), fmt_result(val, unit), F("Black", 54), EM if val >= 0 else RED)
-                if (unit == "R" and val < -0.3) or (unit == "%" and val < -0.15):
-                    d.rounded_rectangle([u(90), u(255), u(630), u(305)], radius=u(12), fill=(60, 26, 24))
-                    T(d, (360, 280), "Most people bail right here.", F("Bold", 25), TXT)
+                if bail and bail[0] <= t < bail[1]:
+                    a = min(ease((t - bail[0]) / 0.3), 1 - ease((t - (bail[1] - 0.3)) / 0.3))
+                    d.rounded_rectangle([u(90), u(255), u(630), u(305)], radius=u(12), fill=mix(BG, (60, 26, 24), a))
+                    T(d, (360, 280), "Most people bail right here.", F("Bold", 25), mix(BG, TXT, a))
             else:
                 xx = px(x)
                 d.ellipse([u(xx - 9), u(py(p["exit"]) - 9), u(xx + 9), u(py(p["exit"]) + 9)], fill=GOLD)
-                k = ease((t - t_play) / 0.5)
-                img = dim(img, 0.82 * k); d = ImageDraw.Draw(img)
-                res = p["result"]
-                col = EM if res["value"] >= 0 else RED
-                T(d, (360, 360), fmt_result(res["value"], res["unit"]), F("Black", 140), mix(BG, col, k))
+                res = p["result"]; col = EM if res["value"] >= 0 else RED
                 sub = f"in {p['holdMin']} minutes" + ("  ·  after charges" if res["unit"] == "R" else "")
-                T(d, (360, 455), sub, F("Bold", 32), mix(BG, TXT, k))
-                T(d, (360, 525), f"It was {c['symbol']}  ·  {c['dateLabel']}", F("Black", 34), mix(BG, GOLD, k))
-                y = 600
-                if c.get("tell"):
-                    d.rounded_rectangle([u(50), u(y - 10), u(670), u(y + 120)], radius=u(18), fill=mix(BG, (36, 32, 22), k))
-                    T(d, (360, y + 22), "THE TELL", F("Black", 24), mix(BG, GOLD, k))
-                    words = c["tell"].split(); lines = [""]
-                    for wd in words:
-                        if len(lines[-1]) + len(wd) + 1 > 34: lines.append(wd)
-                        else: lines[-1] = (lines[-1] + " " + wd).strip()
-                    for li, line in enumerate(lines[:2]):
-                        T(d, (360, y + 62 + li * 38), line, F("Bold", 29), mix(BG, TXT, k))
-                    y += 150
-                if t > t_play + 1.2:
-                    k2 = ease((t - t_play - 1.2) / 0.4)
-                    T(d, (360, y + 60), "New mystery chart every week.", F("Black", 32), mix(BG, TXT, k2))
-                    pill(d, 360, y + 150, 360, 80, "FOLLOW", mix(BG, RED, k2), F("Black", 36))
+                k = ease((t - t_play) / 0.4)
+                img = dim(img, 0.9 * k); d = ImageDraw.Draw(img)
+                T(d, (360, 410), "THE STOCK WAS", F("Black", 34 if t < t_reveal else 30), mix(BG, GOLD, k))
+                if t < t_reveal:
+                    dots = "." * (1 + int((t - t_play) / 0.4) % 3)
+                    T(d, (360, 530), dots, F("Black", 90), mix(BG, GOLD, k))
+                else:
+                    # the pop: the ticker slams onto a full-width band and stays, the result above it
+                    T(d, (360, 255), fmt_result(res["value"], res["unit"]), F("Black", 72), col)
+                    T(d, (360, 315), sub, F("Bold", 26), TXT)
+                    ks = ease((t - t_reveal) / 0.28)
+                    flash = max(0.0, 1 - (t - t_reveal) / 0.45)
+                    band_h = 150 * (0.4 + 0.6 * ks)
+                    d.rectangle([0, u(530 - band_h / 2), W, u(530 + band_h / 2)], fill=mix(GOLD, (255, 250, 235), flash))
+                    sym = c["symbol"]
+                    size = 118
+                    while size > 50 and F("Black", size).getlength(sym) > u(640): size -= 4
+                    size = int(size * (1.0 + 0.25 * (1 - ks)))  # a short pop, never wider than the screen
+                    T(d, (360, 532), sym, F("Black", size), BG)
+                    if t > t_reveal + 0.35:
+                        k3 = ease((t - t_reveal - 0.35) / 0.4)
+                        T(d, (360, 650), f"NSE  ·  {c['dateLabel']}", F("Bold", 32), mix(BG, TXT, k3))
+                    y = 712
+                    if t > t_end_card and c.get("tell"):
+                        y = draw_tell(d, y, c["tell"], ease((t - t_end_card) / 0.4)) + 26
+                    if t > t_end_card + 0.8:
+                        subscribe(d, y + 18, ease((t - t_end_card - 0.8) / 0.4), "New mystery chart every week")
         return img
 
     nf = int(total * FPS)
     buf = np.zeros(int(SR * total) + SR); last = -1
     for f in range(nf):
         tt = f / FPS; uu = int(upto_at(tt))
-        if uu != last and tt < t_play and not (t_ff <= tt < t_rev): place(buf, click(), tt)
+        if uu != last and tt < t_play and not (t_ff <= tt < t_rev): place(buf, click(0.035), tt)
         last = uu
     place(buf, tone(330, 0.5, 0.35, 5), t_ff)
-    for i in range(3): place(buf, tone(880, 0.18, 0.35, 12), t_q + i)
+    for i in range(DECIDE_S): place(buf, tone(880 if i < DECIDE_S - 1 else 1175, 0.18, 0.35, 12), t_q + i)
     place(buf, tone(660, 0.4, 0.3, 6), t_rev); place(buf, tone(990, 0.5, 0.25, 5), t_rev + 0.08)
+    if bail: place(buf, tone(220, 0.35, 0.3, 6), bail[0])
+    roll = t_play + 0.15
+    n = 0
+    while roll < t_reveal - 0.05:
+        place(buf, tone(180 + n * 6, 0.06, 0.12 + n * 0.006, 30), roll)
+        n += 1; roll += max(0.035, 0.13 - n * 0.006)
+    place(buf, tone(70, 0.9, 0.7, 3.5), t_reveal); place(buf, tone(140, 0.6, 0.4, 5), t_reveal)
     win = p["result"]["value"] >= 0
-    for kk, fr in enumerate([523, 659, 784, 1047] if win else [392, 330, 262]): place(buf, tone(fr, 0.6, 0.25, 4), t_play + kk * 0.09)
+    for kk, fr in enumerate([784, 1047, 1319] if win else [523, 392, 330]): place(buf, tone(fr, 0.7, 0.22, 4), t_reveal + 0.05 + kk * 0.06)
     finish(frame, nf, buf, out, poster, poster_t=t_q + 0.5)  # the question, never the answer
 
 
@@ -302,7 +441,7 @@ def render_vs(spec, out, poster):
     # bottom panel would sit in the platforms' caption zone: keep it short and above y=1030 (80% of 1280 = 1024)
     boxes["algo"] = (20, 690, 700, 1010)
     charts = {k: Chart(boxes[k], v) for k, v in (("me", me), ("algo", algo)) if v}
-    t0, t_end = 2.6, 19.0
+    t0, t_end = 4.0, 21.0  # the opening line stays 4 s before the trades play
     t_tot, t_score = t_end + 0.6, t_end + 3.4
     total = t_score + 6.0
 
@@ -329,7 +468,7 @@ def render_vs(spec, out, poster):
             dashed(d, px(e) - 6, bx[2], py(v["entry"]), GOLD, 3)
             if v.get("stop"): dashed(d, px(e) - 6, bx[2], py(v["stop"]), RED, 3)
             pill(d, bx[0] + 150, bx[1] - 30, 110, 38, v["side"], EM if v["side"] == "LONG" else RED, F("Black", 20))
-            draw_fills(d, v, py, px, up)
+            draw_fills(d, v, py, px, up, ch.half())
             done = up >= x + 1
             if done:
                 res = v["result"]; good = res["value"] >= 0
@@ -377,8 +516,7 @@ def render_vs(spec, out, poster):
                 verdict = {"me": "I take the week.", "algo": "The bot takes the week.", "tie": "Dead even.", "none": "No trades this week."}[wk["winner"]]
                 T(d, (360, 610), verdict, F("Black", 46), mix(BG, GOLD, k3))
                 T(d, (360, 690), f"Season: ME {c['after']['me']} - {c['after']['algo']} ALGO", F("Black", 36), mix(BG, TXT, k3))
-                T(d, (360, 760), "Next round: Monday, 9:15", F("Bold", 30), mix(BG, TXT, k3))
-                pill(d, 360, 870, 420, 84, "FOLLOW THE SEASON", mix(BG, RED, k3), F("Black", 32))
+                subscribe(d, 770, k3, "Next round: Monday, 9:15")
         return img
 
     nf = int(total * FPS)
@@ -412,8 +550,8 @@ def main():
     if len(sys.argv) != 4:
         raise SystemExit("usage: render.py spec.json out.mp4 poster.jpg")
     spec = json.load(open(sys.argv[1]))
-    if spec.get("v") != 1:
-        raise SystemExit(f"unsupported spec version {spec.get('v')}")
+    if spec.get("v") != 2:
+        raise SystemExit(f"unsupported spec version {spec.get('v')} (2 = 1-minute candles drawn as live 10-minute candles)")
     kind = spec["content"]["kind"]
     if kind == "mystery": render_mystery(spec, sys.argv[2], sys.argv[3])
     elif kind == "vs": render_vs(spec, sys.argv[2], sys.argv[3])

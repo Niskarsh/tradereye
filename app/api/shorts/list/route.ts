@@ -1,19 +1,21 @@
 import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
-import { listShorts, posterKey, signedGet, statusOf, videoKey } from '@/lib/shorts/store';
+import { listShorts, posterKey, signedGet, statusOf, store, textKey, videoKey } from '@/lib/shorts/store';
+import { getJson } from '@/lib/setups/store';
+import type { WrittenText } from '@/lib/shorts/write';
 
 export const dynamic = 'force-dynamic';
 
-/** GET -> every short made, newest first, with its render status and (when done) private links to the video and poster. */
+/** GET -> every short made, newest first, with its render status, its words (title, caption...) and, when done, private links to the video and poster. */
 export async function GET(req: Request) {
   const denied = ownerRequired(req);
   if (denied) return denied;
   try {
     const items = await listShorts();
     const out = await Promise.all(items.slice(0, 30).map(async (it) => {
-      const status = await statusOf(it.id);
+      const [status, text] = await Promise.all([statusOf(it.id), getJson<WrittenText | { error: string }>(store, textKey(it.id))]);
       const done = status.state === 'done';
-      return { ...it, status, video: done ? await signedGet(videoKey(it.id)) : undefined, poster: done ? await signedGet(posterKey(it.id)) : undefined };
+      return { ...it, status, text, video: done ? await signedGet(videoKey(it.id)) : undefined, poster: done ? await signedGet(posterKey(it.id)) : undefined };
     }));
     return NextResponse.json({ shorts: out });
   } catch (e) {

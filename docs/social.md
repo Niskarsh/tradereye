@@ -34,18 +34,37 @@ app id and secret from Meta's "API setup with Instagram login" page, not the Fac
 - **Test upload (not published)** sends the same video to Instagram and waits until Meta has processed it, without
   publishing (Reels cannot be private). The unpublished upload expires on its own within 24 hours.
 
-## Making shorts (Make a short, on the Socials page)
+## Making shorts (Make shorts, on the Socials page)
+Pick up to 3 shorts in total across both tabs (any mix), each with its own tell / notes, then Generate them all (one
+render job each). Every row opens to the journal's own chart of that trade (TradeCharts: entries, adds, exits, stop,
+target), so an old trade can be recalled before writing its tell. Nothing blocks a trade or week from being used again.
+
 Two templates, both drawn from real data only:
-- **Mystery chart:** one of his trades, replayed from the trade day's saved 1-minute candles (grouped into 2/3/5/10-min
-  candles when the trade is long). Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
+- **Chart in both templates:** the trade day's saved 1-minute candles, from 09:15 (or two hours before a late entry)
+  to the 10-minute candle after the exit, drawn as **10-minute candles that form live**: price moves through each
+  minute (a green minute dips to its low before its high, a red one the reverse; only O/H/L/C are known), the open
+  candle's body and wicks follow it, with a live price tag, until its 10 minutes are over. Finished candles are exact.
+- **Mystery chart:** one of his trades, replayed. Hook line held 5 s; fast-forward to the entry; "Long, short, or
+  wait?" with a 5-second countdown; the trade plays. When it first goes 0.3R (or 0.15%) under water, "Most people bail
+  right here." stays 5 s while the replay runs in slow motion, so those seconds show the dip. Then straight to "THE
+  STOCK WAS" + drum roll, the ticker pops onto a gold band with the result above it, the tell box (max 2 lines, even
+  padding), and a YouTube-style SUBSCRIBE button with @CandlesBeforeCubicles. Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
   trade plays out with a live R counter (price R from his first stop), then the result (the journal's R after charges,
-  or the % move when no risk was logged), the ticker and date, and an optional one-line "tell". Only trades over
+  or the % move when no risk was logged), a drum-roll build-up, and the ticker reveal: the symbol slams onto a
+  full-width gold band and stays on screen (the header switches to it too) through the optional one-line "tell". Only trades over
   92 days old are offered: the ticker is shown, and SEBI wants price data in market education to be 3+ months old.
 - **Me vs Algo:** one finished week (Mon-Fri) since Algo Live started. A trade is the algo's when an Algo Live order
   for that day, stock and side filled within 5 minutes of the journal trade's entry; everything else is his. Each side
   is scored by the journal's R (net after charges / RiskInr; the algo's order risk when RiskInr is missing). Trades with
   neither are not scored. Each panel replays that side's biggest-R trade of the week; tickers are never shown. Season
   table = weeks won per side.
+
+**Claude writes the words (optional, on by default):** at Generate, one Claude call per short (`lib/shorts/write.ts`,
+`ANTHROPIC_API_KEY`, model `COPILOT_MODEL`) gets only real facts: the trade, the candles before and during it (entry
+and exit marked), his journal comment and context columns. It returns the tell (mystery) or the two one-line reasons
+(Me vs Algo), the YouTube title / description / tags and the Instagram caption, saved as `shorts/<id>/text.json`.
+Anything he typed is used instead of Claude's tell / reasons. The mystery's ticker is kept out of every public text
+(it is the reveal), and that is enforced in code too. If Claude fails, the short is still made, just without text.
 
 Generate saves a spec to S3 (`shorts/<id>/spec.json`) and starts **Render short** (`.github/workflows/shorts-render.yml`,
 needs `GH_DISPATCH_TOKEN` like the backtest). The job runs `scripts/shorts/render.py` (Pillow + ffmpeg, Inter font),
