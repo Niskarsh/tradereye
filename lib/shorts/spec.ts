@@ -1,5 +1,5 @@
 import type { Candles } from '../dhan';
-import { resultOf, scoreR, secOfDay, type ShortTrade, type WeekScore } from './trades';
+import { mysteryCutoff, resultOf, scoreR, secOfDay, type ShortTrade, type WeekScore } from './trades';
 
 /**
  * The "spec" handed to the renderer (scripts/shorts/render.py on GitHub Actions): everything the video shows, already
@@ -36,7 +36,7 @@ export interface VsSpec {
   me?: VsPanel; algo?: VsPanel;
 }
 /** one side's panel: its trade, the one-line reason, and the candles that reason refers to (marked in the "why" beat) */
-export type VsPanel = PanelSpec & { note: string; marks?: ChartMark[] };
+export type VsPanel = PanelSpec & { note: string; marks?: ChartMark[]; symbol?: string };
 export interface ShortSpec { v: number; id: string; createdAt: number; handle: string; content: MysterySpec | VsSpec }
 
 const IST = 19800;
@@ -158,11 +158,15 @@ export function mysterySpec(id: string, t: ShortTrade, day: Candles, tell: strin
   return { v: SPEC_VERSION, id, createdAt: now, handle: '@candlesbeforecubicles', content: { kind: 'mystery', symbol: t.symbol, dateLabel: dateLabel(t.date), panel: buildPanel(day, t), tell: tell.trim().slice(0, 90) } };
 }
 
-export function vsPanel(t: ShortTrade & { orderRisk?: number }, day: Candles, note: string): VsPanel {
+export function vsPanel(t: ShortTrade & { orderRisk?: number }, day: Candles, note: string, now = Date.now()): VsPanel {
   const p = buildPanel(day, t);
   const r = scoreR(t);
   // the scoreboard counts R; show the same number on the panel
-  return { ...p, result: r !== undefined ? { value: Math.round(r * 10) / 10, unit: 'R' } : p.result, note: note.trim().slice(0, 40) };
+  return {
+    ...p, result: r !== undefined ? { value: Math.round(r * 10) / 10, unit: 'R' } : p.result, note: note.trim().slice(0, 40),
+    // the ticker is shown only once the trade is over 3 months old (SEBI); recent weeks keep it hidden
+    ...(t.date <= mysteryCutoff(now) ? { symbol: t.symbol } : {}),
+  };
 }
 
 export function vsSpec(id: string, p: { week: WeekScore; before: { me: number; algo: number }; after: { me: number; algo: number }; me?: VsPanel; algo?: VsPanel }, now = Date.now()): ShortSpec {

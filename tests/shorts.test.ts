@@ -193,3 +193,11 @@ test('Me vs Algo: Claude marks per side, and each panel knows how its trade ende
   const p = buildPanel(day, T({ date: '2026-07-15', exitType: 'STOP', netR: -1, entryTime: '09:56:00', exitTime: '10:10:00', holdMin: 14 }));
   assert.equal(p.exitType, 'STOP');
 });
+
+test('Me vs Algo shows a ticker only when the trade is over 3 months old (SEBI)', async () => {
+  const { vsPanel } = await import('../lib/shorts/spec');
+  const day = session('2026-07-15', 375);
+  const t = T({ date: '2026-07-15', symbol: 'ANGELONE', entryTime: '09:56:00', exitTime: '10:20:00', holdMin: 24 });
+  assert.equal(vsPanel(t, day, '', Date.parse('2026-10-24T10:00:00Z')).symbol, 'ANGELONE');
+  assert.equal(vsPanel(t, day, '', Date.parse('2026-08-01T10:00:00Z')).symbol, undefined);
+});

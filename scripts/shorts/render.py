@@ -562,6 +562,8 @@ def render_vs(spec, out, poster):
         yr = (yr[0] - (yr[1] - yr[0]) * 0.3, yr[1])  # room at the bottom for the reason, so it never covers a mark
         py, px = ch.draw(d, up, yr, labels=False)
         T(d, (bx[2], bx[1] - 30), ch.clock(up), F("Bold", 24), MUTED, "rm")
+        if v.get("symbol"):  # only on trades over 3 months old (SEBI); shown from the start, no reveal
+            T(d, (bx[0] + 216, bx[1] - 30), v["symbol"], F("Bold", 22), GOLD, "lm")
         if up > e:
             dashed(d, px(e) - 6, bx[2], py(v["entry"]), GOLD, 3)
             if v.get("stop"): dashed(d, px(e) - 6, bx[2], py(v["stop"]), RED, 3)
@@ -576,10 +578,10 @@ def render_vs(spec, out, poster):
                 if t < t_why or not why:
                     d.rounded_rectangle([u(bx[0] + 160), u(cy - 40), u(bx[2] - 160), u(cy + 40)], radius=u(16), fill=EM if good else RED)
                     T(d, ((bx[0] + bx[2]) / 2, cy), word + fmt_result(res["value"], res["unit"]), F("Black", 32), TXT)
-                T(d, (bx[2] - 210, bx[1] - 30), fmt_result(res["value"], res["unit"]), F("Black", 36), EM if good else RED, "rm")
+                T(d, (bx[2] - 96, bx[1] - 30), fmt_result(res["value"], res["unit"]), F("Black", 36), EM if good else RED, "rm")
             else:
                 val, unit = live_result(v, ch.price_at(up))
-                T(d, (bx[2] - 210, bx[1] - 30), fmt_result(val, unit), F("Black", 36), EM if val >= 0 else RED, "rm")
+                T(d, (bx[2] - 96, bx[1] - 30), fmt_result(val, unit), F("Black", 36), EM if val >= 0 else RED, "rm")
             if why and t >= t_why:
                 # the why beat: the reason, big, and the candles it refers to marked
                 order = ["me", "algo"].index(key)
@@ -595,7 +597,8 @@ def render_vs(spec, out, poster):
         t = f / FPS
         img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
         d.rounded_rectangle([u(20), u(24), u(700), u(150)], radius=u(18), fill=(30, 28, 22))
-        T(d, (360, 50), f"ME vs ALGO  ·  {c['weekLabel'].upper()}", F("Bold", 22), GOLD)
+        tf = (me or algo or {}).get("tf", 10)
+        T(d, (360, 50), f"ME vs ALGO  ·  {c['weekLabel'].upper()}  ·  {tf}-MIN CHARTS", F("Bold", 20), GOLD)
         k = ease((t - t_score) / 0.5) if t >= t_score else 0
         s = c["after"] if k > 0.5 else c["before"]
         glow = math.sin(min(1, max(0, (t - t_score) / 1.0)) * math.pi)

@@ -62,7 +62,9 @@ Two templates, both drawn from real data only:
 - **Me vs Algo:** one finished week (Mon-Fri) since Algo Live started. A trade is the algo's when an Algo Live order
   for that day, stock and side filled within 5 minutes of the journal trade's entry; everything else is his. Each side
   is scored by the journal's R (net after charges / RiskInr; the algo's order risk when RiskInr is missing). Trades with
-  neither are not scored. Each panel replays that side's biggest-R trade of the week; tickers are never shown. Season
+  neither are not scored. Each panel replays that side's biggest-R trade of the week (usually two different stocks).
+  The header says 10-MIN CHARTS. Tickers are shown from the first frame (no reveal) only when that trade is over 92 days
+  old (SEBI's 3-month rule); recent weeks keep them hidden. Season
   table = weeks won per side. Opening line clears after 2 s, then both trades play. Result badges are honest: BOOKED (a win), STOPPED (only when the stop
   actually hit), CUT (a loss closed earlier). **Why beat:** once both trades are done, each side's one-line reason is
   shown and the candles it refers to are marked on that side's chart (Claude picks them, `toMarks` checks them), held
