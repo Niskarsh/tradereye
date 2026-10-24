@@ -96,8 +96,12 @@ needs read/write on `shorts/`. The page polls and shows the preview.
 ## Scheduling (each finished short: Schedule / Edit schedule)
 The editor opens above the shorts: Claude's YouTube title, description, tags and Instagram caption (all editable), a
 YouTube date/time and "Same time as YouTube" for Instagram (untick to give Instagram its own time, or untick a platform
-to skip it). Times are IST. A short not scheduled yet is offered the next free **Mon / Wed / Fri 18:30 IST** slot,
-oldest short first (`lib/shorts/slots.ts`). The plan for every short is one S3 file, `shorts/posts.json`
+to skip it). Times are IST. A short not scheduled yet is offered the next free **Mon / Wed / Fri** day, oldest short
+first: **Instagram 11:00, YouTube 15:30 IST** (`nextSlotPairs`, `lib/shorts/slots.ts`).
+YouTube extras on every upload: not made for kids (`selfDeclaredMadeForKids: false`), no altered / synthetic content
+(`containsSyntheticMedia: false`), category Education (27). **Playlists:** the editor lists the channel's playlists
+(`GET /api/social/playlists`); a new mystery short starts with the playlist whose name contains "Mystery", a Me vs Algo
+short with the one containing "Algo". Adding / removing uses `playlistItems` (force-ssl scope; works while private). The plan for every short is one S3 file, `shorts/posts.json`
 (`lib/shorts/posts.ts` rules, `lib/shorts/publish.ts` work); each card shows Scheduled / Live (link) / Failed.
 - **YouTube:** uploaded when Schedule is pressed, private with `publishAt`; YouTube itself makes it public at that time,
   whatever tradereye is doing. A new time or new words change the upload; Unschedule removes it. Changing or removing

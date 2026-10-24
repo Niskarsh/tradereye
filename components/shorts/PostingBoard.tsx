@@ -9,7 +9,7 @@ import type { PlatformPost, PostPlan } from '@/lib/shorts/posts';
  * live in the last 7 days. YouTube is checked with YouTube itself; Instagram from tradereye's own record.
  */
 
-interface Row { id: string; label: string; poster?: string; post: PostPlan; text?: (ShortText & { model?: string }) | { error: string }; youtubeCheck?: VideoCheck }
+interface Row { id: string; kind?: string; label: string; poster?: string; post: PostPlan; text?: (ShortText & { model?: string }) | { error: string }; youtubeCheck?: VideoCheck }
 
 const pend = (p?: PlatformPost, now = Date.now(), yt = false) => !!p && (yt ? p.state === 'scheduled' && p.at > now : p.state === 'scheduled' || p.state === 'processing');
 
@@ -75,7 +75,7 @@ export default function PostingBoard({ onCounts, active }: { onCounts?: (n: { up
                 </div>
               </div>
               {editing === r.id && (
-                <ScheduleEditor id={r.id} label={r.label} poster={r.poster} now={now} post={r.post}
+                <ScheduleEditor id={r.id} kind={r.kind} label={r.label} poster={r.poster} now={now} post={r.post}
                   text={r.text && 'youtube' in r.text ? r.text : undefined} onClose={() => setEditing(null)} onSaved={() => void load()} />
               )}
             </React.Fragment>

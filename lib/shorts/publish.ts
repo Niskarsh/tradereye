@@ -1,8 +1,8 @@
 import { getJson, putJson } from '../setups/store';
 import { liveInstagram, liveYouTube } from '../social/connections';
 import { containerStatus, createReelContainer, mediaPermalink, publishContainer, waitForContainer } from '../social/instagram';
-import { canManage, deleteVideo, updateVideo, uploadVideo, YouTubeError, type UploadMeta } from '../social/youtube';
-import { igStep, MAX_ATTEMPTS, nextWake, pending, POSTS_KEY, youtubeState, type PlatformPost, type PostPlan, type Posts } from './posts';
+import { addToPlaylist, canManage, deleteVideo, removeFromPlaylist, updateVideo, uploadVideo, YouTubeError, type UploadMeta } from '../social/youtube';
+import { igStep, MAX_ATTEMPTS, nextWake, pending, POSTS_KEY, youtubeState, type PlatformPost, type PlaylistItem, type PostPlan, type Posts } from './posts';
 import { createWake, deleteWake, wakeName } from '../social/scheduler';
 import { MIN_LEAD_MS } from './slots';
 import { signedGet, store, textKey, videoKey } from './store';
@@ -39,23 +39,50 @@ const meta = (t: PostText, at: number): UploadMeta => ({
   title: t.title, description: t.description, tags: t.tags, privacy: 'private', publishAt: new Date(at).toISOString(),
 });
 
-/** Schedule, re-time or re-word the YouTube upload. Returns the new YouTube part of the plan. */
-export async function scheduleYouTube(id: string, at: number, t: PostText, old: PlatformPost | undefined, now = Date.now(), wordsSame = false): Promise<PlatformPost> {
+/**
+ * Schedule, re-time or re-word the YouTube upload, and put it in the chosen playlists. Returns the new YouTube part of
+ * the plan; `problems` lists playlist steps that failed (the upload itself still counts).
+ */
+export async function scheduleYouTube(id: string, at: number, t: PostText, old: PlatformPost | undefined, now = Date.now(), wordsSame = false, playlists?: string[]): Promise<{ post: PlatformPost; problems: string[] }> {
   const state = youtubeState(old, now);
   if (state === 'live') throw new YouTubeError('Already public on YouTube. Change it in YouTube Studio.');
   const sameTime = old?.at === at;
-  if (old?.videoId && state === 'scheduled' && sameTime && wordsSame) return old;  // nothing to change
+  const want = playlists ?? (old?.playlists ?? []).map((x) => x.id);
+  const samePlaylists = sameSet(want, (old?.playlists ?? []).map((x) => x.id));
+  if (old?.videoId && state === 'scheduled' && sameTime && wordsSame && samePlaylists) return { post: old, problems: [] };  // nothing to change
   if (!sameTime && at < now + MIN_LEAD_MS) throw new YouTubeError('Pick a YouTube time at least 15 minutes from now.');
   const { conn, accessToken } = await liveYouTube();
+  let post: PlatformPost;
   if (old?.videoId && state === 'scheduled') {
     if (!canManage(conn.scope)) throw new YouTubeError('Connect YouTube again (top of this page) to allow changing a scheduled video, then save again.');
-    await updateVideo(accessToken, old.videoId, meta(t, at));
-    return { ...old, at, updatedAt: now, error: undefined };
+    if (!sameTime || !wordsSame) await updateVideo(accessToken, old.videoId, meta(t, at));
+    post = { ...old, at, updatedAt: now, error: undefined };
+  } else {
+    const bytes = await store.get(videoKey(id));
+    if (!bytes) throw new YouTubeError('The video file is missing. Generate the short again.');
+    const v = await uploadVideo(accessToken, bytes, meta(t, at));
+    post = { at, state: 'scheduled', updatedAt: now, videoId: v.id, url: v.url, playlists: [] };
   }
-  const bytes = await store.get(videoKey(id));
-  if (!bytes) throw new YouTubeError('The video file is missing. Generate the short again.');
-  const v = await uploadVideo(accessToken, bytes, meta(t, at));
-  return { at, state: 'scheduled', updatedAt: now, videoId: v.id, url: v.url };
+  const synced = await syncPlaylists(accessToken, post.videoId!, post.playlists ?? [], want);
+  return { post: { ...post, playlists: synced.items }, problems: synced.problems };
+}
+
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+
+/** Adds the video to playlists it should be in and takes it out of ones it should not (needs force-ssl). */
+export async function syncPlaylists(accessToken: string, videoId: string, have: PlaylistItem[], want: string[]): Promise<{ items: PlaylistItem[]; problems: string[] }> {
+  const items: PlaylistItem[] = [], problems: string[] = [];
+  for (const h of have) {
+    if (want.includes(h.id)) { items.push(h); continue; }
+    try { if (h.itemId) await removeFromPlaylist(accessToken, h.itemId); }
+    catch (e) { items.push(h); problems.push((e as Error).message); }
+  }
+  for (const id of want) {
+    if (items.some((x) => x.id === id)) continue;
+    try { items.push({ id, itemId: await addToPlaylist(accessToken, id, videoId) }); }
+    catch (e) { problems.push((e as Error).message); }
+  }
+  return { items, problems };
 }
 
 /** Removes the private, not-yet-public YouTube video. */

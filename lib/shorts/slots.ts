@@ -5,9 +5,10 @@
 const IST_MS = 330 * 60_000;
 const DAY_MS = 86_400_000;
 
-/** Default posting days and time: Monday, Wednesday, Friday at 18:30 IST (after market, evening scroll). */
+/** Default posting days and times: Monday, Wednesday, Friday; Instagram at 11:00 IST, YouTube at 15:30 IST, same day. */
 export const DEFAULT_DAYS = [1, 3, 5];
-export const DEFAULT_TIME = '18:30';
+export const DEFAULT_TIME = '15:30';
+export const DEFAULT_TIMES = { youtube: '15:30', instagram: '11:00' };
 /** YouTube needs the publish time comfortably in the future; the page asks for at least this much. */
 export const MIN_LEAD_MS = 15 * 60_000;
 
@@ -28,6 +29,11 @@ export function istLabel(ms: number): string {
   return new Date(ms).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
 }
 
+/** "Mon 26 Oct" in IST. */
+export function istDay(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }).replace(',', '');
+}
+
 /**
  * The next `n` free default slots after `now` (+ lead time): Mon / Wed / Fri 18:30 IST, skipping any slot already
  * taken by another scheduled short (within 30 minutes of it).
@@ -43,6 +49,24 @@ export function nextSlots(n: number, now: number, taken: number[] = [], days = D
     if (at < now + MIN_LEAD_MS) continue;
     if ([...taken, ...out].some((t) => Math.abs(t - at) < 30 * 60_000)) continue;
     out.push(at);
+  }
+  return out;
+}
+
+/**
+ * Default slots for the next `n` shorts: Mon / Wed / Fri, Instagram 11:00 and YouTube 15:30 IST on the same day.
+ * A day is used only when its earlier post (Instagram) is still far enough ahead and neither time is taken.
+ */
+export function nextSlotPairs(n: number, now: number, taken: number[] = [], days = DEFAULT_DAYS, times = DEFAULT_TIMES): { youtube: number; instagram: number }[] {
+  const mins = (t: string) => { const [h, m] = t.split(':').map(Number); return (h * 60 + m) * 60_000; };
+  const gap = mins(times.youtube) - mins(times.instagram);
+  const out: { youtube: number; instagram: number }[] = [];
+  const used = [...taken];
+  while (out.length < n) {
+    const [ig] = nextSlots(1, now, used.flatMap((t) => [t, t - gap]), days, times.instagram);
+    if (ig === undefined) break;
+    out.push({ instagram: ig, youtube: ig + gap });
+    used.push(ig, ig + gap);
   }
   return out;
 }

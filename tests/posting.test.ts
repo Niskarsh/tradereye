@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fromIstInput, istLabel, nextSlots, toIstInput } from '../lib/shorts/slots';
+import { fromIstInput, istDay, istLabel, nextSlotPairs, nextSlots, toIstInput } from '../lib/shorts/slots';
 import { blocksDelete, igStep, LATE_MS, nextWake, PREPARE_MS, RETRY_MS, takenSlots, youtubeState, type PlatformPost } from '../lib/shorts/posts';
 import { atExpression, createWake, deleteWake, schedulerConfig, wakeName } from '../lib/social/scheduler';
 import { signRequest } from '../lib/aws/sigv4';
-import { canManage, deleteVideo, updateVideo, YOUTUBE_SCOPES, MANAGE_SCOPE } from '../lib/social/youtube';
+import { addToPlaylist, canManage, deleteVideo, removeFromPlaylist, updateVideo, YOUTUBE_SCOPES, MANAGE_SCOPE } from '../lib/social/youtube';
 import { gate } from '../lib/auth/gate';
 
 const IST = (s: string) => fromIstInput(s);
@@ -17,13 +17,14 @@ test('IST times: input <-> moment round trip, fixed +05:30', () => {
   assert.match(istLabel(at), /Mon.*26.*Oct.*6:30/i);
 });
 
-test('default slots: next free Mon / Wed / Fri 18:30 IST, skipping taken ones and ones too close', () => {
+test('slots: next free Mon / Wed / Fri at a time, skipping taken ones and ones too close', () => {
   const sat = IST('2026-10-24T22:00');  // Saturday night
-  assert.deepEqual(nextSlots(3, sat).map(toIstInput), ['2026-10-26T18:30', '2026-10-28T18:30', '2026-10-30T18:30']);
+  const at1830 = (n: number, now: number, taken: number[] = []) => nextSlots(n, now, taken, [1, 3, 5], '18:30');
+  assert.deepEqual(at1830(3, sat).map(toIstInput), ['2026-10-26T18:30', '2026-10-28T18:30', '2026-10-30T18:30']);
   // Monday's slot already used by another short
-  assert.deepEqual(nextSlots(2, sat, [IST('2026-10-26T18:30')]).map(toIstInput), ['2026-10-28T18:30', '2026-10-30T18:30']);
+  assert.deepEqual(at1830(2, sat, [IST('2026-10-26T18:30')]).map(toIstInput), ['2026-10-28T18:30', '2026-10-30T18:30']);
   // Monday 18:20: today's slot is under 15 minutes away, so Wednesday first
-  assert.equal(toIstInput(nextSlots(1, IST('2026-10-26T18:20'))[0]), '2026-10-28T18:30');
+  assert.equal(toIstInput(at1830(1, IST('2026-10-26T18:20'))[0]), '2026-10-28T18:30');
 });
 
 test('Instagram timer: prepares 20 min ahead, publishes at the time, gives up when badly late', () => {
@@ -62,7 +63,7 @@ test('YouTube: change and unschedule need force-ssl; update keeps it private wit
   assert.equal(calls[0].init?.method, 'PUT');
   assert.equal(body.id, 'vid1');
   assert.equal(body.snippet.title, 'A b title');
-  assert.deepEqual(body.status, { privacyStatus: 'private', selfDeclaredMadeForKids: false, publishAt: '2026-10-26T13:00:00.000Z' });
+  assert.deepEqual(body.status, { privacyStatus: 'private', selfDeclaredMadeForKids: false, containsSyntheticMedia: false, publishAt: '2026-10-26T13:00:00.000Z' });
   await assert.rejects(updateVideo('tok', 'vid1', { title: 't', privacy: 'public', publishAt: '2026-10-26T13:00:00.000Z' }, fake));
   await deleteVideo('tok', 'vid1', fake);
   assert.equal(calls[1].init?.method, 'DELETE');
@@ -136,4 +137,25 @@ test('Instagram captions keep at most 5 hashtags (Instagram allows 5); words and
   assert.equal(out, 'Long or short here? #trading\nReal trade, real money. Not investment advice.\n#intraday #nse #stocks #chart');
   assert.equal(capHashtags('no tags here'), 'no tags here');
   assert.equal(capHashtags('price #1 setup'), 'price #1 setup');
+});
+
+test('default slots: Mon / Wed / Fri, Instagram 11:00 and YouTube 15:30 IST the same day', () => {
+  const sat = IST('2026-10-24T23:30');
+  const pairs = nextSlotPairs(3, sat).map((p) => [toIstInput(p.instagram), toIstInput(p.youtube)]);
+  assert.deepEqual(pairs, [['2026-10-26T11:00', '2026-10-26T15:30'], ['2026-10-28T11:00', '2026-10-28T15:30'], ['2026-10-30T11:00', '2026-10-30T15:30']]);
+  // Monday's YouTube slot taken by another short: Monday is skipped for both
+  assert.equal(toIstInput(nextSlotPairs(1, sat, [IST('2026-10-26T15:30')])[0].instagram), '2026-10-28T11:00');
+  // Monday at noon: Monday's 11:00 has passed, so Wednesday
+  assert.equal(toIstInput(nextSlotPairs(1, IST('2026-10-26T12:00'))[0].youtube), '2026-10-28T15:30');
+  assert.equal(istDay(IST('2026-10-26T15:30')), 'Mon 26 Oct');
+});
+
+test('YouTube playlists: add (works while private) and remove by the playlist item id', async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fake = (async (url: string, init?: RequestInit) => { calls.push({ url, init }); return new Response(init?.method === 'POST' ? '{"id":"item-1"}' : null, { status: init?.method === 'POST' ? 200 : 204 }); }) as typeof fetch;
+  assert.equal(await addToPlaylist('tok', 'PLmystery0001', 'vid1', fake), 'item-1');
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), { snippet: { playlistId: 'PLmystery0001', resourceId: { kind: 'youtube#video', videoId: 'vid1' } } });
+  await removeFromPlaylist('tok', 'item-1', fake);
+  assert.equal(calls[1].init?.method, 'DELETE');
+  assert.match(calls[1].url, /playlistItems\?id=item-1/);
 });

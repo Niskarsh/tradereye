@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 90;  // the YouTube upload happens here
 
 /**
- * POST { id, text: { title, description, tags, caption }, youtube: { at } | null, instagram: { at } | null }
+ * POST { id, text: { title, description, tags, caption }, youtube: { at, playlists?: [playlistId] } | null, instagram: { at } | null }
  * Saves the words, then:
  *  - youtube { at }: uploads now as private with that publish time (or changes the time / words of the upload)
  *  - instagram { at }: an EventBridge wake-up is set; the timer publishes it at that time (lib/shorts/posts.ts)
@@ -19,7 +19,7 @@ export const maxDuration = 90;  // the YouTube upload happens here
 export async function POST(req: Request) {
   const denied = ownerRequired(req);
   if (denied) return denied;
-  const b = await req.json().catch(() => ({})) as { id?: string; text?: Partial<PostText>; youtube?: { at?: number } | null; instagram?: { at?: number } | null };
+  const b = await req.json().catch(() => ({})) as { id?: string; text?: Partial<PostText>; youtube?: { at?: number; playlists?: unknown } | null; instagram?: { at?: number } | null };
   const id = String(b.id ?? '');
   if (!validId(id)) return bad('Unknown short.');
   if ((await statusOf(id)).state !== 'done') return bad('The video is not ready yet.');
@@ -48,7 +48,12 @@ export async function POST(req: Request) {
   const ytLive = youtubeState(old.youtube, now) === 'live';
   if (!ytLive) {
     try {
-      if (b.youtube) yt = await scheduleYouTube(id, ytAt!, text, old.youtube, now, ytWordsSame);
+      if (b.youtube) {
+        const lists = Array.isArray(b.youtube.playlists) ? b.youtube.playlists.map(String).filter((x) => /^[A-Za-z0-9_-]{10,64}$/.test(x)).slice(0, 5) : undefined;
+        const r = await scheduleYouTube(id, ytAt!, text, old.youtube, now, ytWordsSame, lists);
+        yt = r.post;
+        for (const p of r.problems) errors.push(`YouTube playlist: ${p}`);
+      }
       else if (old.youtube && pending(old.youtube, 'youtube', now)) { await unscheduleYouTube(old.youtube); yt = undefined; }
       else if (old.youtube?.state === 'failed') yt = undefined;
     } catch (e) { errors.push(`YouTube: ${(e as Error).message}`); }

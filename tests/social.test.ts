@@ -51,6 +51,10 @@ test('YouTube upload: details first, then the bytes to the upload address; sched
   const meta = JSON.parse(String(calls[0].init?.body));
   assert.equal(meta.status.privacyStatus, 'private');
   assert.equal(meta.status.publishAt, '2026-10-27T13:30:00Z');
+  // Studio's questions, answered on every upload: not made for kids, no altered / synthetic content; Education
+  assert.equal(meta.status.selfDeclaredMadeForKids, false);
+  assert.equal(meta.status.containsSyntheticMedia, false);
+  assert.equal(meta.snippet.categoryId, '27');
   assert.equal(calls[1].url, 'https://upload.test/session-1');
   await assert.rejects(uploadVideo('at', new Uint8Array([1]), { title: 'T', privacy: 'public', publishAt: '2026-10-27T13:30:00Z' }, fake));
 });

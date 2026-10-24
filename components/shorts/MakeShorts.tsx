@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { TradeCharts } from '@/components/journal/TradeCharts';
 import { PostStatus, ScheduleEditor } from '@/components/shorts/SchedulePanel';
 import { blocksDelete, takenSlots, type PostPlan } from '@/lib/shorts/posts';
-import { istLabel, nextSlots } from '@/lib/shorts/slots';
+import { istDay, nextSlotPairs } from '@/lib/shorts/slots';
 
 /**
  * "Make a short" on the Socials page. Pick up to 3 shorts in total from either tab (any mix: 3 mystery charts, 2 + 1,
@@ -176,8 +176,10 @@ export default function MakeShorts() {
 
   // default slots for shorts not scheduled yet: the next free Mon / Wed / Fri 18:30 IST, oldest short first
   const waiting = shorts.filter((s) => s.status.state === 'done' && !s.post).sort((a, b) => a.createdAt - b.createdAt);
-  const slots = nextSlots(waiting.length, now, takenSlots(Object.fromEntries(shorts.filter((s) => s.post).map((s) => [s.id, s.post!])), now));
-  const defaultAt = new Map(waiting.map((s, i) => [s.id, slots[i]]));
+  // Instagram 11:00 and YouTube 15:30 IST on the same day
+  const slots = nextSlotPairs(waiting.length, now, takenSlots(Object.fromEntries(shorts.filter((s) => s.post).map((s) => [s.id, s.post!])), now));
+  const defaultAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.youtube]));
+  const defaultIgAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.instagram]));
   const editingShort = shorts.find((s) => s.id === editing);
 
   const tab = (k: Kind, label: string) => (
@@ -350,9 +352,9 @@ export default function MakeShorts() {
       {(shorts.length > 0 || ghosts.length > 0) && (
         <div id="shorts-grid" className="mt-6 grid scroll-mt-24 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {editingShort && (
-            <ScheduleEditor key={editingShort.id} id={editingShort.id} label={editingShort.label} poster={editingShort.poster}
+            <ScheduleEditor key={editingShort.id} id={editingShort.id} kind={editingShort.kind} label={editingShort.label} poster={editingShort.poster}
               text={editingShort.text && 'youtube' in editingShort.text ? editingShort.text : undefined}
-              post={editingShort.post} defaultAt={defaultAt.get(editingShort.id)} now={now}
+              post={editingShort.post} defaultAt={defaultAt.get(editingShort.id)} defaultIgAt={defaultIgAt.get(editingShort.id)} now={now}
               onClose={() => setEditing(null)} onSaved={() => void loadShorts()} />
           )}
           {ghosts.map((g) => <SkeletonCard key={g.key} label={g.label} step={g.step} />)}
@@ -396,7 +398,7 @@ export default function MakeShorts() {
                 {s.status.state === 'done' && (
                   <button onClick={() => { setEditing(s.id); document.getElementById('shorts-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
                     className="mt-2 inline-flex h-8 items-center rounded-full border border-brand-accent/70 px-3 text-xs font-semibold text-brand-accent hover:bg-brand-accent hover:text-brand-bg">
-                    {s.post ? 'Edit schedule' : `Schedule${defaultAt.get(s.id) ? ` · ${istLabel(defaultAt.get(s.id)!)}` : ''}`}
+                    {s.post ? 'Edit schedule' : `Schedule${defaultAt.get(s.id) ? ` · ${istDay(defaultAt.get(s.id)!)}` : ''}`}
                   </button>
                 )}
               </div>
