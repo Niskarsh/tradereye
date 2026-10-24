@@ -178,7 +178,7 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
                         </div>
                       )}
                   </div>
-                  <p className="mt-3 text-[11px] leading-4 text-ink-4">Set on every upload: not made for kids · no altered or synthetic (AI) content · category Education.</p>
+                  <p className="mt-3 text-[11px] leading-4 text-ink-4">Set on every upload: not made for kids · no altered or synthetic (AI) content · category People &amp; Blogs · English (US). A SEBI risk disclaimer is added to the description and caption if missing.</p>
                 </>
               )}
             </div>

@@ -159,3 +159,19 @@ test('YouTube playlists: add (works while private) and remove by the playlist it
   assert.equal(calls[1].init?.method, 'DELETE');
   assert.match(calls[1].url, /playlistItems\?id=item-1/);
 });
+
+test('risk disclaimer: added once, above the closing hashtags, on both platforms; mystery says the prices are old', async () => {
+  const { withDisclaimer, DISCLAIMER_MARK, OLD_DATA_LINE } = await import('../lib/shorts/disclaimer');
+  const d = 'Long or short here?\nAnswer at the end.\nReal trade, real money. Not investment advice.\n#shorts #intraday #nse';
+  const out = withDisclaimer(d, 'youtube', 'mystery');
+  const lines = out.split('\n');
+  assert.equal(lines[0], 'Long or short here?');
+  assert.equal(lines.at(-1), '#shorts #intraday #nse');            // hashtags stay last (YouTube shows them above the title)
+  assert.ok(lines.at(-3)!.includes(DISCLAIMER_MARK));
+  assert.ok(out.includes(OLD_DATA_LINE));
+  assert.equal(withDisclaimer(out, 'youtube', 'mystery'), out);       // never twice
+  const ig = withDisclaimer('My bot sat out and still won.\n#trading #algo', 'instagram', 'vs');
+  assert.ok(ig.includes(DISCLAIMER_MARK) && !ig.includes(OLD_DATA_LINE));
+  assert.ok(ig.endsWith('#trading #algo'));
+  assert.ok(withDisclaimer('', 'instagram').startsWith('Disclaimer:'));
+});

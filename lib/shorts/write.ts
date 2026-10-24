@@ -2,6 +2,7 @@ import { jsonClaude, type ClaudeOptions } from '../copilot/claude';
 import type { PanelSpec } from './spec';
 import type { ShortTrade, WeekScore } from './trades';
 import { capHashtags } from './posts';
+import { withDisclaimer } from './disclaimer';
 
 /**
  * Claude writes a short's words in ONE call, when Generate is pressed: the tell drawn into a mystery video (or the
@@ -30,6 +31,7 @@ Hard rules:
 - No investment advice: no buy/sell calls, no "you should", no promises of returns, no "guaranteed", no "easy money".
 - Plain English, Indian retail-trader audience. At most 2 emoji in a caption, none in the title.
 - Every description and caption carries one line: "Real trade, real money. Not investment advice."
+- Do NOT write a longer disclaimer paragraph: the full risk disclaimer is added automatically above the hashtags.
 
 Reach rules (write for the feed, but never promise what the video doesn't show):
 - Title: max 55 characters, and the hook must sit in the first 40: most phones cut the rest. Concrete tension (a
@@ -207,8 +209,8 @@ export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs')
     ...(kind === 'mystery'
       ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] }
       : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) }, vsMarks: { me: vm.me ?? [], algo: vm.algo ?? [] } }),
-    youtube: { title: clip(yt.title, 100), description: clip(yt.description, 4500), tags },
-    instagram: { caption: capHashtags(clip(ig.caption, 2000)) },
+    youtube: { title: clip(yt.title, 100), description: withDisclaimer(clip(yt.description, 4000), 'youtube', kind), tags },
+    instagram: { caption: capHashtags(withDisclaimer(clip(ig.caption, 1700), 'instagram', kind)) },
   };
 }
 

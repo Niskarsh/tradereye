@@ -96,7 +96,7 @@ export interface UploadMeta {
   title: string;               // max 100 characters
   description?: string;        // max 5000 bytes
   tags?: string[];
-  categoryId?: string;         // 27 = Education
+  categoryId?: string;         // default 22 = People & Blogs (a personal trade journal, not education)
   privacy: 'private' | 'unlisted' | 'public';
   publishAt?: string;          // ISO time; YouTube makes a private video public then
 }
@@ -132,8 +132,19 @@ export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: 
 /** YouTube rejects < and > in titles and descriptions. */
 export const cleanText = (s: string) => s.replace(/[<>]/g, '');
 
+/**
+ * People & Blogs: the channel is one person's own trades, shared as a journal. Not "Education": an unregistered person
+ * should not present trades as education or advice (SEBI), and the descriptions say so.
+ */
+export const CATEGORY_PEOPLE_BLOGS = '22';
+/** Title / description language and audio language: English (United States). */
+export const LANGUAGE = 'en-US';
+
 function snippetOf(meta: UploadMeta) {
-  return { title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? ''), tags: meta.tags ?? [], categoryId: meta.categoryId ?? '27' };
+  return {
+    title: cleanText(meta.title).slice(0, 100), description: cleanText(meta.description ?? ''), tags: meta.tags ?? [],
+    categoryId: meta.categoryId ?? CATEGORY_PEOPLE_BLOGS, defaultLanguage: LANGUAGE, defaultAudioLanguage: LANGUAGE,
+  };
 }
 
 /** New title / description / tags and publish time for a video that is still private (needs force-ssl). */

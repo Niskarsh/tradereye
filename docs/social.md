@@ -99,7 +99,11 @@ YouTube date/time and "Same time as YouTube" for Instagram (untick to give Insta
 to skip it). Times are IST. A short not scheduled yet is offered the next free **Mon / Wed / Fri** day, oldest short
 first: **Instagram 11:00, YouTube 15:30 IST** (`nextSlotPairs`, `lib/shorts/slots.ts`).
 YouTube extras on every upload: not made for kids (`selfDeclaredMadeForKids: false`), no altered / synthetic content
-(`containsSyntheticMedia: false`), category Education (27). **Playlists:** the editor lists the channel's playlists
+(`containsSyntheticMedia: false`), category **People & Blogs (22)** (a personal trade journal; deliberately not
+Education), title / description / audio language English (US). **Risk disclaimer** (`lib/shorts/disclaimer.ts`): every
+YouTube description and Instagram caption gets a SEBI risk disclaimer (not a registered adviser, not advice, high risk
+of loss; mystery shorts add that prices are 3+ months old), inserted once above the closing hashtags, by code: on
+Claude's text and again on every save, so edits cannot drop it. **Playlists:** the editor lists the channel's playlists
 (`GET /api/social/playlists`); a new mystery short starts with the playlist whose name contains "Mystery", a Me vs Algo
 short with the one containing "Algo". Adding / removing uses `playlistItems` (force-ssl scope; works while private). The plan for every short is one S3 file, `shorts/posts.json`
 (`lib/shorts/posts.ts` rules, `lib/shorts/publish.ts` work); each card shows Scheduled / Live (link) / Failed.
