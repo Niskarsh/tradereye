@@ -124,6 +124,15 @@ short with the one containing "Algo". Adding / removing uses `playlistItems` (fo
   `SOCIAL_TIMER_ROLE_ARN`. The S3 AWS key also needs `scheduler:CreateSchedule` / `scheduler:DeleteSchedule` on
   `schedule/default/tr-*` and `iam:PassRole` on the timer role. Lambda env: `TICK_URL`, `CRON_SECRET`.
 
+## Cover frame (thumbnail)
+In the schedule editor: **Pick a frame** opens the video with a scrub bar and frame-by-frame buttons; **Use this frame**
+captures that frame in the browser as a JPEG (`components/shorts/ThumbPicker.tsx`) and saves it with its position
+(`POST /api/shorts/thumb` -> `shorts/<id>/thumb.jpg` + `thumb.json`). Capturing needs the S3 bucket to allow the app's
+origin to GET (CORS); without it only the position is saved. **YouTube:** set with `thumbnails.set` when the schedule is
+saved (Shorts custom thumbnails are limited by YouTube to phone-verified, and so far Partner Program, channels: a refusal
+is shown on the card, the video keeps YouTube's frame). **Instagram:** the image is sent as `cover_url` (and the position
+as `thumb_offset`) when the Reel container is made; a frame picked after that remakes the container on save.
+
 ## Posting view (Socials page, second tab)
 Every short with a posting plan: **Needs attention** (failed, rejected by YouTube, timer not set), **Upcoming**
 (soonest first, with a countdown), **Published, last 7 days** (with links). Each row has Edit (same editor). YouTube rows

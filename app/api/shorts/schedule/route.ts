@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
 import { capHashtags, pending, youtubeState, type PlatformPost } from '@/lib/shorts/posts';
-import { dropWake, loadPosts, saveText, scheduleYouTube, syncWake, unscheduleYouTube, updatePlan, type PostText } from '@/lib/shorts/publish';
+import { dropWake, loadPosts, loadThumb, saveText, scheduleYouTube, syncWake, unscheduleYouTube, updatePlan, type PostText } from '@/lib/shorts/publish';
 import { listShorts, statusOf, store, textKey, validId } from '@/lib/shorts/store';
 import { withDisclaimer } from '@/lib/shorts/disclaimer';
 import { getJson } from '@/lib/setups/store';
@@ -71,7 +71,9 @@ export async function POST(req: Request) {
       if (igAt! < now + 2 * 60_000 && !(igAt === old.instagram?.at && pending(old.instagram, 'instagram', now))) errors.push('Instagram: pick a time at least 2 minutes from now, or use Post now.');
       else {
         // a new time or new caption (it is baked into what Meta processed): start over; the old one expires on its own
-        const keep = old.instagram && old.instagram.at === igAt && pending(old.instagram, 'instagram', now) && captionSame;
+        // the cover is baked in too: a frame picked after Meta processed it means starting over
+        const thumbSame = !old.instagram?.containerId || old.instagram.thumbMs === (await loadThumb(id))?.ms;
+        const keep = old.instagram && old.instagram.at === igAt && pending(old.instagram, 'instagram', now) && captionSame && thumbSame;
         ig = keep ? old.instagram : { at: igAt!, state: 'scheduled', updatedAt: now };
       }
     } else ig = undefined;

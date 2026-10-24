@@ -4,7 +4,7 @@ import { fromIstInput, istDay, istLabel, nextSlotPairs, nextSlots, toIstInput } 
 import { blocksDelete, igStep, LATE_MS, nextWake, PREPARE_MS, RETRY_MS, takenSlots, youtubeState, type PlatformPost } from '../lib/shorts/posts';
 import { atExpression, createWake, deleteWake, schedulerConfig, wakeName } from '../lib/social/scheduler';
 import { signRequest } from '../lib/aws/sigv4';
-import { addToPlaylist, canManage, deleteVideo, removeFromPlaylist, updateVideo, YOUTUBE_SCOPES, MANAGE_SCOPE } from '../lib/social/youtube';
+import { addToPlaylist, setThumbnail, canManage, deleteVideo, removeFromPlaylist, updateVideo, YOUTUBE_SCOPES, MANAGE_SCOPE } from '../lib/social/youtube';
 import { gate } from '../lib/auth/gate';
 
 const IST = (s: string) => fromIstInput(s);
@@ -174,4 +174,19 @@ test('risk disclaimer: added once, above the closing hashtags, on both platforms
   assert.ok(ig.includes(DISCLAIMER_MARK) && !ig.includes(OLD_DATA_LINE));
   assert.ok(ig.endsWith('#trading #algo'));
   assert.ok(withDisclaimer('', 'instagram').startsWith('Disclaimer:'));
+});
+
+test('cover frame: YouTube gets the JPEG as the thumbnail; Instagram gets it as the Reel cover plus the frame position', async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fake = (async (url: string, init?: RequestInit) => { calls.push({ url, init }); return new Response('{"id":"c1"}', { status: 200 }); }) as typeof fetch;
+  await setThumbnail('tok', 'vid1', new Uint8Array([0xff, 0xd8, 1]), fake);
+  assert.match(calls[0].url, /^https:\/\/www\.googleapis\.com\/upload\/youtube\/v3\/thumbnails\/set\?videoId=vid1&uploadType=media$/);
+  assert.equal((calls[0].init?.headers as Record<string, string>)['content-type'], 'image/jpeg');
+  await assert.rejects(setThumbnail('tok', 'vid1', new Uint8Array([1]), (async () => new Response('{"error":{"message":"forbidden"}}', { status: 403 })) as typeof fetch), /Partner Program/);
+  const { createReelContainer } = await import('../lib/social/instagram');
+  await createReelContainer({ accessToken: 't', userId: 'u', videoUrl: 'https://v', caption: 'c', coverUrl: 'https://img', thumbOffsetMs: 12345.6 }, fake);
+  const body = calls[1].init?.body as URLSearchParams;
+  assert.equal(body.get('cover_url'), 'https://img');
+  assert.equal(body.get('thumb_offset'), '12346');
+  assert.equal(body.get('media_type'), 'REELS');
 });
