@@ -2,6 +2,7 @@
 import React, { useEffect, useState, type ReactNode } from 'react';
 import { Check, ExternalLink, Loader2, X } from 'lucide-react';
 import { fromIstInput, istLabel, toIstInput } from '@/lib/shorts/slots';
+import ThumbPicker from '@/components/shorts/ThumbPicker';
 import { hashtagCount, IG_MAX_HASHTAGS, type PlatformPost, type PostPlan } from '@/lib/shorts/posts';
 
 /**
@@ -51,7 +52,10 @@ export function PostStatus({ post, now, onPostNow, busy, youtubeCheck, bare }: {
   const ytLate = yc && yc.privacy === 'private' && post.youtube && post.youtube.at < now - 10 * 60_000 && !yc.problem;
   return (
     <div className={bare ? 'space-y-1' : 'mt-2 space-y-1 rounded-lg border border-line p-2'}>
-      {line('YouTube', ytPost, ytLate ? 'scheduled' : ytShown, ytLate && <span className="block text-data-caution">Past its time but YouTube still has it private. Check YouTube Studio.</span>)}
+      {line('YouTube', ytPost, ytLate ? 'scheduled' : ytShown, <>
+        {ytLate && <span className="block text-data-caution">Past its time but YouTube still has it private. Check YouTube Studio.</span>}
+        {post.youtube?.thumbError && <span className="block text-data-caution">Custom thumbnail not set: {post.youtube.thumbError}</span>}
+      </>)}
       {line('Instagram', ig, ig?.state, ig?.state === 'failed' && (
         <button onClick={onPostNow} disabled={busy} className="ml-1 font-semibold text-brand-accent hover:underline disabled:opacity-40">{busy ? 'Posting…' : 'Post now'}</button>
       ))}
@@ -192,6 +196,8 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
               )}
             </div>
           </div>
+
+          <div className="mt-3"><ThumbPicker id={id} disabled={busy || (ytLive && igLive)} /></div>
 
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="space-y-2">

@@ -1,11 +1,11 @@
 import { getJson, putJson } from '../setups/store';
 import { liveInstagram, liveYouTube } from '../social/connections';
 import { containerStatus, createReelContainer, mediaPermalink, publishContainer, waitForContainer } from '../social/instagram';
-import { addToPlaylist, canManage, deleteVideo, removeFromPlaylist, updateVideo, uploadVideo, YouTubeError, type UploadMeta } from '../social/youtube';
+import { addToPlaylist, canManage, deleteVideo, removeFromPlaylist, setThumbnail, updateVideo, uploadVideo, YouTubeError, type UploadMeta } from '../social/youtube';
 import { igStep, MAX_ATTEMPTS, nextWake, pending, POSTS_KEY, youtubeState, type PlatformPost, type PlaylistItem, type PostPlan, type Posts } from './posts';
 import { createWake, deleteWake, wakeName } from '../social/scheduler';
 import { MIN_LEAD_MS } from './slots';
-import { signedGet, store, textKey, videoKey } from './store';
+import { signedGet, store, textKey, thumbKey, thumbMetaKey, videoKey, type ThumbMeta } from './store';
 import type { WrittenText } from './write';
 
 /**
@@ -49,7 +49,9 @@ export async function scheduleYouTube(id: string, at: number, t: PostText, old: 
   const sameTime = old?.at === at;
   const want = playlists ?? (old?.playlists ?? []).map((x) => x.id);
   const samePlaylists = sameSet(want, (old?.playlists ?? []).map((x) => x.id));
-  if (old?.videoId && state === 'scheduled' && sameTime && wordsSame && samePlaylists) return { post: old, problems: [] };  // nothing to change
+  const thumb = await loadThumb(id);
+  const sameThumb = !thumb?.image || old?.thumbMs === thumb.ms;
+  if (old?.videoId && state === 'scheduled' && sameTime && wordsSame && samePlaylists && sameThumb) return { post: old, problems: [] };  // nothing to change
   if (!sameTime && at < now + MIN_LEAD_MS) throw new YouTubeError('Pick a YouTube time at least 15 minutes from now.');
   const { conn, accessToken } = await liveYouTube();
   let post: PlatformPost;
@@ -64,8 +66,24 @@ export async function scheduleYouTube(id: string, at: number, t: PostText, old: 
     post = { at, state: 'scheduled', updatedAt: now, videoId: v.id, url: v.url, playlists: [] };
   }
   const synced = await syncPlaylists(accessToken, post.videoId!, post.playlists ?? [], want);
-  return { post: { ...post, playlists: synced.items }, problems: synced.problems };
+  post = { ...post, playlists: synced.items };
+  const problems = [...synced.problems];
+  // the cover frame he picked, as the custom thumbnail (YouTube may refuse it for Shorts: reported, not fatal)
+  if (thumb?.image && post.thumbMs !== thumb.ms) {
+    try {
+      const img = await store.get(thumbKey(id));
+      if (!img) throw new Error('The cover image is missing: pick the frame again.');
+      await setThumbnail(accessToken, post.videoId!, img);
+      post = { ...post, thumbMs: thumb.ms, thumbError: undefined };
+    } catch (e) {
+      post = { ...post, thumbError: (e as Error).message };
+      problems.push(`thumbnail: ${(e as Error).message}`);
+    }
+  }
+  return { post, problems };
 }
+
+export const loadThumb = (id: string) => getJson<ThumbMeta>(store, thumbMetaKey(id));
 
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
@@ -111,8 +129,11 @@ export async function stepInstagram(id: string, p: PlatformPost, now = Date.now(
       const text = await getJson<WrittenText | { error: string }>(store, textKey(id));
       const caption = text && 'instagram' in text ? text.instagram.caption : '';
       const videoUrl = await signedGet(videoKey(id), 3 * 3600);
-      const containerId = await createReelContainer({ accessToken: conn.accessToken, userId: conn.userId, videoUrl, caption });
-      cur = { ...cur, state: 'processing', containerId, containerAt: now, updatedAt: now, error: undefined };
+      // the cover he picked: the exact frame as an image, and its position as a fallback
+      const thumb = await loadThumb(id);
+      const coverUrl = thumb?.image ? await signedGet(thumbKey(id), 3 * 3600, 'image/jpeg') : undefined;
+      const containerId = await createReelContainer({ accessToken: conn.accessToken, userId: conn.userId, videoUrl, caption, coverUrl, thumbOffsetMs: thumb?.ms });
+      cur = { ...cur, state: 'processing', containerId, containerAt: now, updatedAt: now, error: undefined, thumbMs: thumb?.ms };
       if (now < cur.at) return cur;                      // processed ahead; published on a later run at its time
     }
     const s = waitMs ? await waitForContainer(conn.accessToken, cur.containerId!, waitMs) : await containerStatus(conn.accessToken, cur.containerId!);

@@ -79,10 +79,14 @@ export async function instagramMe(accessToken: string, fetchImpl: typeof fetch =
 }
 
 /** Step 1: Meta fetches the video from a public URL and starts processing it. Returns the container id. */
-export async function createReelContainer(p: { accessToken: string; userId: string; videoUrl: string; caption?: string; shareToFeed?: boolean }, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function createReelContainer(p: { accessToken: string; userId: string; videoUrl: string; caption?: string; shareToFeed?: boolean; coverUrl?: string; thumbOffsetMs?: number }, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const body = new URLSearchParams({ media_type: 'REELS', video_url: p.videoUrl, caption: p.caption ?? '', share_to_feed: String(p.shareToFeed ?? true), access_token: p.accessToken });
+  // the cover: an image (cover_url, wins when both are given) or a frame of the video (thumb_offset, in ms)
+  if (p.coverUrl) body.set('cover_url', p.coverUrl);
+  if (p.thumbOffsetMs !== undefined) body.set('thumb_offset', String(Math.max(0, Math.round(p.thumbOffsetMs))));
   const j = await readJson(await fetchImpl(`${GRAPH}/${p.userId}/media`, {
     method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ media_type: 'REELS', video_url: p.videoUrl, caption: p.caption ?? '', share_to_feed: String(p.shareToFeed ?? true), access_token: p.accessToken }),
+    body,
   }), 'Sending the video to Instagram');
   return String(j.id);
 }

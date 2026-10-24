@@ -209,3 +209,17 @@ export async function removeFromPlaylist(accessToken: string, itemId: string, fe
   const res = await fetchImpl(`${API}/playlistItems?${new URLSearchParams({ id: itemId })}`, { method: 'DELETE', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}` } });
   if (!res.ok && res.status !== 404) throw await apiError(res, 'Removing it from the playlist');
 }
+
+/**
+ * A custom thumbnail (JPEG / PNG). YouTube allows custom thumbnails only on phone-verified channels, and for Shorts
+ * (since July 2026) only for YouTube Partner Program channels so far; otherwise it answers 403.
+ */
+export async function setThumbnail(accessToken: string, videoId: string, image: Uint8Array, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const res = await fetchImpl(`${UPLOAD.replace('/videos', '/thumbnails/set')}?${new URLSearchParams({ videoId, uploadType: 'media' })}`, {
+    method: 'POST', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'image/jpeg' }, body: image as BodyInit,
+  });
+  if (res.ok) return;
+  const e = await apiError(res, 'Setting the thumbnail');
+  if (res.status === 403) e.message += ' (YouTube lets this channel use custom Short thumbnails only once it is phone-verified and, for Shorts, in the Partner Program; the video still uses YouTube\'s own frame)';
+  throw e;
+}

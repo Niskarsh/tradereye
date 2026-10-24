@@ -29,6 +29,8 @@ export interface PlatformPost {
   wakeName?: string;
   wakeError?: string;         // the wake-up could not be set (the timer is not set up, or AWS refused)
   playlists?: PlaylistItem[]; // YouTube: the playlists it was added to
+  thumbMs?: number;           // the cover frame used (YouTube: thumbnail set; Instagram: cover of the container)
+  thumbError?: string;        // YouTube refused the custom thumbnail
 }
 /** A YouTube playlist the video is in (itemId = its entry in that playlist, used to take it out again). */
 export interface PlaylistItem { id: string; itemId?: string }

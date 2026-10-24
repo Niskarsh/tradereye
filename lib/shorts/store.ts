@@ -13,6 +13,7 @@ import type { ShortSpec, Template } from './spec';
  *   shorts/<id>/short.mp4          the video (1080x1920)
  *   shorts/<id>/poster.jpg         a still for the list
  *   shorts/<id>/text.json          its words: title, description, tags, Instagram caption (Claude, at Generate)
+ *   shorts/<id>/thumb.jpg / .json  the cover frame he picked (YouTube thumbnail, Instagram cover)
  */
 
 export const store: Store = {
@@ -33,6 +34,10 @@ export const videoKey = (id: string) => `shorts/${id}/short.mp4`;
 export const posterKey = (id: string) => `shorts/${id}/poster.jpg`;
 /** the words: tell / reasons, YouTube title, description, tags, Instagram caption (written by Claude at Generate) */
 export const textKey = (id: string) => `shorts/${id}/text.json`;
+/** the cover he picked: the frame as a JPEG, and where in the video it is ({ ms, image }) */
+export const thumbKey = (id: string) => `shorts/${id}/thumb.jpg`;
+export const thumbMetaKey = (id: string) => `shorts/${id}/thumb.json`;
+export interface ThumbMeta { ms: number; image: boolean; at: number }
 export const validId = (id: string) => /^[a-z0-9-]{6,40}$/.test(id);
 
 /** A job that has said nothing for this long is treated as failed (GitHub never started it, or it died). */
@@ -70,14 +75,14 @@ const s3 = () => (client ??= new S3Client({
 const bucket = () => process.env.AWS_S3_BUCKET_NAME!;
 
 /** A private, time-limited link to the video or poster (for the preview, and for Instagram to fetch the video). */
-export async function signedGet(key: string, seconds = 3600): Promise<string> {
-  return getSignedUrl(s3(), new GetObjectCommand({ Bucket: bucket(), Key: key }), { expiresIn: seconds });
+export async function signedGet(key: string, seconds = 3600, contentType?: string): Promise<string> {
+  return getSignedUrl(s3(), new GetObjectCommand({ Bucket: bucket(), Key: key, ...(contentType ? { ResponseContentType: contentType } : {}) }), { expiresIn: seconds });
 }
 
 export async function deleteShort(id: string): Promise<void> {
   const all = await listShorts();
   await putJson(store, INDEX_KEY, all.filter((x) => x.id !== id));
-  for (const key of [specKey(id), statusKey(id), videoKey(id), posterKey(id), textKey(id)]) {
+  for (const key of [specKey(id), statusKey(id), videoKey(id), posterKey(id), textKey(id), thumbKey(id), thumbMetaKey(id)]) {
     await s3().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key })).catch(() => {});
   }
 }
