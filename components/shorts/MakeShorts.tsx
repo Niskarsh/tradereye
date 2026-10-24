@@ -382,7 +382,6 @@ export default function MakeShorts() {
                 {s.text && 'youtube' in s.text && (
                   <>
                     <p className="mt-1 text-xs font-semibold text-white">{s.text.youtube.title}</p>
-                    <button onClick={() => setTextOpen(textOpen === s.id ? null : s.id)} className="mt-1 text-[11px] text-brand-accent hover:underline">{textOpen === s.id ? 'Hide text' : 'Show text'}</button>
                     {textOpen === s.id && (
                       <div className="mt-2 space-y-2 text-[11px] leading-4 text-ink-2">
                         {s.text.tell && <p><b className="text-ink-3">Tell:</b> {s.text.tell}</p>}
@@ -395,12 +394,18 @@ export default function MakeShorts() {
                   </>
                 )}
                 <PostStatus post={s.post} now={now} busy={posting === s.id} onPostNow={() => postNow(s.id)} />
-                {s.status.state === 'done' && (
-                  <button onClick={() => { setEditing(s.id); document.getElementById('shorts-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
-                    className="mt-2 inline-flex h-8 items-center rounded-full border border-brand-accent/70 px-3 text-xs font-semibold text-brand-accent hover:bg-brand-accent hover:text-brand-bg">
-                    {s.post ? 'Edit schedule' : `Schedule${defaultAt.get(s.id) ? ` · ${istDay(defaultAt.get(s.id)!)}` : ''}`}
-                  </button>
-                )}
+                {/* actions: Show text on the left, Schedule on the right edge of the card */}
+                <div className="mt-2 flex items-center gap-2">
+                  {s.text && 'youtube' in s.text && (
+                    <button onClick={() => setTextOpen(textOpen === s.id ? null : s.id)} className="shrink-0 text-[11px] text-brand-accent hover:underline">{textOpen === s.id ? 'Hide text' : 'Show text'}</button>
+                  )}
+                  {s.status.state === 'done' && (
+                    <button onClick={() => { setEditing(s.id); document.getElementById('shorts-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+                      className="ml-auto inline-flex h-8 shrink-0 items-center whitespace-nowrap rounded-full border border-brand-accent/70 px-3 text-xs font-semibold text-brand-accent hover:bg-brand-accent hover:text-brand-bg">
+                      {s.post ? 'Edit schedule' : `Schedule${defaultAt.get(s.id) ? ` · ${istDay(defaultAt.get(s.id)!)}` : ''}`}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
