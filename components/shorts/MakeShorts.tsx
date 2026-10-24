@@ -171,7 +171,7 @@ export default function MakeShorts() {
   );
 
   return (
-    <section className="mt-8">
+    <section className="mt-4">
       <h2 className="text-xl font-semibold text-white">Make shorts</h2>
       <p className="mt-1 text-sm text-ink-3">Pick up to {MAX_PICKS} in total from either tab. Open a row to see the trade on its chart. Rendering takes a few minutes on GitHub; each short shows below when ready.</p>
 

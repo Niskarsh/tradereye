@@ -7,7 +7,7 @@ import type { PlatformPost, PostPlan } from '@/lib/shorts/posts';
 /**
  * Scheduling one finished short: edit the words Claude wrote, pick the YouTube time, and either reuse it for Instagram
  * ("Same time on Instagram") or give Instagram its own. YouTube is uploaded at once as private with that publish time;
- * Instagram is published by tradereye itself at its time (the timer, every 5 minutes).
+ * Instagram is published by tradereye itself at its time (an EventBridge Scheduler wake-up).
  */
 
 export interface ShortText { youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string } }
@@ -17,9 +17,19 @@ const input = 'mt-1 w-full rounded-lg border border-line-strong bg-brand-bg px-3
 /** YouTube flips the video public by itself: past its time a scheduled video is live. */
 const ytState = (p: PlatformPost | undefined, now: number) => (p && p.state === 'scheduled' && p.at <= now ? 'live' : p?.state);
 const igPending = (p?: PlatformPost) => p?.state === 'scheduled' || p?.state === 'processing';
+const pendingState = (s?: string) => s === 'scheduled' || s === 'processing';
 
-/** The one-line status per platform on a short's card. */
-export function PostStatus({ post, now, onPostNow, busy }: { post?: PostPlan; now: number; onPostNow: () => void; busy: boolean }) {
+export interface VideoCheck { privacy: string; upload: string; problem?: string }
+
+/** "in 2 d 4 h" / "in 35 min" / "12 min ago" */
+export function countdown(at: number, now: number): string {
+  const m = Math.round((at - now) / 60_000), a = Math.abs(m);
+  const t = a < 60 ? `${a} min` : a < 1440 ? `${Math.floor(a / 60)} h ${a % 60} min` : `${Math.floor(a / 1440)} d ${Math.floor((a % 1440) / 60)} h`;
+  return m >= 0 ? `in ${t}` : `${t} ago`;
+}
+
+/** The one-line status per platform (on a short's card and in the Posting view). */
+export function PostStatus({ post, now, onPostNow, busy, youtubeCheck, bare }: { post?: PostPlan; now: number; onPostNow: () => void; busy: boolean; youtubeCheck?: VideoCheck; bare?: boolean }) {
   if (!post?.youtube && !post?.instagram) return null;
   const line = (name: string, p: PlatformPost | undefined, state: string | undefined, extra?: ReactNode) => p && (
     <p className="text-[11px] leading-4">
@@ -28,14 +38,20 @@ export function PostStatus({ post, now, onPostNow, busy }: { post?: PostPlan; no
         ? <span className="text-data-green">Live{p.url && <> · <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">open<ExternalLink className="size-3" /></a></>}</span>
         : state === 'failed'
           ? <span className="text-data-red-text">Failed: {p.error ?? 'unknown error'}</span>
-          : <span className="text-white">{istLabel(p.at)} · {state === 'processing' ? 'ready at Meta, waiting for its time' : 'scheduled'}{p.error && <span className="text-data-caution"> (retrying: {p.error})</span>}</span>}
+          : <span className="text-white">{istLabel(p.at)} ({countdown(p.at, now)}) · {state === 'processing' ? 'ready at Meta, waiting for its time' : 'scheduled'}{p.error && <span className="text-data-caution"> (retrying: {p.error})</span>}</span>}
+      {p.wakeError && pendingState(state) && <span className="block text-data-red-text">Timer not set: {p.wakeError}</span>}
       {extra}
     </p>
   );
   const ig = post.instagram;
+  // YouTube's own word wins over the clock: public = live, a problem = failed, past its time but still private = late
+  const yc = youtubeCheck;
+  const ytShown = !post.youtube ? undefined : yc?.problem ? 'failed' : yc?.privacy === 'public' ? 'live' : ytState(post.youtube, now);
+  const ytPost = post.youtube && yc?.problem ? { ...post.youtube, error: yc.problem } : post.youtube;
+  const ytLate = yc && yc.privacy === 'private' && post.youtube && post.youtube.at < now - 10 * 60_000 && !yc.problem;
   return (
-    <div className="mt-2 space-y-1 rounded-lg border border-line p-2">
-      {line('YouTube', post.youtube, ytState(post.youtube, now))}
+    <div className={bare ? 'space-y-1' : 'mt-2 space-y-1 rounded-lg border border-line p-2'}>
+      {line('YouTube', ytPost, ytLate ? 'scheduled' : ytShown, ytLate && <span className="block text-data-caution">Past its time but YouTube still has it private. Check YouTube Studio.</span>)}
       {line('Instagram', ig, ig?.state, ig?.state === 'failed' && (
         <button onClick={onPostNow} disabled={busy} className="ml-1 font-semibold text-brand-accent hover:underline disabled:opacity-40">{busy ? 'Posting…' : 'Post now'}</button>
       ))}
@@ -108,7 +124,7 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
             <p className="text-sm font-semibold text-white">Schedule · {label}</p>
             <button onClick={onClose} aria-label="Close" className="ml-auto text-ink-4 hover:text-white"><X className="size-4" /></button>
           </div>
-          <p className="mt-0.5 text-xs text-ink-3">Times are IST. YouTube gets the video now (private) and makes it public at its time. Instagram is posted by tradereye at its time, within about 5–10 minutes.</p>
+          <p className="mt-0.5 text-xs text-ink-3">Times are IST. YouTube gets the video now (private) and makes it public at its time. Instagram is posted by tradereye at its time (within a minute or two).</p>
 
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="rounded-xl border border-line p-3">

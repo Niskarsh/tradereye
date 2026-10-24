@@ -3,10 +3,11 @@
  * Pure (no network); lib/shorts/publish.ts does the work.
  *
  * YouTube: uploaded when he presses Schedule, as private with publishAt; YouTube itself makes it public at that time.
- * Instagram: the API cannot schedule or post privately, so tradereye publishes it itself. A timer (GitHub Actions,
- * every 5 minutes, .github/workflows/social-tick.yml) calls /api/social/tick:
- *   - from PREPARE_MS before the slot: the video is handed to Meta (a Reel container) so it is processed in time
- *   - at the slot: once Meta says FINISHED, it is published
+ * Instagram: the API cannot schedule or post privately, so tradereye publishes it itself. For every waiting Reel there
+ * is one EventBridge Scheduler wake-up (lib/social/scheduler.ts) at its next step; it calls a small Lambda, which calls
+ * /api/social/tick:
+ *   - PREPARE_MS before the slot: the video is handed to Meta (a Reel container) so it is processed in time
+ *   - at the slot: once Meta says FINISHED, it is published (not finished yet: another wake-up RETRY_MS later)
  * Nothing reaches Instagram's feed before the slot, so it can be unscheduled until then.
  */
 
@@ -24,6 +25,9 @@ export interface PlatformPost {
   url?: string;               // the public link, once known
   error?: string;
   attempts?: number;          // failed tries in a row (Instagram)
+  wakeAt?: number;            // Instagram: the next timer wake-up (EventBridge Scheduler), and its name
+  wakeName?: string;
+  wakeError?: string;         // the wake-up could not be set (the timer is not set up, or AWS refused)
 }
 export interface PostPlan { youtube?: PlatformPost; instagram?: PlatformPost }
 export type Posts = Record<string, PostPlan>;
@@ -37,6 +41,10 @@ export const LATE_MS = 90 * 60_000;
 export const CONTAINER_TTL_MS = 23 * 3_600_000;
 /** Failed tries in a row before an Instagram post is marked failed. */
 export const MAX_ATTEMPTS = 3;
+/** Not finished at Meta yet, or a failed try: the next wake-up comes this much later. */
+export const RETRY_MS = 2 * 60_000;
+/** A wake-up may arrive a little early or late; steps allow this much slack. */
+const SLACK_MS = 60_000;
 
 /** YouTube flips the video public by itself: after its time a scheduled video is live. */
 export function youtubeState(p: PlatformPost | undefined, now = Date.now()): PostState | undefined {
@@ -58,8 +66,17 @@ export function igStep(p: PlatformPost | undefined, now = Date.now()): IgStep {
   if (!p || !pending(p, 'instagram')) return 'wait';
   if (now > p.at + LATE_MS) return 'missed';
   const fresh = !!p.containerId && !!p.containerAt && now - p.containerAt < CONTAINER_TTL_MS;
-  if (!fresh) return now >= p.at - PREPARE_MS ? 'prepare' : 'wait';
-  return now >= p.at ? 'check' : 'wait';
+  if (!fresh) return now >= p.at - PREPARE_MS - SLACK_MS ? 'prepare' : 'wait';
+  return now >= p.at - SLACK_MS / 2 ? 'check' : 'wait';
+}
+
+/** When the timer should next wake up for this Instagram post (undefined = nothing left to do). */
+export function nextWake(p: PlatformPost | undefined, now = Date.now()): number | undefined {
+  if (!p || !pending(p, 'instagram') || now > p.at + LATE_MS) return undefined;
+  const fresh = !!p.containerId && !!p.containerAt && now - p.containerAt < CONTAINER_TTL_MS;
+  if (!fresh) return now < p.at - PREPARE_MS ? p.at - PREPARE_MS : p.attempts ? now + RETRY_MS : now;  // now = as soon as possible
+  if (now < p.at) return p.at;
+  return now + RETRY_MS;
 }
 
 /** A short's video and words can be deleted only when nothing is waiting to go out. */

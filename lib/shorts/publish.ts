@@ -2,7 +2,8 @@ import { getJson, putJson } from '../setups/store';
 import { liveInstagram, liveYouTube } from '../social/connections';
 import { containerStatus, createReelContainer, mediaPermalink, publishContainer, waitForContainer } from '../social/instagram';
 import { canManage, deleteVideo, updateVideo, uploadVideo, YouTubeError, type UploadMeta } from '../social/youtube';
-import { igStep, MAX_ATTEMPTS, pending, POSTS_KEY, youtubeState, type PlatformPost, type PostPlan, type Posts } from './posts';
+import { igStep, MAX_ATTEMPTS, nextWake, pending, POSTS_KEY, youtubeState, type PlatformPost, type PostPlan, type Posts } from './posts';
+import { createWake, deleteWake, wakeName } from '../social/scheduler';
 import { MIN_LEAD_MS } from './slots';
 import { signedGet, store, textKey, videoKey } from './store';
 import type { WrittenText } from './write';
@@ -101,17 +102,46 @@ export async function stepInstagram(id: string, p: PlatformPost, now = Date.now(
   }
 }
 
-/** The timer: one step for every Instagram post that needs one. Returns counts only (the job log is public). */
+/**
+ * Makes sure the post's next timer wake-up exists (EventBridge Scheduler), and that a wake-up no longer needed is gone.
+ * Never throws: a problem is written on the post (wakeError) and shown on the page.
+ */
+export async function syncWake(id: string, p: PlatformPost | undefined, now = Date.now()): Promise<PlatformPost | undefined> {
+  if (!p) return p;
+  const want = nextWake(p, now);
+  const at = want === undefined ? undefined : Math.max(want, now + 60_000);
+  const name = at === undefined ? undefined : wakeName('ig', id, at);
+  if (name === p.wakeName && !p.wakeError) return p;                 // this step's wake-up is already set
+  try {
+    if (p.wakeName && p.wakeName !== name) await deleteWake(p.wakeName).catch(() => {});  // ran already, or no longer wanted
+    if (name) await createWake(name, at!, { short: id }, fetch, undefined, now);
+    return { ...p, wakeAt: at, wakeName: name, wakeError: undefined };
+  } catch (e) {
+    return { ...p, wakeAt: undefined, wakeName: undefined, wakeError: (e as Error).message };
+  }
+}
+
+/** Removes a post's pending wake-up (unscheduled, or replaced by a new plan). */
+export async function dropWake(p: PlatformPost | undefined): Promise<void> {
+  if (p?.wakeName) await deleteWake(p.wakeName).catch(() => {});
+}
+
+/**
+ * The timer (called by the Lambda when a wake-up fires): one step for every Instagram post that is due, then the next
+ * wake-up for each waiting post. Returns counts only.
+ */
 export async function tick(now = Date.now()): Promise<{ pending: number; prepared: number; published: number; failed: number }> {
   const posts = await loadPosts();
-  const due = Object.entries(posts).filter(([, plan]) => igStep(plan.instagram, now) !== 'wait');
-  const out = { pending: Object.values(posts).filter((p) => pending(p.instagram, 'instagram', now)).length, prepared: 0, published: 0, failed: 0 };
-  for (const [id, plan] of due) {
+  const waiting = Object.entries(posts).filter(([, plan]) => pending(plan.instagram, 'instagram', now));
+  const out = { pending: waiting.length, prepared: 0, published: 0, failed: 0 };
+  for (const [id, plan] of waiting) {
     const before = plan.instagram!;
-    const after = await stepInstagram(id, before, now);
+    let after = igStep(before, now) === 'wait' ? before : await stepInstagram(id, before, now);
     if (after.state === 'live') out.published++;
     else if (after.state === 'failed') out.failed++;
     else if (after.containerId && after.containerId !== before.containerId) out.prepared++;
+    after = (await syncWake(id, after, now))!;
+    if (after === before) continue;
     await updatePlan(id, (p) => (p.instagram && p.instagram.updatedAt === before.updatedAt ? { ...p, instagram: after } : p));  // he changed it meanwhile: his wins
   }
   return out;

@@ -148,3 +148,21 @@ export async function deleteVideo(accessToken: string, id: string, fetchImpl: ty
   const res = await fetchImpl(`${API}/videos?${new URLSearchParams({ id })}`, { method: 'DELETE', cache: 'no-store', headers: { authorization: `Bearer ${accessToken}` } });
   if (!res.ok && res.status !== 404) throw await apiError(res, 'Removing the YouTube video');
 }
+
+export interface VideoCheck { privacy: string; upload: string; publishAt?: string; problem?: string }
+
+/** What YouTube says about our videos (up to 50 ids). A video missing from the answer was deleted on YouTube. */
+export async function videoChecks(accessToken: string, ids: string[], fetchImpl: typeof fetch = fetch): Promise<Record<string, VideoCheck | null>> {
+  const out: Record<string, VideoCheck | null> = Object.fromEntries(ids.map((id) => [id, null]));
+  if (!ids.length) return out;
+  const res = await fetchImpl(`${API}/videos?${new URLSearchParams({ part: 'status', id: ids.slice(0, 50).join(','), maxResults: '50' })}`, { cache: 'no-store', headers: { authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw await apiError(res, 'Checking the YouTube videos');
+  const j = await res.json() as { items?: { id: string; status?: { privacyStatus?: string; uploadStatus?: string; publishAt?: string; rejectionReason?: string; failureReason?: string } }[] };
+  for (const v of j.items ?? []) {
+    const s = v.status ?? {};
+    const problem = s.uploadStatus === 'rejected' ? `YouTube rejected it (${s.rejectionReason ?? 'no reason given'})`
+      : s.uploadStatus === 'failed' ? `YouTube could not process it (${s.failureReason ?? 'no reason given'})` : undefined;
+    out[v.id] = { privacy: s.privacyStatus ?? '', upload: s.uploadStatus ?? '', publishAt: s.publishAt, problem };
+  }
+  return out;
+}

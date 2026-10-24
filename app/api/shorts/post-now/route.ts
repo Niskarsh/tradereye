@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
-import { loadPosts, stepInstagram, updatePlan } from '@/lib/shorts/publish';
+import { loadPosts, stepInstagram, syncWake, updatePlan } from '@/lib/shorts/publish';
 import { statusOf, validId } from '@/lib/shorts/store';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,8 @@ export async function POST(req: Request) {
   const now = Date.now();
   // keep a fresh processed video if there is one; otherwise it is made now
   const start = { ...(old ?? {}), at: now, state: old?.state === 'processing' ? 'processing' as const : 'scheduled' as const, updatedAt: now, attempts: 0, error: undefined };
-  const after = await stepInstagram(id, start, now, 60_000);
+  // published: its old wake-up is removed; still processing at Meta: a wake-up retries in 2 minutes
+  const after = await syncWake(id, await stepInstagram(id, start, now, 60_000), Date.now());
   const plan = await updatePlan(id, (p) => ({ ...p, instagram: after }));
   return NextResponse.json({ plan });
 }

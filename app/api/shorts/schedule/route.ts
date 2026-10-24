@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
 import { pending, youtubeState, type PlatformPost } from '@/lib/shorts/posts';
-import { loadPosts, saveText, scheduleYouTube, unscheduleYouTube, updatePlan, type PostText } from '@/lib/shorts/publish';
+import { dropWake, loadPosts, saveText, scheduleYouTube, syncWake, unscheduleYouTube, updatePlan, type PostText } from '@/lib/shorts/publish';
 import { statusOf, store, textKey, validId } from '@/lib/shorts/store';
 import { getJson } from '@/lib/setups/store';
 import type { WrittenText } from '@/lib/shorts/write';
@@ -13,7 +13,7 @@ export const maxDuration = 90;  // the YouTube upload happens here
  * POST { id, text: { title, description, tags, caption }, youtube: { at } | null, instagram: { at } | null }
  * Saves the words, then:
  *  - youtube { at }: uploads now as private with that publish time (or changes the time / words of the upload)
- *  - instagram { at }: queued; the timer publishes it at that time (lib/shorts/posts.ts)
+ *  - instagram { at }: an EventBridge wake-up is set; the timer publishes it at that time (lib/shorts/posts.ts)
  *  - null: unscheduled (the private YouTube video is removed). Anything already public is left alone.
  */
 export async function POST(req: Request) {
@@ -65,6 +65,9 @@ export async function POST(req: Request) {
         ig = keep ? old.instagram : { at: igAt!, state: 'scheduled', updatedAt: now };
       }
     } else ig = undefined;
+    if (ig !== old.instagram) await dropWake(old.instagram);  // its timer wake-up belonged to the old plan
+    ig = await syncWake(id, ig, now);                           // the timer's next wake-up for the new plan
+    if (ig?.wakeError) errors.push(`Instagram timer: ${ig.wakeError}`);
   }
 
   const plan = await updatePlan(id, () => ({ youtube: yt, instagram: ig }));

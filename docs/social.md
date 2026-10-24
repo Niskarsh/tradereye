@@ -98,11 +98,22 @@ oldest short first (`lib/shorts/slots.ts`). The plan for every short is one S3 f
 - **YouTube:** uploaded when Schedule is pressed, private with `publishAt`; YouTube itself makes it public at that time,
   whatever tradereye is doing. A new time or new words change the upload; Unschedule removes it. Changing or removing
   needs the `youtube.force-ssl` scope: a channel connected before it was added shows "Connect again once".
-- **Instagram:** the API cannot schedule or post privately, so tradereye publishes it. **Social post timer**
-  (`.github/workflows/social-tick.yml`, every 5 minutes) calls `POST /api/social/tick` with `CRON_SECRET`: from 20 minutes
-  before the slot the video is handed to Meta (a Reel container, so it is processed in time; nothing is visible), and at
-  the slot it is published once Meta says FINISHED. Expect it live within ~5-10 minutes of the time (GitHub's timer can
-  lag). Three failed tries in a row, or over 90 minutes late, marks it Failed with **Post now** (publish at once, also
-  the retry). The timer's answer is counts only (its log is public).
+- **Instagram:** the API cannot schedule or post privately, so tradereye publishes it, woken by **EventBridge
+  Scheduler** (`lib/social/scheduler.ts`, signed with `lib/aws/sigv4.ts`). Each waiting Reel has exactly one one-time
+  wake-up (`tr-ig-<short>-<minute>`, default group, deleted by AWS after it runs) at its next step. It invokes the Lambda
+  **tradereye-social-timer** (`infra/social-timer/index.mjs`), which calls `POST /api/social/tick` with `CRON_SECRET`:
+  20 minutes before the slot the video is handed to Meta (processed ahead, nothing visible), at the slot it is
+  published once Meta says FINISHED (not yet: another wake-up 2 minutes later). Three failed tries in a row, or over 90
+  minutes late, marks it Failed with **Post now** (publish at once, also the retry). Unscheduling or a new time removes
+  the old wake-up. If a wake-up cannot be set, the post says "Timer not set" with AWS's reason.
+  Cost: Scheduler 14M invocations / month free, Lambda 1M requests / month free; this uses ~30.
 - A scheduled short cannot be deleted until it is unscheduled. Anything already public is never touched.
-- Env: `CRON_SECRET` (24+ random characters) in Vercel **and** as a GitHub repo secret, same value.
+- Env (Vercel): `CRON_SECRET` (24+ random characters, same value in the Lambda), `SOCIAL_TIMER_LAMBDA_ARN`,
+  `SOCIAL_TIMER_ROLE_ARN`. The S3 AWS key also needs `scheduler:CreateSchedule` / `scheduler:DeleteSchedule` on
+  `schedule/default/tr-*` and `iam:PassRole` on the timer role. Lambda env: `TICK_URL`, `CRON_SECRET`.
+
+## Posting view (Socials page, second tab)
+Every short with a posting plan: **Needs attention** (failed, rejected by YouTube, timer not set), **Upcoming**
+(soonest first, with a countdown), **Published, last 7 days** (with links). Each row has Edit (same editor). YouTube rows
+are checked with YouTube itself (`videos.list`): public = live, rejected / failed / deleted = needs attention, still
+private well after its time = flagged. `GET /api/shorts/posts`.
