@@ -539,7 +539,7 @@ def render_vs(spec, out, poster):
     WHY_STEP = 0.6
     t_why = t_end + 0.5
     t_tot = (t_why + MESSAGE_MIN_S) if why else (t_end + 0.6)
-    t_score = t_tot + 2.8
+    t_score = t_tot + 1.8  # verdict + season 3 s after THIS WEEK (was 4 s)
     total = t_score + 6.0
 
     def prog(t): return 0 if t < t0 else min(1.0, (t - t0) / (t_end - t0))
@@ -627,6 +627,8 @@ def render_vs(spec, out, poster):
             if t >= t_score + 1.2:
                 k3 = ease((t - t_score - 1.2) / 0.5)
                 verdict = {"me": "I take the week.", "algo": "The bot takes the week.", "tie": "Dead even.", "none": "No trades this week."}[wk["winner"]]
+                if wk["winner"] in ("me", "algo") and wk[wk["winner"]]["n"] == 0:  # won by not trading while the other lost
+                    verdict = "I sat out. Still won." if wk["winner"] == "me" else "The bot sat out. Still won."
                 T(d, (360, 610), verdict, F("Black", 46), mix(BG, GOLD, k3))
                 T(d, (360, 690), f"Season: ME {c['after']['me']} - {c['after']['algo']} ALGO", F("Black", 36), mix(BG, TXT, k3))
                 subscribe(d, 770, k3, "Next round: Monday, 9:15")

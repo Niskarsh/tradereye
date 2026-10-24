@@ -68,7 +68,8 @@ Two templates, both drawn from real data only:
   table = weeks won per side. Opening line clears after 2 s, then both trades play. Result badges are honest: BOOKED (a win), STOPPED (only when the stop
   actually hit), CUT (a loss closed earlier). **Why beat:** once both trades are done, each side's one-line reason is
   shown and the candles it refers to are marked on that side's chart (Claude picks them, `toMarks` checks them), held
-  5 s, before the week's totals and the season score.
+  5 s, before the week's totals; 3 s later the verdict ("I take the week." / "The bot takes the week." / "Dead even.",
+  or "... sat out. Still won." when the winner made no trades) and the season score.
   **Season ledger** (`lib/shorts/season.ts`, S3 `shorts/season.json`): the first time a short uses a week, that week and
   every earlier finished week are frozen (both sides' R, trade counts, winner). The video's week totals and season score
   come only from frozen weeks, so a score shown to viewers never drifts when the journal changes later. The Me vs Algo
