@@ -221,9 +221,11 @@ export default function MakeShorts() {
                   <>
                     {chartFor === p.key && <div className="mt-2"><Chart c={p.trade.chart} token={token} /></div>}
                     <label className="mt-2 block text-xs text-ink-3">
-                      The tell: what gave the trade away, shown at the end{ai ? ' (leave empty and Claude writes it)' : ' (optional)'}
+                      {p.trade.result.value < 0
+                        ? 'What I missed: the warning sign on the 10-min chart, shown at the end'
+                        : 'The tell: what gave the trade away on the 10-min chart, shown at the end'}{ai ? ' (leave empty and Claude writes it)' : ' (optional)'}
                       <input value={p.tell} disabled={busy} onChange={(e) => { const v = e.target.value.slice(0, 90); update(p.key, (x) => ({ ...x, tell: v } as Pick)); }}
-                        placeholder="e.g. Three tests of the same low, each wick longer" className={input} />
+                        placeholder={p.trade.result.value < 0 ? 'e.g. The 09:45 candle made a lower high' : 'e.g. The 09:45 pullback held above the 09:35 low'} className={input} />
                     </label>
                   </>
                 ) : (

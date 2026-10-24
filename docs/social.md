@@ -48,7 +48,11 @@ Two templates, both drawn from real data only:
   wait?" with a 5-second countdown; the trade plays. When it first goes 0.3R (or 0.15%) under water, "Most people bail
   right here." stays 5 s while the replay runs in slow motion, so those seconds show the dip. Then straight to "THE
   STOCK WAS" + drum roll, the ticker pops onto a gold band with the result above it, the tell box (max 2 lines, even
-  padding), and a YouTube-style SUBSCRIBE button with @CandlesBeforeCubicles. Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
+  padding), and a YouTube-style SUBSCRIBE button with @CandlesBeforeCubicles.
+  **Losing trades** are shown just as fully, but nothing may suggest the call was right: the reveal pill always says
+  "MY CALL: LONG/SHORT" (never "the answer"); the dip message becomes "The stop stays where it is."; the box is
+  "WHAT I MISSED" (the warning sign visible on the 10-min candles before entry, or plainly "nothing warned" when there
+  was none) instead of "THE TELL"; the closing line asks "Would you have taken it?". Claude's titles say it was a loss. Fast-forward to the entry, freeze, "Long, short, or wait?" countdown, reveal, the
   trade plays out with a live R counter (price R from his first stop), then the result (the journal's R after charges,
   or the % move when no risk was logged), a drum-roll build-up, and the ticker reveal: the symbol slams onto a
   full-width gold band and stays on screen (the header switches to it too) through the optional one-line "tell". Only trades over

@@ -28,22 +28,37 @@ Hard rules:
 - Plain English, Indian retail-trader audience. At most 2 emoji in a caption, none in the title.
 - Every description and caption carries one line: "Real trade, real money. Not investment advice."`;
 
-const MYSTERY_TASK = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
-"Long, short, or wait?", then plays the trade and finally reveals the stock.
-- tell: one sentence, max 80 characters (it must fit two short lines on screen): the clue visible on the chart
-  BEFORE the entry that the trade was based on (or, for a losing trade, the warning sign that was there).
-  The video shows ONLY the 10-minute candles listed below, so the clue must be visible on THOSE candles: e.g. a higher
-  low, a long lower wick, a close back above a level, a lower high, a tight base. Name the candle by its time when that
-  helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show. If his
-  journal comment says why he took it, use it only where the 10-minute candles back it up.
+const MYSTERY_CORE = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
+"Long, short, or wait?", shows HIS call ("MY CALL: LONG"), plays the trade and finally reveals the stock.
+The video shows ONLY the 10-minute candles listed below, so anything you point at must be visible on THOSE candles: e.g.
+a higher low, a lower high, a long wick, a close back above or below a level, a tight base. Name the candle by its time
+when that helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show.
+If his journal comment explains the trade, use it only where the 10-minute candles back it up.
 - The stock's name and ticker are the reveal: never put them in title, description, tags or caption.
+- youtube.tags: 8-15 lowercase tags (no #), general trading terms only.
+- notes: leave both empty.`;
+
+const MYSTERY_WIN = `OUTCOME: A WIN.
+- tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 10-minute
+  candles BEFORE the entry that the trade was based on.
 - youtube.title: max 70 characters, a curiosity hook built around the decision; do not give the answer away.
 - youtube.description: 3-5 short lines: the hook, "Answer and the stock revealed at the end.", the not-advice line,
   then 4-6 hashtags on the last line (#shorts first).
-- youtube.tags: 8-15 lowercase tags (no #), general trading terms only.
 - instagram.caption: max 600 characters: hook line, "Long, short or wait? Comment before the reveal 👇", the not-advice
-  line, then 6-10 hashtags.
-- notes: leave both empty.`;
+  line, then 6-10 hashtags.`;
+
+const MYSTERY_LOSS = `OUTCOME: A LOSS. Be honest and plain about it: no excuses, no spin, no "it was still a good trade" unless the
+facts clearly show a valid setup that simply failed.
+- tell (shown as "WHAT I MISSED"): one sentence, max 80 characters (two short lines on screen): the warning sign that
+  was visible on the 10-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
+  high: buyers were already fading"). If no such sign is visible on those candles, say so plainly instead of inventing
+  one, e.g. "Nothing on the 10-min chart warned. The stop did its job."
+- youtube.title: max 70 characters, honest that it is a losing trade, built around the decision (e.g. "I lost on this
+  one. Would you have taken it?"); do not reveal the stock.
+- youtube.description: 3-5 short lines: the hook, "The stock and what I missed, revealed at the end.", the not-advice
+  line, then 4-6 hashtags on the last line (#shorts first).
+- instagram.caption: max 600 characters: an honest hook about the loss, "What would you have done? Comment below 👇",
+  the not-advice line, then 6-10 hashtags.`;
 
 const VS_TASK = `This is a ME vs ALGO short: one week of his own trades against his trading bot's (Algo Live), each side's
 biggest trade replayed, the week's totals in R, and the season score. Tickers are never shown.
@@ -104,8 +119,11 @@ function tradeFacts(t: ShortTrade, p: PanelSpec, label: string): string {
   return lines.join('\n');
 }
 
+/** A loss is any trade whose shown result is below zero (R after charges, or the % move). */
+export const isLoss = (p: PanelSpec) => p.result.value < 0;
+
 export function mysteryMessage(t: ShortTrade, p: PanelSpec): string {
-  return `${MYSTERY_TASK}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
+  return `${MYSTERY_CORE}\n\n${isLoss(p) ? MYSTERY_LOSS : MYSTERY_WIN}\n\nTHE TRADE (the ticker below is for your understanding only; keep it out of every text)\n${tradeFacts(t, p, 'trade')}`;
 }
 
 export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScore; after: { me: number; algo: number }; me?: { t: ShortTrade; p: PanelSpec }; algo?: { t: ShortTrade; p: PanelSpec } }): string {

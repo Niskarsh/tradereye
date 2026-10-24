@@ -144,3 +144,17 @@ test('Claude gets the candles with the entry and exit marked, and his own journa
   assert.match(msg, /RvolAtEntry=2.3/);
   assert.match(msg, /never put them in title/);
 });
+
+test('a losing trade gets the honest instructions: WHAT I MISSED, not THE TELL', async () => {
+  const { mysteryMessage } = await import('../lib/shorts/write');
+  const day = session('2026-07-15', 375);
+  const base = { date: '2026-07-15', dir: 'LONG' as const, entryTime: '09:56:16', exitTime: '10:18:00', holdMin: 22, stop: 99.5,
+    fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' as const }, { time: '10:18:00', price: 99.4, qty: 50, kind: 'out' as const }] };
+  const loss = mysteryMessage(T({ ...base, netR: -1.1, net: -330 }), buildPanel(day, T({ ...base, netR: -1.1, net: -330 })));
+  assert.match(loss, /OUTCOME: A LOSS/);
+  assert.match(loss, /WHAT I MISSED/);
+  assert.doesNotMatch(loss, /OUTCOME: A WIN/);
+  const win = mysteryMessage(T({ ...base, netR: 1.4 }), buildPanel(day, T({ ...base, netR: 1.4 })));
+  assert.match(win, /OUTCOME: A WIN/);
+  assert.match(win, /THE TELL/);
+});
