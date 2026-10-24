@@ -40,9 +40,11 @@ target), so an old trade can be recalled before writing its tell. Nothing blocks
 
 Two templates, both drawn from real data only:
 - **Chart in both templates:** the trade day's saved 1-minute candles, from 09:15 (or two hours before a late entry)
-  to the 10-minute candle after the exit, drawn as **10-minute candles that form live**: price moves through each
+  to the 5-minute candle after the exit, drawn as **5-minute candles that form live**: price moves through each
   minute (a green minute dips to its low before its high, a red one the reverse; only O/H/L/C are known), the open
-  candle's body and wicks follow it, with a live price tag, until its 10 minutes are over. Finished candles are exact.
+  candle's body and wicks follow it, with a live price tag, until its 5 minutes are over. Finished candles are exact.
+  The chart stays zoomed out on the whole window (no zoom-in on the trade, so no candle is clipped and the day's context
+  stays), with a time axis and vertical grid lines every 15 / 30 / 60 minutes, and an empty column on the right.
 - **Mystery chart:** one of his trades, replayed. Hook line held 5 s; fast-forward to the entry; "Long, short, or
   wait?" with a 5-second countdown; the trade plays. When it first goes 0.3R (or 0.15%) under water, "Most people bail
   right here." stays 5 s while the replay runs in slow motion, so those seconds show the dip. Then straight to "THE
@@ -50,11 +52,11 @@ Two templates, both drawn from real data only:
   padding), and a YouTube-style SUBSCRIBE button with @CandlesBeforeCubicles.
   **Losing trades** are shown just as fully, but nothing may suggest the call was right: the reveal pill always says
   "MY CALL: LONG/SHORT" (never "the answer"); the dip message becomes "The stop stays where it is."; the box is
-  "WHAT I MISSED" (the warning sign visible on the 10-min candles before entry, or plainly "nothing warned" when there
+  "WHAT I MISSED" (the warning sign visible on the 5-min candles before entry, or plainly "nothing warned" when there
   was none) instead of "THE TELL"; the closing line asks "Would you have taken it?". Claude's titles say it was a loss.
   **Recap** (when there is a tell): after the end card has been read, the tell box slides to the top, the result and
   ticker band clear, and the chart comes back with the ticker and date in the header, the whole trade drawn, the P&L
-  under it, and 1-3 marks drawn one by one: rings on 10-minute highs / lows / closes (same kind joined by a line, e.g.
+  under it, and 1-3 marks drawn one by one: rings on 5-minute highs / lows / closes (same kind joined by a line, e.g.
   falling highs) or a level line. Claude picks the candles (`marks` in its answer); `toMarks` keeps only candles on the
   chart and takes every price from the candles themselves. Comment + Subscribe never move once shown. The live R counter is price R
   from his first stop; the result is the journal's R after charges (or the % move when no risk was logged). Only trades
@@ -63,7 +65,7 @@ Two templates, both drawn from real data only:
   for that day, stock and side filled within 5 minutes of the journal trade's entry; everything else is his. Each side
   is scored by the journal's R (net after charges / RiskInr; the algo's order risk when RiskInr is missing). Trades with
   neither are not scored. Each panel replays that side's biggest-R trade of the week (usually two different stocks).
-  The header says 10-MIN CHARTS. Tickers are shown from the first frame (no reveal) only when that trade is over 92 days
+  The header says 5-MIN CHARTS. Tickers are shown from the first frame (no reveal) only when that trade is over 92 days
   old (SEBI's 3-month rule); recent weeks keep them hidden. Season
   table = weeks won per side. Opening line clears after 2 s, then both trades play. Result badges are honest: BOOKED (a win), STOPPED (only when the stop
   actually hit), CUT (a loss closed earlier). **Why beat:** once both trades are done, each side's one-line reason is

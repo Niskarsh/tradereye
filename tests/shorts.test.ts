@@ -94,19 +94,19 @@ test('candles: only the trade day, grouped from 09:15 when the trade is long', (
   assert.equal(g5[0][4], day.c[4]);
 });
 
-test('panel: 1-minute candles from 09:15 (or 2 hours before a late entry) to the candle after the exit, drawn as 10-min', () => {
+test('panel: 1-minute candles from 09:15 (or 2 hours before a late entry) to the candle after the exit, drawn as 5-min', () => {
   const day = session('2026-07-15', 375);
   const t = T({ date: '2026-07-15', dir: 'LONG', entryTime: '09:56:16', exitTime: '11:00:18', holdMin: 64, stop: 99.5, netR: 2.41,
     fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' }, { time: '11:00:18', price: 101, qty: 50, kind: 'out' }] });
   const p = buildPanel(day, t);
   const hhmm = (sec: number) => new Date((sec + 19800) * 1000).toISOString().slice(11, 16);
-  assert.equal(p.tf, 10);
+  assert.equal(p.tf, 5);
   assert.equal(hhmm(p.candles[0][0]), '09:15');
   assert.equal(hhmm(p.candles[p.entryIdx][0]), '09:56');
   assert.equal(hhmm(p.candles[p.exitIdx][0]), '11:00');
-  assert.equal(hhmm(p.candles[p.candles.length - 1][0]), '11:14'); // the exit's 10-min candle (11:05) and one more
+  assert.equal(hhmm(p.candles[p.candles.length - 1][0]), '11:09'); // the exit's 5-min candle (11:00) and one more
   assert.equal(p.fills.length, 2);
-  // a late entry starts the chart two hours earlier, on a 10-minute boundary
+  // a late entry starts the chart two hours earlier, on a 5-minute boundary
   const late = buildPanel(day, { ...t, entryTime: '13:47:00', exitTime: '14:10:00', holdMin: 23 });
   assert.equal(hhmm(late.candles[0][0]), '11:45');
   assert.throws(() => buildPanel({ t: [], o: [], h: [], l: [], c: [], v: [] }, t), /No candles saved/);
@@ -136,9 +136,9 @@ test('Claude gets the candles with the entry and exit marked, and his own journa
     fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' }, { time: '11:00:18', price: 101, qty: 50, kind: 'out' }] });
   const p = buildPanel(day, t);
   const lines = candleLines(p).split('\n');
-  assert.equal(lines.length, 12); // 10-minute candles 09:15 .. 11:05
+  assert.equal(lines.length, 23); // 5-minute candles 09:15 .. 11:05
   assert.match(lines.find((l) => l.includes('ENTRY')) ?? '', /^09:55/);
-  assert.match(lines.find((l) => l.includes('EXIT')) ?? '', /^10:55/);
+  assert.match(lines.find((l) => l.includes('EXIT')) ?? '', /^11:00/);
   const msg = mysteryMessage(t, p);
   assert.match(msg, /Held the morning low three times/);
   assert.match(msg, /RvolAtEntry=2.3/);
@@ -166,7 +166,7 @@ test('recap marks: only candles on the chart, prices from the candles, levels in
     fills: [{ time: '09:56:16', price: 100, qty: 50, kind: 'in' }, { time: '11:00:18', price: 101, qty: 50, kind: 'out' }] }));
   const ss = slots(p);
   assert.equal(ss[0].time, '09:15');
-  assert.equal(ss[3].time, '09:45');
+  assert.equal(ss[6].time, '09:45');  // 5-minute candles
   const m = toMarks([
     { time: '09:35', kind: 'high', price: 999, label: 'lower high' },   // price comes from the candle, not Claude
     { time: '09:45', kind: 'low', price: 0, label: 'held the low' },
@@ -176,8 +176,8 @@ test('recap marks: only candles on the chart, prices from the candles, levels in
     { time: '09:25', kind: 'close', price: 0, label: 'x'.repeat(40) },
   ], p);
   assert.equal(m.length, 3);
-  assert.deepEqual(m[0], { slot: 2, kind: 'high', price: Math.round(ss[2].h * 100) / 100, label: 'lower high' });
-  assert.equal(m[1].price, Math.round(ss[3].l * 100) / 100);
+  assert.deepEqual(m[0], { slot: 4, kind: 'high', price: Math.round(ss[4].h * 100) / 100, label: 'lower high' });
+  assert.equal(m[1].price, Math.round(ss[6].l * 100) / 100);
   assert.equal(m[2].label.length, 24);
   assert.deepEqual(toMarks('nonsense', p), []);
 });

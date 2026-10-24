@@ -52,7 +52,7 @@ Reach rules (write for the feed, but never promise what the video doesn't show):
 - Never: "smash like", "link in bio", fake urgency, all caps words, "guaranteed", made-up numbers.
 - youtube.description (search and "show more" readers): 700-1500 characters of real content, no padding or keyword
   lists. Line 1: the hook / comment question (max 100 characters). Then a short paragraph telling this trade's story
-  from the facts (the setup on the 10-minute chart, the decision, what made it hard), using the words people search for
+  from the facts (the setup on the 5-minute chart, the decision, what made it hard), using the words people search for
   naturally (intraday, NSE, price action, stop loss, risk, R multiple...). Then one line on what the series is. Then
   "Subscribe to Candles Before Cubicles: real trades, every week." Then the not-advice line, then the hashtags.
 - youtube.tags: 20-30 lowercase tags, the phrases people actually type into YouTube search for this kind of video:
@@ -63,12 +63,12 @@ Reach rules (write for the feed, but never promise what the video doesn't show):
 
 const MYSTERY_CORE = `This is a MYSTERY CHART short: the video replays the chart up to his entry, freezes, asks viewers
 "Long, short, or wait?", shows HIS call ("MY CALL: LONG"), plays the trade and finally reveals the stock.
-The video shows ONLY the 10-minute candles listed below, so anything you point at must be visible on THOSE candles: e.g.
+The video shows ONLY the 5-minute candles listed below, so anything you point at must be visible on THOSE candles: e.g.
 a higher low, a lower high, a long wick, a close back above or below a level, a tight base. Name the candle by its time
 when that helps ("the 09:45 candle held above the 09:35 low"). Never use something only a 1-minute chart would show.
-If his journal comment explains the trade, use it only where the 10-minute candles back it up.
+If his journal comment explains the trade, use it only where the 5-minute candles back it up.
 - marks: after the reveal the chart comes back with the ticker named, and the candles your tell talks about are marked on
-  it. Give 1-3 marks, each pointing at a 10-minute candle by its time exactly as listed ("09:45"): kind "high" or "low"
+  it. Give 1-3 marks, each pointing at a 5-minute candle by its time exactly as listed ("09:45"): kind "high" or "low"
   rings that candle's high or low (two or more highs, or lows, are joined by a line: e.g. falling highs), "close" rings
   its close, "level" draws a horizontal line at "price" (a level the tell names, inside the chart's range; for other
   kinds set price to 0). label: max 24 characters ("lower high", "held the low"). The marks must show exactly what the
@@ -77,7 +77,7 @@ If his journal comment explains the trade, use it only where the 10-minute candl
 - notes: leave both empty.`;
 
 const MYSTERY_WIN = `OUTCOME: A WIN.
-- tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 10-minute
+- tell (shown as "THE TELL"): one sentence, max 80 characters (two short lines on screen): the clue on the 5-minute
   candles BEFORE the entry that the trade was based on.
 - youtube.title: a curiosity hook built around the decision; do not give the answer away.
 - youtube.description: as in the reach rules; the story must not give away my call or the result ("my call and the
@@ -88,9 +88,9 @@ const MYSTERY_WIN = `OUTCOME: A WIN.
 const MYSTERY_LOSS = `OUTCOME: A LOSS. Be honest and plain about it: no excuses, no spin, no "it was still a good trade" unless the
 facts clearly show a valid setup that simply failed.
 - tell (shown as "WHAT I MISSED"): one sentence, max 80 characters (two short lines on screen): the warning sign that
-  was visible on the 10-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
+  was visible on the 5-minute candles BEFORE the entry and went against his call (e.g. "The 09:45 candle made a lower
   high: buyers were already fading"). If no such sign is visible on those candles, say so plainly instead of inventing
-  one, e.g. "Nothing on the 10-min chart warned. The stop did its job."
+  one, e.g. "Nothing on the 5-min chart warned. The stop did its job."
 - youtube.title: honest that it is a losing trade, built around the decision (e.g. "I lost on this one. Would you
   take it?"); do not reveal the stock.
 - youtube.description: as in the reach rules; honest that it was a loss, without revealing the stock ("the stock and
@@ -101,13 +101,13 @@ facts clearly show a valid setup that simply failed.
 const VS_TASK = `This is a ME vs ALGO short: one week of his own trades against his trading bot's (Algo Live), each side's
 biggest trade replayed, the week's totals in R, and the season score. Tickers are never shown.
 - notes.me / notes.algo: max 40 characters each: why that side's trade was taken, from the facts (for the algo, describe
-  it mechanically, e.g. "Short on a 10-min breakdown"). Empty string when that side had no trade. A losing side's
+  it mechanically, e.g. "Short on a 5-min breakdown"). Empty string when that side had no trade. A losing side's
   reason is still why it was taken: no excuses, no spin.
 - vs_marks.me / vs_marks.algo: after both trades play, each side's reason is shown and the candles it refers to are
-  marked on that side's chart. 1-2 marks per side, same format as below: time of a 10-minute candle exactly as listed
+  marked on that side's chart. 1-2 marks per side, same format as below: time of a 5-minute candle exactly as listed
   for THAT side, kind "high" | "low" | "close" | "level" (price only for a level, else 0), label max 24 characters.
   The marks must show exactly what that side's reason says. Empty array when that side had no trade.
-  The charts show ONLY the 10-minute candles listed; never point at something only a 1-minute chart would show.
+  The charts show ONLY the 5-minute candles listed; never point at something only a 1-minute chart would show.
 - No stock names or tickers anywhere.
 - youtube.title: the rivalry and the result of the week (who won).
 - youtube.description: as in the reach rules: the week's story (each side's trade, why it was taken, how it ended,

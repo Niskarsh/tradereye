@@ -4,10 +4,10 @@ import { mysteryCutoff, resultOf, scoreR, secOfDay, type ShortTrade, type WeekSc
 /**
  * The "spec" handed to the renderer (scripts/shorts/render.py on GitHub Actions): everything the video shows, already
  * decided here, so the renderer only draws. Candles are the real 1-minute candles of the trade's day; the video shows
- * them as 10-minute candles that form live (price moving through each minute), like a real-time chart.
+ * them as 5-minute candles that form live (price moving through each minute), like a real-time chart.
  */
 
-export const SPEC_VERSION = 2; // 2: candles are 1-minute, drawn as live-forming 10-minute candles
+export const SPEC_VERSION = 2; // 2: candles are 1-minute, drawn as live-forming candles of `tf` minutes (5)
 export type Template = 'mystery' | 'vs';
 
 export interface PanelSpec {
@@ -24,7 +24,7 @@ export interface PanelSpec {
 
 /**
  * A mark on the recap chart (the part after the reveal that shows what the tell talks about). Positions come from the
- * real candles: `slot` is the 10-minute candle's index in the panel, `price` is that candle's own high / low / close
+ * real candles: `slot` is the drawn (5-minute) candle's index in the panel, `price` is that candle's own high / low / close
  * (or, for a level, a price inside the chart's range). Claude only says which candle and which kind.
  */
 export interface ChartMark { slot: number; kind: 'high' | 'low' | 'close' | 'level'; price: number; label: string }
@@ -77,15 +77,15 @@ function idxAt(cs: [number, number, number, number, number][], hhmmss: string): 
   return k;
 }
 
-/** Display timeframe: the video draws 10-minute candles that form live from the 1-minute candles inside them. */
-export const DISPLAY_TF = 10;
+/** Display timeframe: the video draws 5-minute candles that form live from the 1-minute candles inside them. */
+export const DISPLAY_TF = 5;
 /** at most this much of the day before the entry (a late entry starts the chart later than 09:15) */
 const MAX_LEAD_MIN = 120;
 
 /**
- * The window shown, as 1-MINUTE candles (the renderer groups them into live-forming 10-minute candles): from 09:15
- * (or at most two hours before the entry, on a 10-minute boundary) through the whole trade to the end of the
- * 10-minute candle after the exit. Indexes (entry, exit, fills) are minute indexes into `candles`.
+ * The window shown, as 1-MINUTE candles (the renderer groups them into live-forming 5-minute candles): from 09:15
+ * (or at most two hours before the entry, on a 5-minute boundary) through the whole trade to the end of the
+ * 5-minute candle after the exit. Indexes (entry, exit, fills) are minute indexes into `candles`.
  */
 export function buildPanel(day: Candles, t: ShortTrade): PanelSpec {
   if (!day.t.length) throw new Error(`No candles saved for ${t.symbol} on ${t.date}.`);
@@ -107,7 +107,7 @@ export function buildPanel(day: Candles, t: ShortTrade): PanelSpec {
   };
 }
 
-/** The panel's drawn (10-minute) candles: start time "HH:MM" and exact O/H/L/C, in order. */
+/** The panel's drawn (5-minute) candles: start time "HH:MM" and exact O/H/L/C, in order. */
 export function slots(p: PanelSpec): { time: string; o: number; h: number; l: number; c: number }[] {
   const tfSec = p.tf * 60, open = 9 * 3600 + 15 * 60;
   const out: { time: string; o: number; h: number; l: number; c: number; s: number }[] = [];
