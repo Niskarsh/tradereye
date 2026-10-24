@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
-import { pending, youtubeState, type PlatformPost } from '@/lib/shorts/posts';
+import { capHashtags, pending, youtubeState, type PlatformPost } from '@/lib/shorts/posts';
 import { dropWake, loadPosts, saveText, scheduleYouTube, syncWake, unscheduleYouTube, updatePlan, type PostText } from '@/lib/shorts/publish';
 import { statusOf, store, textKey, validId } from '@/lib/shorts/store';
 import { getJson } from '@/lib/setups/store';
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     title: String(b.text?.title ?? '').trim().slice(0, 100),
     description: String(b.text?.description ?? '').slice(0, 4900),
     tags: (Array.isArray(b.text?.tags) ? b.text!.tags : []).map((x) => String(x).trim().replace(/^#/, '')).filter(Boolean).slice(0, 20),
-    caption: String(b.text?.caption ?? '').slice(0, 2200),
+    caption: capHashtags(String(b.text?.caption ?? '').slice(0, 2200)),  // Instagram allows 5 hashtags
   };
   const now = Date.now();
   const ytAt = b.youtube?.at, igAt = b.instagram?.at;

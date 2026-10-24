@@ -81,7 +81,11 @@ Two templates, both drawn from real data only:
 `ANTHROPIC_API_KEY`, model `COPILOT_MODEL`) gets only real facts: the trade, the candles before and during it (entry
 and exit marked), his journal comment and context columns. It returns the tell (mystery) or the two one-line reasons
 (Me vs Algo), the YouTube title / description / tags and the Instagram caption, saved as `shorts/<id>/text.json`.
-Anything he typed is used instead of Claude's tell / reasons. The mystery's ticker is kept out of every public text
+Anything he typed is used instead of Claude's tell / reasons. Reach rules in the prompt: title max 55 characters with
+the hook in the first 40 (phones cut the rest), searchable words where natural, one easy comment question, the first
+line of the description (100 chars) and caption (125 chars) carry the hook, YouTube exactly 3 hashtags (#shorts first),
+Instagram 3-5. Instagram allows **5 hashtags at most**: `capHashtags` drops extras from Claude's caption and from his
+edits. The mystery's ticker is kept out of every public text
 (it is the reveal), and that is enforced in code too. If Claude fails, the short is still made, just without text.
 
 Generate saves a spec to S3 (`shorts/<id>/spec.json`) and starts **Render short** (`.github/workflows/shorts-render.yml`,

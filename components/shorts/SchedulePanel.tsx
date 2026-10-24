@@ -2,7 +2,7 @@
 import React, { useState, type ReactNode } from 'react';
 import { ExternalLink, Loader2, X } from 'lucide-react';
 import { fromIstInput, istLabel, toIstInput } from '@/lib/shorts/slots';
-import type { PlatformPost, PostPlan } from '@/lib/shorts/posts';
+import { hashtagCount, IG_MAX_HASHTAGS, type PlatformPost, type PostPlan } from '@/lib/shorts/posts';
 
 /**
  * Scheduling one finished short: edit the words Claude wrote, pick the YouTube time, and either reuse it for Instagram
@@ -146,7 +146,7 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
 
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="block text-xs text-ink-3">YouTube title <span className="text-ink-4">({title.length}/100)</span>
+              <label className="block text-xs text-ink-3">YouTube title <span className={title.length > 55 ? 'text-data-caution' : 'text-ink-4'}>({title.length}/100{title.length > 55 ? ': phones show about 50' : ''})</span>
                 <input value={title} maxLength={100} disabled={busy || ytLive} onChange={(e) => setTitle(e.target.value)} className={input} />
               </label>
               <label className="block text-xs text-ink-3">YouTube description
@@ -157,6 +157,7 @@ export function ScheduleEditor({ id, label, poster, text, post, defaultAt, now, 
               </label>
             </div>
             <label className="block text-xs text-ink-3">Instagram caption <span className="text-ink-4">({caption.length}/2200)</span>
+              <span className={hashtagCount(caption) > IG_MAX_HASHTAGS ? 'text-data-red-text' : 'text-ink-4'}> · {hashtagCount(caption)}/{IG_MAX_HASHTAGS} hashtags{hashtagCount(caption) > IG_MAX_HASHTAGS ? ' (extra ones are dropped)' : ''}</span>
               <textarea value={caption} rows={12} maxLength={2200} disabled={busy || igLive} onChange={(e) => setCaption(e.target.value)} className={input} />
             </label>
           </div>

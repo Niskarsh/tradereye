@@ -90,3 +90,15 @@ export function takenSlots(posts: Posts, now = Date.now()): number[] {
   for (const plan of Object.values(posts)) for (const p of [plan.youtube, plan.instagram]) if (p && p.at > now) out.push(p.at);
   return out;
 }
+
+/** Instagram accepts at most 5 hashtags on a post: later ones are dropped (duplicates too), the words stay. */
+export const IG_MAX_HASHTAGS = 5;
+export function capHashtags(caption: string, max = IG_MAX_HASHTAGS): string {
+  const seen = new Set<string>();
+  return caption.replace(/(^|\s)#([\p{L}\p{N}_]+)/gu, (m, pre: string, tag: string) => {
+    const k = tag.toLowerCase();
+    if (seen.has(k) || seen.size >= max) return pre;
+    seen.add(k); return m;
+  }).replace(/[ \t]+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').trimEnd();
+}
+export const hashtagCount = (caption: string) => new Set((caption.match(/(?:^|\s)#([\p{L}\p{N}_]+)/gu) ?? []).map((t) => t.trim().toLowerCase())).size;

@@ -126,3 +126,14 @@ test('EventBridge Scheduler: one-time wake-up calling the Lambda, deleted after 
   await deleteWake(name, fake, env);   // 404 = already ran: fine
   await assert.rejects(createWake(name, at, {}, (async () => new Response('{"Message":"denied"}', { status: 403 })) as typeof fetch, env), /PassRole/);
 });
+
+test('Instagram captions keep at most 5 hashtags (Instagram allows 5); words and line breaks stay', async () => {
+  const { capHashtags, hashtagCount } = await import('../lib/shorts/posts');
+  const c = 'Long or short here? #trading\nReal trade, real money. Not investment advice.\n#intraday #nse #Trading #stocks #chart #daytrading #money';
+  const out = capHashtags(c);
+  assert.equal(hashtagCount(c), 7);
+  assert.equal(hashtagCount(out), 5);
+  assert.equal(out, 'Long or short here? #trading\nReal trade, real money. Not investment advice.\n#intraday #nse #stocks #chart');
+  assert.equal(capHashtags('no tags here'), 'no tags here');
+  assert.equal(capHashtags('price #1 setup'), 'price #1 setup');
+});
