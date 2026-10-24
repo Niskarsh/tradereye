@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TradeCharts } from '@/components/journal/TradeCharts';
 import { PostStatus, ScheduleEditor } from '@/components/shorts/SchedulePanel';
@@ -66,6 +66,8 @@ export default function MakeShorts() {
   const [editing, setEditing] = useState<string | null>(null);  // the short being scheduled
   const [posting, setPosting] = useState<string | null>(null);  // "Post now" on Instagram
   const [now, setNow] = useState(() => Date.now());
+  const [ghosts, setGhosts] = useState<{ key: number; label: string; step: string }[]>([]);  // shorts being started
+  const [deleting, setDeleting] = useState<Record<string, 'busy' | 'gone'>>({});
 
   const loadShorts = useCallback(async () => {
     const r = await fetch('/api/shorts/list', { cache: 'no-store' }).catch(() => null);
@@ -101,20 +103,33 @@ export default function MakeShorts() {
   const addWeek = (w: Week) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'vs', week: w, notes: { me: '', algo: '' } }]);
   const update = (key: number, f: (p: Pick) => Pick) => setPicks((ps) => ps.map((p) => (p.key === key ? f(p) : p)));
   const removePick = (key: number) => setPicks((ps) => ps.filter((p) => p.key !== key));
+  /** how many times a trade / week is already in the tray (the row's Add button shows it) */
+  const added = (id: string) => picks.filter((p) => (p.kind === 'mystery' ? p.trade.id === id : p.week.week === id)).length;
+  const pickLabel = (p: Pick) => (p.kind === 'mystery' ? `Mystery: ${p.trade.symbol} · ${dateFmt(p.trade.date)}` : `Me vs Algo · ${p.week.label}`);
 
   /** one request per pick, in order; a failed pick stays in the tray with its reason */
   const generate = async () => {
     setBusy(true); setErr('');
+    // one placeholder tile per short, right away, until its real card exists
+    setGhosts(picks.map((p) => ({ key: p.key, label: pickLabel(p), step: 'Waiting its turn' })));
+    setTimeout(() => document.getElementById('shorts-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    const ghostStep = (key: number, step: string) => setGhosts((g) => g.map((x) => (x.key === key ? { ...x, step } : x)));
     const left: Pick[] = [];
     for (const p of picks) {
       update(p.key, (x) => ({ ...x, state: 'sending' }));
+      ghostStep(p.key, ai ? 'Claude is writing the text' : 'Building the chart');
       const body = p.kind === 'mystery' ? { kind: 'mystery', tradeId: p.trade.id, date: p.trade.date, tell: p.tell, ai } : { kind: 'vs', week: p.week.week, notes: p.notes, ai };
       try {
         const r = await fetch('/api/shorts/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': token ?? '' }, body: JSON.stringify(body) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) left.push({ ...p, state: j.message ?? `HTTP ${r.status}` });
-        else if (j.textError) setErr(`Made, but Claude could not write the text: ${j.textError}`);
+        else {
+          if (j.textError) setErr(`Made, but Claude could not write the text: ${j.textError}`);
+          ghostStep(p.key, 'Starting the render');
+          await loadShorts();  // its real card (rendering) takes the placeholder's place
+        }
       } catch (e) { left.push({ ...p, state: (e as Error).message }); }
+      setGhosts((g) => g.filter((x) => x.key !== p.key));
     }
     if (picks.some((p) => p.kind === 'vs')) setWeeks(null); // a Me vs Algo short freezes weeks: show them frozen
     setPicks(left); setChartFor(null); setBusy(false);
@@ -133,10 +148,20 @@ export default function MakeShorts() {
 
   const remove = async (id: string) => {
     if (!window.confirm('Delete this short?')) return;
+    setDeleting((d) => ({ ...d, [id]: 'busy' }));
     const r = await fetch('/api/shorts/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null);
     const j = await r?.json().catch(() => ({}));
-    if (!r?.ok) setErr(j?.message ?? 'Could not delete it.');
-    void loadShorts();
+    if (!r?.ok) {
+      setErr(j?.message ?? 'Could not delete it.');
+      setDeleting((d) => omit(d, id));
+      return;
+    }
+    setDeleting((d) => ({ ...d, [id]: 'gone' }));  // fades and shrinks away, then leaves the grid
+    setTimeout(() => {
+      setShorts((all) => all.filter((x) => x.id !== id));
+      setDeleting((d) => omit(d, id));
+      if (editing === id) setEditing(null);
+    }, 350);
   };
 
   /** Instagram right now (also the retry after a failure) */
@@ -158,11 +183,19 @@ export default function MakeShorts() {
   const tab = (k: Kind, label: string) => (
     <button onClick={() => setKind(k)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${kind === k ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>{label}</button>
   );
-  const addBtn = (onClick: () => void) => (
-    <button onClick={onClick} disabled={full}
-      className="inline-flex h-8 items-center gap-1 rounded-full border border-line-strong px-3 text-xs font-semibold text-ink-2 hover:border-brand-accent hover:text-white disabled:opacity-30">
-      <Plus className="size-3.5" />Add
-    </button>
+  /** Add, or once in the tray "Added" with a tick (click again to add it once more) */
+  const addBtn = (onClick: () => void, n: number) => (
+    n > 0 ? (
+      <button onClick={onClick} disabled={full} title={full ? `${MAX_PICKS} picked already` : 'Add it again'}
+        className="inline-flex h-8 items-center gap-1 rounded-full border border-brand-accent bg-brand-accent/15 px-3 text-xs font-semibold text-brand-accent transition-colors hover:bg-brand-accent/25 disabled:cursor-default disabled:hover:bg-brand-accent/15">
+        <Check className="size-3.5 animate-[pop_.25s_ease-out]" />Added{n > 1 ? ` ×${n}` : ''}
+      </button>
+    ) : (
+      <button onClick={onClick} disabled={full} title={full ? `${MAX_PICKS} picked already: remove one below` : undefined}
+        className="inline-flex h-8 items-center gap-1 rounded-full border border-line-strong px-3 text-xs font-semibold text-ink-2 transition-colors hover:border-brand-accent hover:text-white disabled:opacity-30">
+        <Plus className="size-3.5" />Add
+      </button>
+    )
   );
   const chevron = (id: string) => (
     <button onClick={() => setOpen(open === id ? null : id)} aria-label={open === id ? 'Hide chart' : 'Show chart'} className="text-ink-3 hover:text-white">
@@ -195,7 +228,7 @@ export default function MakeShorts() {
                       <span className="hidden w-14 text-ink-3 sm:inline">{t.entryTime}</span>
                       <span className="hidden w-16 text-ink-3 sm:inline">{t.holdMin} min</span>
                       <span className={`ml-auto w-16 text-right font-semibold ${tone(t.result.value)}`}>{fmt(t.result)}</span>
-                      {addBtn(() => addMystery(t))}
+                      {addBtn(() => addMystery(t), added(t.id))}
                     </div>
                     {open === t.id && <div className="bg-zinc-950/30 px-1 pb-3"><Chart c={t.chart} token={token} /></div>}
                   </div>
@@ -225,7 +258,7 @@ export default function MakeShorts() {
                       title={w.frozenAt ? 'Locked: later shorts always show this result' : 'Freezes when its first short is made'}>
                       {w.frozenAt ? `${w.rescoredAt ? 'Re-scored' : 'Frozen'} ${new Date(w.rescoredAt ?? w.frozenAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })}` : 'Not frozen'}
                     </span>
-                    {addBtn(() => addWeek(w))}
+                    {addBtn(() => addWeek(w), added(w.week))}
                   </div>
                   {w.drift && w.now && (
                     <div className="flex flex-wrap items-center gap-2 px-3 pb-2 text-xs text-data-caution">
@@ -314,22 +347,28 @@ export default function MakeShorts() {
         </div>
       </div>
 
-      {shorts.length > 0 && (
-        <div id="shorts-grid" className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      {(shorts.length > 0 || ghosts.length > 0) && (
+        <div id="shorts-grid" className="mt-6 grid scroll-mt-24 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {editingShort && (
             <ScheduleEditor key={editingShort.id} id={editingShort.id} label={editingShort.label} poster={editingShort.poster}
               text={editingShort.text && 'youtube' in editingShort.text ? editingShort.text : undefined}
               post={editingShort.post} defaultAt={defaultAt.get(editingShort.id)} now={now}
               onClose={() => setEditing(null)} onSaved={() => void loadShorts()} />
           )}
+          {ghosts.map((g) => <SkeletonCard key={g.key} label={g.label} step={g.step} />)}
           {shorts.map((s) => (
-            <div key={s.id} className="overflow-hidden rounded-2xl border border-line-strong bg-brand-card">
-              <div className="flex aspect-[9/16] items-center justify-center bg-black">
+            <div key={s.id} className={`relative overflow-hidden rounded-2xl border border-line-strong bg-brand-card transition-all duration-300 ${deleting[s.id] === 'gone' ? 'scale-90 opacity-0' : deleting[s.id] ? 'pointer-events-none' : ''}`}>
+              {deleting[s.id] && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-brand-bg/70 text-sm font-semibold text-white backdrop-blur-[2px]">
+                  <Loader2 className="size-4 animate-spin" />Deleting…
+                </div>
+              )}
+              <div className="relative flex aspect-[9/16] items-center justify-center bg-black">
                 {s.status.state === 'done' && s.video
                   ? <video src={s.video} poster={s.poster} controls playsInline preload="none" className="size-full object-contain" />
                   : s.status.state === 'failed'
                     ? <p className="px-3 text-center text-xs text-data-red-text">{s.status.error ?? 'Render failed.'}</p>
-                    : <span className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="size-4 animate-spin" />{s.status.state === 'queued' ? 'Waiting for GitHub' : 'Rendering'}</span>}
+                    : <SkeletonVideo step={s.status.state === 'queued' ? 'Waiting for GitHub' : 'Rendering the video'} hint="Usually 2–4 minutes" />}
               </div>
               <div className="p-3">
                 <div className="flex items-start justify-between gap-2">
@@ -366,5 +405,35 @@ export default function MakeShorts() {
         </div>
       )}
     </section>
+  );
+}
+
+const omit = <T,>(o: Record<string, T>, k: string) => Object.fromEntries(Object.entries(o).filter(([x]) => x !== k));
+
+/** The video area while a short is on its way: a YouTube-style shimmering tile with what is happening now. */
+function SkeletonVideo({ step, hint }: { step: string; hint?: string }) {
+  return (
+    <div className="skeleton absolute inset-0 flex flex-col items-center justify-end gap-1 p-4 pb-8 text-center">
+      <div className="skeleton mb-auto mt-6 h-3 w-2/3 rounded-full" />
+      <div className="skeleton h-24 w-5/6 rounded-lg" />
+      <div className="skeleton mb-6 mt-3 h-8 w-1/2 rounded-full" />
+      <span className="flex items-center gap-1.5 text-xs font-semibold text-ink-2"><Loader2 className="size-3.5 animate-spin" />{step}</span>
+      {hint && <span className="text-[11px] text-ink-4">{hint}</span>}
+    </div>
+  );
+}
+
+/** A whole placeholder card for a short being started (before its real card exists). */
+function SkeletonCard({ label, step }: { label: string; step: string }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-line-strong bg-brand-card" aria-busy="true">
+      <div className="relative aspect-[9/16] bg-black"><SkeletonVideo step={step} /></div>
+      <div className="space-y-2 p-3">
+        <p className="text-xs leading-5 text-ink-2">{label}</p>
+        <div className="skeleton h-3 w-11/12 rounded-full" />
+        <div className="skeleton h-3 w-2/3 rounded-full" />
+        <div className="skeleton mt-2 h-8 w-28 rounded-full" />
+      </div>
+    </div>
   );
 }
