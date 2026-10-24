@@ -19,7 +19,7 @@ const MAX_PICKS = 3;
 type Kind = 'mystery' | 'vs';
 interface Result { value: number; unit: 'R' | '%' }
 interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; securityId?: string; initialStop?: string; lastStop?: string; target?: string; fills: { time: string; side: 'BUY' | 'SELL'; qty: number; price: number }[] }
-interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo }
+interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo; hasStop?: boolean }
 interface Side { r: number; n: number; uncounted: number }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
 type Winner = 'me' | 'algo' | 'tie' | 'none';
@@ -229,6 +229,10 @@ export default function MakeShorts() {
                       <span className={`w-14 text-xs font-bold ${t.dir === 'LONG' ? 'text-data-green' : 'text-data-red-text'}`}>{t.dir}</span>
                       <span className="hidden w-14 text-ink-3 sm:inline">{t.entryTime}</span>
                       <span className="hidden w-16 text-ink-3 sm:inline">{t.holdMin} min</span>
+                      {t.hasStop === false && (
+                        <span title="No InitialStop in the journal: the video has no stop line and shows the result in %, not R"
+                          className="rounded-md border border-data-caution/50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-data-caution">no stop</span>
+                      )}
                       <span className={`ml-auto w-16 text-right font-semibold ${tone(t.result.value)}`}>{fmt(t.result)}</span>
                       {addBtn(() => addMystery(t), added(t.id))}
                     </div>

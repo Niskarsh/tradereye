@@ -36,13 +36,13 @@ export function chartInfo(t: ShortTrade): ChartInfo {
     fills: t.fills.map((f) => ({ time: f.time, side: f.kind === 'in' ? inSide : outSide, qty: f.qty, price: f.price })) };
 }
 
-export interface MysteryCandidate { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: { value: number; unit: 'R' | '%' }; chart: ChartInfo }
+export interface MysteryCandidate { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: { value: number; unit: 'R' | '%' }; chart: ChartInfo; hasStop: boolean }
 
 /** Trades old enough to show with their ticker, newest first. */
 export async function mysteryCandidates(now = Date.now()): Promise<MysteryCandidate[]> {
   const trades = await journalTradesBetween('2020-01', istToday(now).slice(0, 7));
   return trades.filter((t) => mysteryEligible(t, now)).reverse()
-    .map((t) => ({ id: t.id, date: t.date, symbol: t.symbol, dir: t.dir, entryTime: t.entryTime.slice(0, 5), holdMin: t.holdMin, result: resultOf(t), chart: chartInfo(t) }));
+    .map((t) => ({ id: t.id, date: t.date, symbol: t.symbol, dir: t.dir, entryTime: t.entryTime.slice(0, 5), holdMin: t.holdMin, result: resultOf(t), chart: chartInfo(t), hasStop: !!t.stop }));
 }
 
 export async function findTrade(id: string, date: string): Promise<ShortTrade | undefined> {
