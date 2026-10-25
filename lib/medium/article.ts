@@ -66,11 +66,29 @@ export interface Article {
   /** what Claude cost on this article, ₹ */
   costInr: number;
 }
-export interface ArticleHead { id: string; format: Format; period: string; title: string; createdAt: number; updatedAt: number; published?: { url: string; at: number }; deleted?: boolean }
+export interface ArticleHead {
+  id: string; format: Format; period: string; title: string; createdAt: number; updatedAt: number; published?: { url: string; at: number }; deleted?: boolean;
+  /** Building tradereye: the iterations it covers (for the series links) */
+  iterations?: [number, number];
+}
 export const headOf = (a: Article): ArticleHead => ({
-  id: a.id, format: a.format, period: a.material.period.label, title: a.kit?.title || FORMATS.find((f) => f.id === a.format)!.name,
+  id: a.id, format: a.format, period: a.material.period.label, title: a.kit?.title || `${FORMATS.find((f) => f.id === a.format)!.name}: ${a.material.period.label}`,
   createdAt: a.createdAt, updatedAt: a.updatedAt, published: a.published, deleted: a.deleted,
+  ...(a.format === 'building' ? { iterations: [Number(a.material.period.from), Number(a.material.period.to)] as [number, number] } : {}),
 });
+
+/**
+ * The series block for a Building tradereye part: links to the published parts that came before it (earlier
+ * iterations), oldest first, so readers can find part 1. Empty when none is published yet.
+ */
+export function seriesLinks(a: Pick<Article, 'format' | 'material'>, heads: ArticleHead[]): { label: string; title: string; url: string }[] {
+  if (a.format !== 'building') return [];
+  const from = Number(a.material.period.from);
+  return heads
+    .filter((h) => h.format === 'building' && h.published && !h.deleted && h.iterations && h.iterations[1] < from)
+    .sort((x, y) => x.iterations![0] - y.iterations![0])
+    .map((h) => ({ label: h.iterations![0] === h.iterations![1] ? `Part ${h.iterations![0]}` : `Iterations ${h.iterations![0]}–${h.iterations![1]}`, title: h.title, url: h.published!.url }));
+}
 
 /* ---------------- settings: publications and secret terms ---------------- */
 

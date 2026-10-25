@@ -20,6 +20,16 @@ data and he pastes it into Medium and publishes by hand (Medium's own "Schedule 
    Medium's paste). Suggested publication from settings.
 6. **Published**: he pastes the story's link back; the list shows Draft / Published.
 
+**Drafts** save themselves (answers, draft text, kit: 1.5 s after the last change, plus before any button that loads
+or calls Claude; the page warns before closing with unsaved edits). An article stays a draft in the list until its
+Medium link is pasted back, so it can be reopened and changed any time.
+
+**Building tradereye as a series** (one article per Algo Lab iteration): pick the same iteration in From and To. The
+kept ledger starts at iteration 5, so iterations 1-4 come from an old run's results file when one is still in the run
+index, otherwise from `lib/medium/early.ts` (numbers copied from docs/algo-lab.md "Iterations"). A part gets a one-line
+recap of every earlier iteration and the chart shows them all; the publish kit lists the earlier parts already
+published ("Earlier in this series", copyable) so readers can start at part 1.
+
 ### The guards (pure, `lib/medium/article.ts`, tested in `tests/mediumPage.test.ts`)
 - **His words**: the page shows how much of the draft is his answers (3-word runs); under 80% it warns. Medium does
   not allow AI-written stories behind the paywall, and his Partner Program account is the asset.
