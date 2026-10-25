@@ -213,14 +213,42 @@ export function yourWordsShare(draft: string, answers: string[]): number {
 }
 export const YOUR_WORDS_MIN = 0.8;
 
-export interface Checks { yourWords: number; secrets: string[]; tickers: string[]; advice: { phrase: string; why: string }[]; unknownNumbers: string[]; missingImages: string[]; blocked: boolean }
+/**
+ * Words a reader who has never traded will not know. Flagged (not blocked) when the draft uses one without a plain
+ * explanation in the same sentence ("R" counts as explained when a sentence mentions R together with risk).
+ */
+const JARGON: [RegExp, string][] = [
+  [/\bStrategy [A-Z]\b/, 'a label from the data ("Strategy A"): say what it is'],
+  [/\bt[- ]?(stat|statistic|value)\b|\bt \d/i, 't (say "confidence score" and what it means)'],
+  [/\brank correlation\b/i, 'rank correlation'],
+  [/\b(out[- ]of[- ]sample|walk[- ]forward)\b/i, 'out-of-sample / walk-forward'],
+  [/\b(ATR|VWAP|RVOL|EMA)\b/, 'indicator abbreviation'],
+  [/\b(drawdown|slippage|bracket|market[- ]neutral|basket)\b/i, 'trading term'],
+  [/\bR[- ]multiple\b/i, 'R-multiple'],
+];
+const sentences = (t: string) => t.split(/(?<=[.!?])\s+|\n+/);
+export function jargonHits(draft: string): string[] {
+  const body = bodyText(draft), out: string[] = [];
+  for (const [re, what] of JARGON) {
+    const s = sentences(body).filter((x) => re.test(x));
+    if (s.length && !s.some((x) => /\(|means|meaning|i\.e\.|that is|called/i.test(x))) out.push(what);
+  }
+  if (/[+−-]?\d+(\.\d+)?\s?R\b/.test(body) && !sentences(body).some((x) => /\bR\b/.test(x) && /risk/i.test(x))) out.push('R is used but never explained (say what it means in terms of the risk)');
+  return out;
+}
+
+/** A question that asks him for a number, date, month, name or result instead of his thinking. */
+export const asksForFact = (q: string) =>
+  /\b(which|what) (month|months|date|day|days|stock|stocks|number|percentage|price|ticker|year)\b|\bhow (many|much)\b|\bwhen (exactly|was|did)\b|\bstrategy [A-Z]\b/i.test(q);
+
+export interface Checks { yourWords: number; jargon: string[]; secrets: string[]; tickers: string[]; advice: { phrase: string; why: string }[]; unknownNumbers: string[]; missingImages: string[]; blocked: boolean }
 /** Everything the page shows under the draft. Secret terms and recent tickers block copying. */
 export function checkDraft(a: Pick<Article, 'draft' | 'answers' | 'material' | 'kit'>, secretTerms: string[]): Checks {
   const all = [a.draft, a.kit?.title ?? '', a.kit?.subtitle ?? '', ...Object.values(a.kit?.captions ?? {})].join('\n');
   const secrets = secretHits(all, secretTerms), tickers = tickerHits(all, a.material.hiddenTickers);
   const placed = new Set([...a.draft.matchAll(/\[IMAGE ([^\]]+)\]/g)].map((m) => m[1].trim()));
   return {
-    yourWords: yourWordsShare(a.draft, a.answers),
+    yourWords: yourWordsShare(a.draft, a.answers), jargon: jargonHits(a.draft),
     secrets, tickers, advice: adviceHits(all),
     unknownNumbers: unknownNumbers(bodyText(a.draft), [...a.material.facts, ...a.answers]),
     missingImages: a.material.images.filter((i) => i.data.kind !== 'banner' && !placed.has(i.id)).map((i) => i.id),

@@ -5,7 +5,7 @@ import {
   suggestPublications, tickerHits, toMediumHtml, unknownNumbers, withDisclaimer, yourWordsShare, DISCLAIMER_MARK,
   OLD_PRICES_LINE, type Article, type Material,
 } from '../lib/medium/article';
-import { buildingMaterial, factsFor, labeller, strategyLetter, tradeChart, tradesMaterial, vsMaterial } from '../lib/medium/material';
+import { buildingMaterial, factsFor, labeller, versionName, tradeChart, tradesMaterial, vsMaterial } from '../lib/medium/material';
 import type { ShortTrade } from '../lib/shorts/trades';
 import type { LedgerEntry } from '../lib/ml/ledger';
 
@@ -137,7 +137,7 @@ test('Me vs Algo material uses the frozen score it is given', () => {
   const me = [trade('1', '2026-10-20', 'RELIANCE', 100, 100)], algo = [trade('2', '2026-10-23', 'TCS', -100, 100, { dir: 'SHORT' })];
   const week = { week: '2026-10-19', me: { r: 9, n: 1, uncounted: 0 }, algo: { r: -1, n: 1, uncounted: 0 }, winner: 'me' as const };
   const m = vsMaterial({ from: '2026-10-19', to: '2026-10-23', label: 'w' }, week, { me: 1, algo: 0 }, [week], me, algo, new Map(), NOW);
-  assert.match(m.facts[0], /him \+9\.0R from 1 trades, the algo −1\.0R/);
+  assert.match(m.facts.join('\n'), /him \+9\.0R from 1 trades, the algo −1\.0R/);
   assert.ok(m.images.some((i) => i.data.kind === 'scoreboard'));
 });
 
@@ -150,7 +150,9 @@ test('Algo Lab material: strategy names and what-changed lines stay out until he
   const m = buildingMaterial({ from: '7', to: '7', label: 'Iterations 7–7' }, [e]);
   const facts = m.facts.join('\n');
   assert.ok(!/Tight bracket|ATR stop|SECRET-FEATURE|more months/.test(facts));
-  assert.match(facts, /Strategy A 400 trades, \+0\.05R a trade overall, t 2\.1, 9\/14 months green, decide months \+0\.04R a trade, exam months −0\.03R a trade \(FAILED the exam\)/);
+  assert.match(facts, /The model: 400 test trades, \+0\.05R a trade \(on average each trade made 5% of the amount it risked\); made money in 9 of the 14 months it traded; confidence score t 2\.1; decide months \+0\.04R a trade; exam months −0\.03R a trade \(FAILED the exam/);
+  assert.ok(!/Strategy [A-Z]/.test(facts));
+  assert.match(facts, /Plain-words glossary/);
   assert.match(facts, /This is part 7 of the series/);
   assert.equal(m.changes?.length, 2);
   const shared = factsFor(m, [1]).join('\n');
@@ -159,9 +161,26 @@ test('Algo Lab material: strategy names and what-changed lines stay out until he
   assert.deepEqual(m.images.find((i) => i.data.kind === 'iterations')?.data, { kind: 'iterations', bars: [{ label: '#7', value: -0.03, note: 'exam' }] });
 });
 
-test('strategy letters: keep a letter id, map descriptive ids by order', () => {
-  assert.equal(strategyLetter('F', []), 'F');
-  assert.equal(strategyLetter('tight', ['wide', 'tight']), 'Strategy B');
+test('versions get plain names, never letters', () => {
+  assert.equal(versionName('F', 'F', ['F']), 'the model');
+  assert.equal(versionName('F', 'F', ['B', 'F', 'G']), 'the version it kept');
+  assert.equal(versionName('G', 'F', ['B', 'F', 'G']), 'comparison version 2');
+});
+
+test('questions that ask him for data are recognised', async () => {
+  const { asksForFact } = await import('../lib/medium/article');
+  assert.ok(asksForFact('Which month was the green one?'));
+  assert.ok(asksForFact('Strategy A lost 701 trades. Why?'));
+  assert.ok(asksForFact('How many trades did you take?'));
+  assert.ok(!asksForFact('Your first version lost money in 8 of 9 months. What did you think when you saw that?'));
+});
+
+test('jargon a beginner would not know is flagged unless explained in the same sentence', async () => {
+  const { jargonHits } = await import('../lib/medium/article');
+  assert.ok(jargonHits('Strategy A made +0.05R.').length >= 2);
+  assert.deepEqual(jargonHits('Each trade made +0.05R, where R means the amount I risked on it.'), []);
+  assert.ok(jargonHits('The t-stat was 2.1.').some((x) => x.startsWith('t ')));
+  assert.deepEqual(jargonHits('The confidence score (t) was 2.1, which means it is probably not luck.'), []);
 });
 
 test('trade chart: 1-minute candles become 5-minute ones from 09:15 to 30 min after the exit, with his marks', () => {
@@ -187,7 +206,7 @@ test('iterations 1-4 come from the notes; a later part gets a one-line recap of 
   assert.deepEqual(EARLY_NOTES.map((n) => n.iteration), [1, 2, 3, 4]);
   const first = buildingMaterial({ from: '1', to: '1', label: 'Iteration 1' }, [], [EARLY_NOTES[0]]);
   assert.match(first.facts.join('\n'), /This is part 1 of the series .* It is the first part\./);
-  assert.match(first.facts.join('\n'), /701 trades, −0\.20R a trade/);
+  assert.match(first.facts.join('\n'), /701 test trades; −0\.20R a trade/);
   // the notes' what-changed lines are offered unticked, never in the facts
   assert.equal(first.changes?.length, EARLY_NOTES[0].changes.length);
   assert.ok(!first.facts.join('\n').includes('calendar in disguise'));

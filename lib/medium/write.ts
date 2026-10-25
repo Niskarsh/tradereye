@@ -1,6 +1,6 @@
 import { jsonClaude, type ClaudeOptions } from '../copilot/claude';
 import { claudeOptions } from '../shorts/write';
-import { cleanDraft, cleanTags, FORMATS, withDisclaimer, type Article, type Kit } from './article';
+import { asksForFact, cleanDraft, cleanTags, FORMATS, withDisclaimer, type Article, type Kit } from './article';
 import { factsFor } from './material';
 
 /**
@@ -12,9 +12,17 @@ import { factsFor } from './material';
  * never given to Claude (they are "Stock A" ...), and the page blocks copying if one appears anyway.
  */
 
-const AUDIENCE = `"Candles Before Cubicles": a software developer in India who day-trades NSE stocks with his own money before
-work, and builds his own trading app (tradereye) and a trading model. Medium readers: traders and developers who want
-real, honest numbers and lessons, not hype.`;
+const AUDIENCE = `"Candles Before Cubicles": a software developer in India who day-trades stocks with his own money before
+work, and builds his own trading app (tradereye) and a trading model. His Medium readers are curious people, most of
+whom have NEVER traded: they must be able to follow every sentence without knowing any trading words.`;
+
+const PLAIN = `Plain language, always:
+- Write for someone who has never traded. Short sentences, everyday words.
+- Every trading or data term gets a plain explanation the first time it appears, using the glossary in the data
+  (e.g. "-0.20R a trade, meaning each trade lost a fifth of what it risked").
+- Never use labels or codes from the data as if the reader knew them: no "Strategy A", no "iteration 7's F", no
+  column names. Say what the thing is ("the version it kept", "a second version it compared against").
+- No unexplained abbreviations or statistics jargon (t-stat, rank correlation, out-of-sample, walk-forward, ATR...).`;
 
 const NEVER = `Never:
 - invent experiences, feelings, events, numbers or quotes. Every number must be in the data or his answers.
@@ -23,10 +31,18 @@ const NEVER = `Never:
 - write a disclaimer (it is added automatically).`;
 
 export const QUESTIONS_SYSTEM = `You help ${AUDIENCE}
-He is about to write a Medium article from his own experience. Ask him 4 or 5 pointed questions that pull out the
-story only he can tell: a decision and why, what he felt or doubted at a specific moment, what he got wrong, what he
-would change. Each question must point at ONE specific fact in the data (a trade, a number, an iteration) and be
-answerable in a few spoken sentences. Max 30 words each. No yes/no questions, no generic "what did you learn".
+He is about to write a Medium article from his own experience. Ask him 4 or 5 questions that pull out the story only
+he can tell: why he made a decision, what he expected, what surprised or frustrated him, what he got wrong, what he
+would tell a beginner.
+
+- NEVER ask him for a fact, number, date, month, name or result. Everything that is known is already in the data; what
+  is not in the data (e.g. which months were green) is not known, so do not ask about it either. Ask only about his
+  thinking and feelings around the facts.
+- You may anchor a question on one fact, stated in plain words in the question itself ("Your very first version lost
+  money in 8 of the 9 months it traded. What did you think when you saw that?").
+- Each question must make sense to him without looking anything up, and be answerable in a few spoken sentences.
+  Max 35 words. No yes/no questions, no generic "what did you learn".
+${PLAIN}
 ${NEVER}`;
 
 export const DRAFT_SYSTEM = `You arrange ${AUDIENCE}
@@ -37,7 +53,10 @@ article MUST be his words:
 - You may add at most one short linking sentence per section, and an opening line only if his answers have none.
   Nothing else of your own. If his answers are thin, the article is short: do not pad it.
 - Numbers only from the data or his answers, written exactly as given (rounding to 1 decimal is fine).
-- Refer to stocks only by the labels in the data ("Stock A" etc. stay as they are).
+- Refer to stocks only by the labels in the data ("Stock A" etc. stay as they are), and say once why names are hidden.
+- You MAY add short plain explanations of terms (a clause or one sentence) wherever a beginner would get lost; these
+  are the only other words of your own allowed.
+${PLAIN}
 ${NEVER}
 
 Format of "draft" (plain text, markdown-lite): "## " section headings, "- " bullet lines, **bold** sparingly, "> " for
@@ -45,7 +64,7 @@ one standout line of his. Put each image on its own line as [IMAGE <id>] where i
 banner, it goes on top automatically). No H1 title inside the draft.
 
 Publish kit:
-- title: max 70 characters, specific, with a real number and tension ("11 Iterations, 1 Honest Exam: ...").
+- title: max 70 characters, specific, with a real number and tension, understandable by a non-trader.
 - subtitle: max 140 characters, says what the reader gets.
 - tags: exactly 5 Medium tags, lower case, the ones readers of this topic follow (e.g. "algorithmic trading",
   "day trading", "machine learning", "stock market", "trading psychology"); never tickers or brand names.
@@ -82,7 +101,10 @@ const clip = (s: unknown, n: number) => String(s ?? '').replace(/\s+/g, ' ').tri
 
 export async function askQuestions(a: Article, o: ClaudeOptions = claudeOptions()): Promise<{ questions: string[]; costInr: number }> {
   const r = await jsonClaude(QUESTIONS_SYSTEM, questionsMessage(a), QUESTIONS_SCHEMA, { ...o, timeoutMs: 60_000 }, 1200);
-  const qs = (Array.isArray(r.json.questions) ? r.json.questions : []).map((q) => clip(q, 240)).filter(Boolean).slice(0, 5);
+  const all = (Array.isArray(r.json.questions) ? r.json.questions : []).map((q) => clip(q, 240)).filter(Boolean);
+  // he should never be asked for data tradereye already has (or does not have): drop questions that ask for a fact
+  const kept = all.filter((q) => !asksForFact(q));
+  const qs = (kept.length >= 3 ? kept : all).slice(0, 5);
   if (!qs.length) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no questions.');
   return { questions: qs, costInr: r.costInr };
 }

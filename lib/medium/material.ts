@@ -47,10 +47,25 @@ export function articleTrade(t: T, label: string, show: boolean): ArticleTrade {
   };
 }
 
+/** What a reader who has never traded needs to follow a trade article. Given to Claude as facts. */
+export const TRADES_GLOSSARY = [
+  'Plain-words glossary (explain these to the reader the first time they appear):',
+  'Intraday trade = bought and sold (or sold and bought back) the same day, never held overnight.',
+  'Long = a bet the price will rise. Short = a bet the price will fall (sell first, buy back later).',
+  'Stop (stop-loss) = the price where he gets out automatically to cap the loss, set before the trade.',
+  'R = how much a trade made or lost compared with what he risked on it (the loss if the stop is hit). +2R = made twice what he risked; −1R = lost what he risked.',
+  'Charges = brokerage, exchange fees and taxes on every trade.',
+  'Hit rate = the share of trades that made money.',
+  '"Stock A", "Stock B" = real stocks whose names are hidden because the trade is less than 3 months old (Indian market rules on sharing recent price data).',
+];
+
+const EXIT: Record<string, string> = { TARGET: 'hit his profit target', STOP: 'stopped out (hit his stop-loss)', MANUAL: 'closed by hand', EOD: 'closed at the end of the day', TIME: 'closed on time' };
+const exitPlain = (x: string) => EXIT[x] ?? (x === 'UNKNOWN' ? 'exit not recorded' : x.toLowerCase().replace(/_/g, ' '));
+
 /** One trade's line for Claude: the facts, and his own journal note when he wrote one. */
 export const tradeFact = (a: ArticleTrade) =>
   `${a.label}${a.side ? ` (${a.side === 'me' ? 'his trade' : 'the algo\'s trade'})` : ''}: ${a.dir} on ${a.date}, in ${a.entryTime}, out ${a.exitTime} (${a.holdMin} min), ` +
-  `result ${a.result} (${inr(a.net)} after charges), exit ${a.exitType}${a.comment ? `. His journal note: "${a.comment}"` : ''}`;
+  `result ${a.result} (${inr(a.net)} after charges), ${exitPlain(a.exitType)}${a.comment ? `. His journal note: "${a.comment}"` : ''}`;
 
 function summary(ts: T[]) {
   const wins = ts.filter((t) => t.net > 0).length;
@@ -109,7 +124,7 @@ export function tradesMaterial(format: 'weekly' | 'monthly', period: Material['p
   const { label, show, hidden } = labeller(trades, now);
   const items = trades.map((t) => articleTrade(t, label(t), show(t)));
   const s = summary(trades);
-  const facts = [summaryLine(format === 'weekly' ? `Week ${period.label}` : `${period.label}`, s)];
+  const facts = [...TRADES_GLOSSARY, summaryLine(format === 'weekly' ? `Week ${period.label}` : `${period.label}`, s)];
   if (prev && prev.length) facts.push(summaryLine('The period before', summary(prev)));
   const exits = new Map<string, number>(); trades.forEach((t) => exits.set(t.exitType, (exits.get(t.exitType) ?? 0) + 1));
   if (trades.length) facts.push(`Exits: ${[...exits].map(([k, v]) => `${v} ${k}`).join(', ')}.`);
@@ -132,9 +147,10 @@ export function vsMaterial(period: Material['period'], week: WeekScore, season: 
   const items = all.map((t) => articleTrade(t, label(t), show(t)));
   const won = { me: 'He won the week.', algo: 'The algo won the week.', tie: 'Dead even.', none: 'Neither side traded.' }[week.winner];
   const facts = [
+    ...TRADES_GLOSSARY,
     `Me vs Algo, week of ${period.label} (frozen score): him ${sgn(week.me.r)}R from ${week.me.n} trades, the algo ${sgn(week.algo.r)}R from ${week.algo.n} trades. ${won}`,
     `Season so far (weeks won, frozen): him ${season.me}, the algo ${season.algo}.`,
-    'The algo is his own model (Algo Live), trading real money on his account; it only takes short trades.',
+    'The algo is his own computer model (Algo Live): it picks and places trades by itself with real money on his account, and only takes short trades. Each week, whoever made more R wins the week.',
     ...items.map(tradeFact),
   ];
   const images = [banner(), {
@@ -147,15 +163,36 @@ export function vsMaterial(period: Material['period'], week: WeekScore, season: 
   return { format: 'vs-algo', period, facts, trades: items, images, hiddenTickers: hidden, oldPrices: all.length > 0 && all.every(show) };
 }
 
-/** A strategy's public name: a letter (its own id when that already is one), never its descriptive name. */
-export function strategyLetter(id: string, order: string[]): string {
-  if (/^[A-Z][0-9]?$/.test(id)) return id;
-  const i = order.indexOf(id);
-  return `Strategy ${String.fromCharCode(65 + ((i < 0 ? order.length : i) % 26))}`;
+/**
+ * A version's public name, in plain words: never a letter or code ("Strategy A" means nothing to a reader) and never
+ * its descriptive name (that spells out stops and targets). The one the iteration went forward with is "the version
+ * it kept"; the others are numbered comparison versions.
+ */
+export function versionName(id: string, best: string | undefined, ids: string[]): string {
+  if (ids.length === 1) return 'the model';
+  if (id === best) return 'the version it kept';
+  const others = ids.filter((x) => x !== best);
+  return `comparison version ${others.indexOf(id) + 1}`;
 }
 
 /** R a trade, 2 decimals ("+0.05R"): Algo Lab results are per trade, so one decimal would hide them. */
 const rt = (n: number) => `${sgn(n, 2)}R a trade`;
+/** "+0.05R a trade (each trade made 5% of what it risked, on average)" */
+const rtPlain = (n: number) => `${rt(n)} (on average each trade ${n >= 0 ? 'made' : 'lost'} ${Math.abs(Math.round(n * 100))}% of the amount it risked)`;
+
+/** What a reader who has never traded needs to follow an Algo Lab article. Given to Claude as facts. */
+export const ALGO_GLOSSARY = [
+  'Plain-words glossary (explain these to the reader the first time they appear):',
+  'Algo Lab = his own software that tests a trading idea on years of past price data, as if it had traded back then (no real money).',
+  'Iteration = one round of: change something, re-test it on the past, look at the result, decide what to change next.',
+  'R = how much a trade made or lost compared with what it risked. +1R = made as much as it risked; −1R = lost all of it. +0.05R a trade = each trade made 5% of what it risked, on average. Each test trade risks ₹300.',
+  'Charges = brokerage, exchange fees and taxes paid on every trade; small per trade, but they add up.',
+  'Exam months = the most recent months, locked away and never used to build or tune the model, used once at the end to check it still works on data it has never seen. Failing the exam = it lost money there.',
+  'Decide months = the months the next steps are chosen from (the exam months are kept out of it).',
+  't (confidence score) = how unlikely the result is to be luck; above about 2 = probably not luck, near 0 = could easily be luck.',
+  'Signal = how well the model\'s predictions lined up with what really happened next; 0 = it knows nothing.',
+  'Short trade = a bet that the price will fall.',
+];
 
 /**
  * Building tradereye: Algo Lab iterations, process and results only. `entries` are iterations with results files (the
@@ -165,12 +202,11 @@ const rt = (n: number) => `${sgn(n, 2)}R a trade`;
  */
 export function buildingMaterial(period: Material['period'], entries: LedgerEntry[], notes: EarlyNote[] = [], earlier: { iteration: number; line: string; bar?: { label: string; value: number; note?: string } }[] = []): Material {
   const its = [...entries].sort((a, b) => a.iteration - b.iteration);
-  const order = [...new Set(its.flatMap((e) => e.lines.map((l) => l.id)))];
   const from = Number(period.from), to = Number(period.to);
   const facts = [
-    'Algo Lab: a machine-learning model for NSE intraday trades that he builds iteration by iteration, on top of his own trade journal app (tradereye). ' +
-    'Each iteration trains on earlier months, decides on later ones ("decide months"), and only confirms on "exam" months it never trained on. ' +
-    'R = profit in units of the risk taken; results are per trade, after charges unless said.',
+    'Algo Lab: a machine-learning model that tries to pick good intraday trades (in and out the same day) on Indian stocks, which he builds iteration by iteration, ' +
+    'inside his own trading app (tradereye). All results below are from testing on past data, per trade, after charges unless said.',
+    ...ALGO_GLOSSARY,
     from === to
       ? `Series: one article per iteration. This is part ${from} of the series (iteration ${from}).${from > 1 ? ` Earlier parts covered iterations 1–${from - 1}.` : ' It is the first part.'}`
       : `This article covers iterations ${from}–${to}.`,
@@ -184,10 +220,14 @@ export function buildingMaterial(period: Material['period'], entries: LedgerEntr
   }));
   for (const e of its) {
     const best = e.lines.find((l) => l.id === e.best) ?? [...e.lines].sort((a, b) => b.netR - a.netR)[0];
-    const lines = e.lines.map((l) => `${strategyLetter(l.id, order)} ${l.n} trades, ${rt(l.netR)} overall, t ${l.t.toFixed(1)}, ${l.monthsGreen}/${l.monthsTraded} months green` +
-      `${l.dev !== null ? `, decide months ${rt(l.dev)}` : ''}${l.exam !== null ? `, exam months ${rt(l.exam)}${l.exam < 0 ? ' (FAILED the exam)' : ''}` : ''}`);
+    const ids = e.lines.map((l) => l.id);
+    const lines = [...e.lines].sort((a, b) => (a.id === best?.id ? -1 : b.id === best?.id ? 1 : 0)).map((l) => {
+      const name = versionName(l.id, best?.id, ids);
+      return `${name[0].toUpperCase()}${name.slice(1)}: ${l.n} test trades, ${rtPlain(l.netR)}; made money in ${l.monthsGreen} of the ${l.monthsTraded} months it traded; confidence score t ${l.t.toFixed(1)}` +
+        `${l.dev !== null ? `; decide months ${rt(l.dev)}` : ''}${l.exam !== null ? `; exam months ${rt(l.exam)}${l.exam < 0 ? ' (FAILED the exam: lost money on months it had never seen)' : ' (passed the exam)'}` : ''}`;
+    });
     rows.push({
-      iteration: e.iteration, fact: `Iteration ${e.iteration} (${dayLabel(new Date(e.createdAt).toISOString().slice(0, 10))}): ${lines.join('; ')}.`,
+      iteration: e.iteration, fact: `Iteration ${e.iteration} (${dayLabel(new Date(e.createdAt).toISOString().slice(0, 10))}). ${lines.join('. ')}.`,
       bar: best ? { label: `#${e.iteration}`, value: Math.round((best.exam ?? best.netR) * 100) / 100, note: best.exam !== null ? 'exam' : 'overall' } : undefined,
       changes: e.changes,
     });
@@ -198,7 +238,7 @@ export function buildingMaterial(period: Material['period'], entries: LedgerEntr
   const bars = [...earlier.map((e) => e.bar).filter((b): b is NonNullable<typeof b> => !!b), ...rows.map((r) => r.bar).filter((b): b is NonNullable<typeof b> => !!b)];
   const images = [banner(), {
     id: 'iterations', title: from === to ? `Iteration ${from} against the ones before` : 'Every iteration\'s result',
-    caption: 'R a trade of each iteration\'s best strategy, on exam months it never trained on where it had them (otherwise overall). Red = lost.',
+    caption: 'Average result per trade of the version each iteration kept, in R (+0.05R = each trade made 5% of what it risked). Exam months where it had them. Red = lost money.',
     data: { kind: 'iterations', bars },
   } as ImageSpec];
   return { format: 'building', period, facts, trades: [], images, hiddenTickers: [], changes, oldPrices: false };
@@ -211,7 +251,7 @@ export function recapOf(e: LedgerEntry | EarlyNote): { iteration: number; line: 
   const v = best ? Math.round((best.exam ?? best.netR) * 100) / 100 : 0;
   return {
     iteration: e.iteration,
-    line: best ? `best strategy ${best.n} trades, ${rt(best.netR)} overall${best.exam !== null ? `, exam ${rt(best.exam)}${best.exam < 0 ? ' (failed)' : ''}` : ''}.` : 'no results.',
+    line: best ? `the version it kept: ${best.n} test trades, ${rtPlain(best.netR)}${best.exam !== null ? `; exam months ${rt(best.exam)}${best.exam < 0 ? ' (failed the exam)' : ' (passed the exam)'}` : ''}.` : 'no results.',
     bar: { label: `#${e.iteration}`, value: v, note: best?.exam !== null ? 'exam' : 'overall' },
   };
 }
