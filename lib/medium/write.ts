@@ -1,0 +1,103 @@
+import { jsonClaude, type ClaudeOptions } from '../copilot/claude';
+import { claudeOptions } from '../shorts/write';
+import { cleanDraft, cleanTags, FORMATS, withDisclaimer, type Article, type Kit } from './article';
+import { factsFor } from './material';
+
+/**
+ * The Medium page's two Claude calls, each only when he presses its button:
+ *  1. Questions: 4-5 pointed questions about the period's real data, so the article is built from HIS experience.
+ *  2. Draft: arranges HIS answers into the article (his sentences kept; only order, trims, short headings and
+ *     one-line links added), plus the publish kit (title, subtitle, 5 tags, image captions).
+ * Claude gets only factsFor(article) and his answers. The disclaimer is added by code; tickers of recent trades were
+ * never given to Claude (they are "Stock A" ...), and the page blocks copying if one appears anyway.
+ */
+
+const AUDIENCE = `"Candles Before Cubicles": a software developer in India who day-trades NSE stocks with his own money before
+work, and builds his own trading app (tradereye) and a trading model. Medium readers: traders and developers who want
+real, honest numbers and lessons, not hype.`;
+
+const NEVER = `Never:
+- invent experiences, feelings, events, numbers or quotes. Every number must be in the data or his answers.
+- give investment advice: no buy / sell / hold calls, no "you should", no price targets, no predictions, no promises.
+- reveal how his edge works: no model inputs or features, no thresholds, no entry / stop / target rules, even if hinted.
+- write a disclaimer (it is added automatically).`;
+
+export const QUESTIONS_SYSTEM = `You help ${AUDIENCE}
+He is about to write a Medium article from his own experience. Ask him 4 or 5 pointed questions that pull out the
+story only he can tell: a decision and why, what he felt or doubted at a specific moment, what he got wrong, what he
+would change. Each question must point at ONE specific fact in the data (a trade, a number, an iteration) and be
+answerable in a few spoken sentences. Max 30 words each. No yes/no questions, no generic "what did you learn".
+${NEVER}`;
+
+export const DRAFT_SYSTEM = `You arrange ${AUDIENCE}
+Medium's Partner Program does not allow AI-written articles behind the paywall, and this account is his income. So the
+article MUST be his words:
+- Build the body from his answers, keeping his own sentences. You may: reorder them, cut repetition and filler
+  ("um", "like", "so yeah"), fix grammar and typos, split long sentences, and add short section headings (max 6 words).
+- You may add at most one short linking sentence per section, and an opening line only if his answers have none.
+  Nothing else of your own. If his answers are thin, the article is short: do not pad it.
+- Numbers only from the data or his answers, written exactly as given (rounding to 1 decimal is fine).
+- Refer to stocks only by the labels in the data ("Stock A" etc. stay as they are).
+${NEVER}
+
+Format of "draft" (plain text, markdown-lite): "## " section headings, "- " bullet lines, **bold** sparingly, "> " for
+one standout line of his. Put each image on its own line as [IMAGE <id>] where it belongs (ids listed below; not the
+banner, it goes on top automatically). No H1 title inside the draft.
+
+Publish kit:
+- title: max 70 characters, specific, with a real number and tension ("11 Iterations, 1 Honest Exam: ...").
+- subtitle: max 140 characters, says what the reader gets.
+- tags: exactly 5 Medium tags, lower case, the ones readers of this topic follow (e.g. "algorithmic trading",
+  "day trading", "machine learning", "stock market", "trading psychology"); never tickers or brand names.
+- captions: one factual caption per image id (max 120 characters), from the data only.`;
+
+export const QUESTIONS_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['questions'],
+  properties: { questions: { type: 'array', items: { type: 'string' } } },
+} as const;
+
+export const DRAFT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['draft', 'title', 'subtitle', 'tags', 'captions'],
+  properties: {
+    draft: { type: 'string' }, title: { type: 'string' }, subtitle: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    captions: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'caption'], properties: { id: { type: 'string' }, caption: { type: 'string' } } } },
+  },
+} as const;
+
+const data = (a: Article) => {
+  const f = FORMATS.find((x) => x.id === a.format)!;
+  return [`ARTICLE TYPE: ${f.name} (${f.what}). Period: ${a.material.period.label}.`, 'DATA (real, from his journal / app):', ...factsFor(a.material, a.shared).map((l) => `- ${l}`)].join('\n');
+};
+
+export const questionsMessage = (a: Article) => data(a);
+
+export function draftMessage(a: Article): string {
+  const qa = a.questions.map((q, i) => `Q${i + 1}: ${q}\nHIS ANSWER: ${(a.answers[i] ?? '').trim() || '(no answer)'}`).join('\n\n');
+  const imgs = a.material.images.filter((i) => i.data.kind !== 'banner').map((i) => `- ${i.id}: ${i.title}`).join('\n');
+  return `${data(a)}\n\nIMAGES (place each with [IMAGE <id>]):\n${imgs || '- none'}\n\nHIS ANSWERS (the article is made of these):\n${qa}`;
+}
+
+const clip = (s: unknown, n: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+export async function askQuestions(a: Article, o: ClaudeOptions = claudeOptions()): Promise<{ questions: string[]; costInr: number }> {
+  const r = await jsonClaude(QUESTIONS_SYSTEM, questionsMessage(a), QUESTIONS_SCHEMA, { ...o, timeoutMs: 60_000 }, 1200);
+  const qs = (Array.isArray(r.json.questions) ? r.json.questions : []).map((q) => clip(q, 240)).filter(Boolean).slice(0, 5);
+  if (!qs.length) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no questions.');
+  return { questions: qs, costInr: r.costInr };
+}
+
+export async function writeDraft(a: Article, o: ClaudeOptions = claudeOptions()): Promise<{ draft: string; kit: Kit; costInr: number }> {
+  const r = await jsonClaude(DRAFT_SYSTEM, draftMessage(a), DRAFT_SCHEMA, { ...o, timeoutMs: 120_000 }, 6000);
+  const j = r.json as { draft?: string; title?: string; subtitle?: string; tags?: unknown; captions?: { id?: string; caption?: string }[] };
+  if (!j.draft) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no draft.');
+  const ids = new Set(a.material.images.map((i) => i.id));
+  const captions: Record<string, string> = {};
+  for (const i of a.material.images) if (i.caption) captions[i.id] = i.caption;
+  for (const c of Array.isArray(j.captions) ? j.captions : []) if (c?.id && ids.has(c.id) && c.caption) captions[c.id] = clip(c.caption, 160);
+  return {
+    draft: withDisclaimer(cleanDraft(j.draft, a.material.images), a.material.oldPrices),
+    kit: { title: clip(j.title, 100), subtitle: clip(j.subtitle, 160), tags: cleanTags(j.tags), captions },
+    costInr: r.costInr,
+  };
+}

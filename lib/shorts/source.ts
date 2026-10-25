@@ -51,13 +51,13 @@ export async function findTrade(id: string, date: string): Promise<ShortTrade | 
 }
 
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
-function weekdays(from: string, to: string): string[] {
+export function weekdays(from: string, to: string): string[] {
   const out: string[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) { const wd = new Date(`${d}T00:00:00Z`).getUTCDay(); if (wd !== 0 && wd !== 6) out.push(d); }
   return out;
 }
 
-async function algoOrders(days: string[]): Promise<AlgoOrder[]> {
+export async function algoOrders(days: string[]): Promise<AlgoOrder[]> {
   const states = await Promise.all(days.map((d) => loadState(liveStore, d).catch(() => undefined)));
   return days.flatMap((d, i) => (states[i]?.orders ?? []).map((o) => ({ date: d, symbol: o.symbol, sentAt: o.sentAt, risk: o.risk, stop: o.stop, status: o.status, avgPrice: o.avgPrice })));
 }

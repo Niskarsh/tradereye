@@ -1,6 +1,49 @@
+# Medium
+
+## The Medium page (Socials -> Medium, `/socials/medium`, signed in only)
+Medium's API is closed to new integrations and no browser automation is used: tradereye prepares an article from real
+data and he pastes it into Medium and publishes by hand (Medium's own "Schedule for later" for timing).
+
+1. **Format and period** (no Claude): Weekly trade log (a week's journal trades), Me vs Algo (a finished season week:
+   its score comes only from the frozen ledger `shorts/season.json`, and choosing a week freezes it, exactly as a short
+   does), Building tradereye (a range of kept Algo Lab iterations), Monthly review (a month's trades against the month
+   before). `lib/medium/source.ts` loads, `lib/medium/material.ts` decides what goes in.
+2. **Questions** (one Claude call, on the button): 4-5 pointed questions about that data. He answers by typing or
+   dictating (Chrome speech recognition, `components/medium/Dictate.tsx`).
+3. **Draft** (one Claude call, on the button, needs 3 answers of 15+ words): Claude only reorders, trims and adds short
+   headings to HIS answers, plus the publish kit (title, subtitle, 5 tags, image captions). Editable inline.
+4. **Images**, drawn in the browser from the article's data (`components/medium/render.ts`), each with its own PNG
+   download: feature image (title over the article's own chart / bars, faint), trade charts (5-minute candles from the
+   saved 1-minute ones, his entries / adds / exits via `tradeMarks`, his real stop only), equity curve, Me vs Algo
+   scoreboard, Algo Lab exam bars. The draft marks where each goes with `[IMAGE <id>]`.
+5. **Publish kit**: copy buttons for each field and for the whole article as rich text (headings, bold, lists survive
+   Medium's paste). Suggested publication from settings.
+6. **Published**: he pastes the story's link back; the list shows Draft / Published.
+
+### The guards (pure, `lib/medium/article.ts`, tested in `tests/mediumPage.test.ts`)
+- **His words**: the page shows how much of the draft is his answers (3-word runs); under 80% it warns. Medium does
+  not allow AI-written stories behind the paywall, and his Partner Program account is the asset.
+- **Invented numbers**: numbers in the draft that are in neither the data nor his answers are flagged.
+- **His edge**: Claude never gets journal context columns (setup, RVOL, ...), Algo Lab feature importance / "liked"
+  features / thresholds / setup parameters, or strategy names (they become letters). Algo Lab "what changed" lines are
+  unticked by default; only ticked ones reach Claude. **Secret terms** (settings) found in the draft, title, subtitle or
+  captions block copying.
+- **SEBI**: tickers of trades under 92 days old are "Stock A", "Stock B" everywhere (Claude never sees them); one in the
+  text blocks copying. Tip / call / prediction phrases are flagged. The risk disclaimer is added by code at the end of
+  every saved draft (plus "prices are 3+ months old" when every trade shown is). Lampshade of ILLUMINATION (an
+  AI-only publication) can never be chosen.
+
+### Storage (no Terraform change: the app key already reads / writes the whole bucket)
+The bucket is publicly readable, so everything private is **encrypted** (AES-256-GCM, key from `AUTH_SECRET`, like the
+YouTube / Instagram tokens; changing `AUTH_SECRET` makes them unreadable): `medium/articles/index.enc`,
+`medium/articles/<id>/article.enc`, `medium/settings.enc` (publications, secret terms). Images are not stored. The app
+key cannot delete objects, so Remove hides an article. APIs (all signed in): `GET/POST /api/medium/articles`,
+`GET/PUT /api/medium/article?id=`, `POST /api/medium/questions`, `POST /api/medium/draft`, `GET/PUT /api/medium/settings`,
+`GET /api/medium/periods`.
+
 # Medium trend radar (collector)
 
-The first piece of the Medium page (Socials -> Medium, coming next): a collector that watches what is being published in
+A collector that watches what is being published in
 Medium's trading tags, so articles can be angled at what is heating up. Nothing here calls Claude.
 
 ## How it collects (runs entirely in AWS)

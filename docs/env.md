@@ -36,7 +36,7 @@ Secret = must never be committed, logged or shared. "Read by" lists the code tha
 ### Vercel (tradereye app)
 | Variable | Secret | Read by | What it is / how to rotate |
 |---|---|---|---|
-| `AUTH_SECRET` | yes | `lib/auth/session.ts`, `lib/auth/ownerSync.ts`, `lib/social/store.ts`, google login | signs sessions **and encrypts the saved YouTube/Instagram tokens** (S3 `social/*.enc`): changing it signs you out and means connecting YouTube and Instagram again |
+| `AUTH_SECRET` | yes | `lib/auth/session.ts`, `lib/auth/ownerSync.ts`, `lib/social/store.ts`, `lib/medium/articles.ts`, google login | signs sessions, **encrypts the saved YouTube/Instagram tokens** (S3 `social/*.enc`) **and the Medium articles and settings** (S3 `medium/**/*.enc`): changing it signs you out, means connecting YouTube and Instagram again, and makes saved Medium drafts and secret terms unreadable (publish or copy them out first) |
 | `OWNER_EMAIL`, `OWNER_GOOGLE_ID` | no | `lib/auth/session.ts`, google login/callback | the only Google account allowed in |
 | `APP_URL` | no | `lib/auth/google.ts`, `lib/social/oauth.ts` | optional fixed site address for OAuth redirects |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secret: yes | `lib/auth/google.ts`, `lib/social/youtube.ts`, auth + youtube routes | Google OAuth client (sign-in and YouTube); rotate in Google Cloud console |
@@ -47,8 +47,8 @@ Secret = must never be committed, logged or shared. "Read by" lists the code tha
 | `CRON_SECRET` | yes | `app/api/social/tick` (checks it) | **also in Terraform `cron_secret`** (the Lambda sends it). Rotate: `openssl rand -hex 32` → Vercel + `terraform.tfvars` → redeploy + `terraform apply` |
 | `IG_APP_ID`, `IG_APP_SECRET` | secret: yes | `lib/social/instagram.ts`, instagram routes | Meta app "Tradereye Publisher" |
 | `YOUTUBE_CHANNEL_HANDLE`, `IG_USERNAME` | no | `lib/social/youtube.ts`, `lib/social/instagram.ts` | optional: the only channel / account posted to |
-| `ANTHROPIC_API_KEY` | yes | `lib/copilot/claude.ts`, `lib/shorts/write.ts`, copilot / book / study / journal routes | Claude API key (platform.claude.com) |
-| `COPILOT_MODEL`, `COPILOT_THINKING`, `COPILOT_DAILY_LIMIT`, `COPILOT_CHAT_LIMIT`, `COPILOT_RISK_INR`, `COPILOT_NIFTY_DIR_PCT`, `COPILOT_EMA_REACH_ATR`, `COPILOT_POC_ROWS`, `COPILOT_USD_INR` | no | `lib/copilot/settings.ts` (+ `lib/shorts/write.ts`) | co-pilot settings, all optional |
+| `ANTHROPIC_API_KEY` | yes | `lib/copilot/claude.ts`, `lib/shorts/write.ts`, `lib/medium/write.ts`, copilot / book / study / journal / medium routes | Claude API key (platform.claude.com) |
+| `COPILOT_MODEL`, `COPILOT_THINKING`, `COPILOT_DAILY_LIMIT`, `COPILOT_CHAT_LIMIT`, `COPILOT_RISK_INR`, `COPILOT_NIFTY_DIR_PCT`, `COPILOT_EMA_REACH_ATR`, `COPILOT_POC_ROWS`, `COPILOT_USD_INR` | no | `lib/copilot/settings.ts` (+ `lib/shorts/write.ts`, `lib/medium/write.ts`) | co-pilot settings, all optional |
 | `GEMINI_API_KEY` | yes | `lib/book/ocr.ts` | order-book OCR; `GEMINI_MODEL` optional |
 | `ALLOWED_DHAN_CLIENT_ID` | no | `lib/live/guard.ts`, totp + journal review routes | only Dhan tokens of this client id are accepted |
 | `DHAN_CLIENT_ID`, `DHAN_MPIN` | MPIN: yes | `app/api/auth/totp` | make a Dhan token from a TOTP. `DHAN_CLIENT_ID` is also a GitHub secret |
