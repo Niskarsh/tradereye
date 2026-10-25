@@ -19,8 +19,8 @@ The file formats are shared with `lib/medium/collect.ts` (tradereye's reading si
 
 ## Checking it
 `GET /api/medium/status` (signed in; open it in the browser): whether it is collecting, the last run per feed, stories
-stored, and the tag trends so far. A wrong tag slug shows up as an error or 0 stories: fix it in `FEEDS` and paste the
-file into the Lambda again. The Lambda's own logs: Lambda -> Monitor -> View CloudWatch logs.
+stored, and the tag trends so far. A wrong tag slug shows up as an error or 0 stories: fix it in `FEEDS` and run `terraform apply`
+(infra/terraform). The Lambda's own logs: Lambda -> Monitor -> View CloudWatch logs.
 
 ## Trends (`trends()` in `lib/medium/collect.ts`)
 Counts the tags on every stored story, last 7 days against the average week of the 3 weeks before (only weeks the
