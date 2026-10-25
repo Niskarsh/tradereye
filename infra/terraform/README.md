@@ -20,7 +20,7 @@ Never managed here: the Instagram timer's one-time wake-ups (`tr-ig-...`): trade
 ## Taking over the existing pieces (once)
 0. `./discover.sh inventory` lists everything in the account (all regions), to catch pieces nobody remembered.
 1. `./discover.sh users` lists IAM users and their keys, to tell which one Vercel and GitHub Actions use.
-2. `./discover.sh imports --users <vercel-user>,<github-user> --timer-role <role> [--ec2 <instance-id>]` writes
+2. `./discover.sh imports --users <vercel-user>,<github-user> --timer-role <role> [--ec2 <instance-id> [--ec2-region <r>]]` writes
    `imports.tf` (read-only; changes nothing).
 3. `terraform plan -generate-config-out=generated.tf` writes every imported piece's current settings as Terraform
    (still changes nothing). Errors about the Lambda's code are expected at this step.
