@@ -1,49 +1,42 @@
 # tradereye on AWS, with Terraform
 
-The permanent AWS pieces are written here, so they are created by one command instead of console clicks.
+Every permanent AWS piece is written here: changes are made by editing these files and running `terraform apply`,
+not in the console.
 
-Managed here:
-- the Medium collector (`medium-collector.tf`): Lambda `tradereye-medium-collector` (code: `../medium-collector/index.mjs`),
-  its role (logs + read/write `medium/*`), its log group (30 days), the EventBridge Scheduler schedule (every 3 hours,
-  Asia/Kolkata) and its role, and read access to `medium/*` for the IAM user whose key is in Vercel (a separate policy;
-  existing policies are not touched).
+| File | What |
+|---|---|
+| `s3.tf` | the tradereye bucket and its settings (public read, CORS, encryption, ownership) |
+| `app-user.tf` | the IAM user whose key tradereye uses (Vercel + GitHub Actions), its S3 policy and posting-timer policy |
+| `social-timer.tf` | the Instagram timer: Lambda (code `../social-timer/index.mjs`), its role, logs, and the role Scheduler uses |
+| `medium-collector.tf` | the Medium trend radar collector: Lambda (code `../medium-collector/index.mjs`), roles, logs, schedule |
+| `trade-assistant.tf` | the Trade Assistant EC2 machine, its security group and Elastic IP (the Dhan-whitelisted IP) |
 
-Being brought in (hand-made earlier, taken over with `discover.sh` + `terraform import`, settings copied exactly):
-- the S3 bucket and its settings (CORS, public access block, encryption, ...)
-- the IAM users whose keys are in Vercel and in GitHub Actions, with their policies (their access keys are never
-  managed: Terraform never sees or stores a secret)
-- the Instagram timer: Lambda `tradereye-social-timer`, its role and log group, and the role Scheduler uses to run it
-- (if included) the Trade Assistant EC2 machine, its security group and Elastic IP
+Never managed here: access keys (Terraform never holds a secret key), the Instagram timer's one-time wake-ups
+(`tr-ig-...`, tradereye creates and deletes them), and the state bucket itself.
 
-Never managed here: the Instagram timer's one-time wake-ups (`tr-ig-...`): tradereye creates and deletes those itself.
+Safety rails: `prevent_destroy` on the bucket, the app user, the EC2 machine, its security group, Elastic IP and its
+attachment (any plan that would delete or replace them is refused). The EC2 machine is only recorded, never changed.
 
-## Taking over the existing pieces (once)
-0. `./discover.sh inventory` lists everything in the account (all regions), to catch pieces nobody remembered.
-1. `./discover.sh users` lists IAM users and their keys, to tell which one Vercel and GitHub Actions use.
-2. `./discover.sh imports --users <vercel-user>,<github-user> --timer-role <role> [--ec2 <instance-id> [--ec2-region <r>]]` writes
-   `imports.tf` (read-only; changes nothing).
-3. `terraform plan -generate-config-out=generated.tf` writes every imported piece's current settings as Terraform
-   (still changes nothing). Errors about the Lambda's code are expected at this step.
-4. Claude turns `generated.tf` into clean, committed files (no account ids or bucket name in the public repo).
-5. `terraform plan` must then show **0 to change, 0 to destroy** for the imported pieces: that proves the files match
-   AWS exactly. Only then `terraform apply` (it records them in state, and creates the Medium collector).
+## State
+Kept in a separate **private** bucket, `tradereye-tfstate-<account id>` (versioned, public access blocked), key
+`terraform/tradereye.tfstate`, locked by S3 itself. Not in the tradereye bucket: that one is publicly readable and the
+state holds secrets. Created once by hand (see the setup steps).
 
-## One-time setup
-1. Install Terraform 1.10 or newer and the AWS CLI.
-2. In IAM, create a user for Terraform (`tradereye-terraform`) with the `AdministratorAccess` policy and an access key
-   for the CLI. (Simplest for one person; it can be narrowed later to IAM, Lambda, Scheduler, Logs and the bucket.)
-   Keep this key only on your computer: never in Vercel, GitHub or the repo.
-3. `aws configure --profile tradereye-tf` and paste that key.
-4. In this folder: copy `backend.hcl.example` to `backend.hcl`, `terraform.tfvars.example` to `terraform.tfvars`, fill both.
-5. `terraform init -backend-config=backend.hcl`
-
-State is kept in the tradereye bucket at `terraform/tradereye.tfstate` (encrypted, locked by S3 itself).
+## Local files (never committed)
+`backend.hcl`, `terraform.tfvars` (bucket, user, `cron_secret`), `imports.tf` (written by `discover.sh`, needed for the
+first apply only), `generated.tf` (scratch from the takeover).
 
 ## Every change
-- `terraform plan` shows what would change; `terraform apply` does it (it asks for `yes` first).
-- Changing `../medium-collector/index.mjs` and running `terraform apply` updates the Lambda's code.
-- Test the collector: `aws lambda invoke --function-name tradereye-medium-collector --profile tradereye-tf out.json && cat out.json`
+- `terraform plan` shows what would change; `terraform apply` does it (asks for `yes` first).
+- Lambda code: edit `../social-timer/index.mjs` or `../medium-collector/index.mjs`, then `terraform apply`.
 
-## Cost
-Terraform itself is free; the state file is a few KB in S3. The resources cost what they would if made by hand
-(inside the free tiers for the collector).
+## How the hand-made pieces were taken over
+`discover.sh inventory` (everything in the account), `discover.sh users`, `discover.sh imports ...` (writes
+`imports.tf`), `terraform plan -generate-config-out=generated.tf` (their exact settings), then turned into these files.
+The resource names match `imports.tf`, so the first `terraform apply` imports them.
+
+## Follow-ups (not done yet, on purpose: first take over exactly as it is)
+- The bucket is publicly readable as a whole; only the journal screenshots need it. Narrow it to their folders.
+- The Trade Assistant's security group allows SSH (22) and port 3000 from anywhere. With Cloudflare proxying, 3000 can
+  be limited to Cloudflare's IP ranges, and SSH to your own IP.
+- CRON_SECRET was shared in a chat during the takeover: change it (new value in `terraform.tfvars` and in Vercel, apply).

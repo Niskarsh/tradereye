@@ -15,7 +15,7 @@ variable "bucket" {
 }
 
 variable "vercel_iam_user" {
-  description = "Name of the IAM user whose access key is in Vercel (AWS_ACCESS_KEY_ID); it gets read access to medium/*"
+  description = "Name of the IAM user whose access key tradereye uses (Vercel AWS_ACCESS_KEY_ID, and GitHub Actions)"
   type        = string
 }
 
@@ -29,4 +29,10 @@ variable "ec2_region" {
   description = "Region of the Trade Assistant EC2 machine, when it is not the bucket's region"
   type        = string
   default     = null
+}
+
+variable "cron_secret" {
+  description = "CRON_SECRET: the same value as in Vercel; the Instagram timer Lambda sends it to /api/social/tick"
+  type        = string
+  sensitive   = true
 }

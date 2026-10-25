@@ -1,6 +1,8 @@
 # The Medium trend radar's collector: EventBridge Scheduler -> Lambda -> S3 (medium/*). See docs/medium.md.
 # The Lambda's code is ../medium-collector/index.mjs: change that file and run terraform apply to update it.
 
+# tradereye reads medium/* with the app user's existing access to the whole bucket (app-user.tf): nothing extra needed.
+
 locals {
   collector_name = "tradereye-medium-collector"
   medium_objects = "arn:aws:s3:::${var.bucket}/medium/*"
@@ -119,18 +121,4 @@ resource "aws_scheduler_schedule" "medium_collector" {
       maximum_retry_attempts       = 2
     }
   }
-}
-
-# --- tradereye (Vercel's key) may read what the collector saves; a separate policy, existing ones are not touched ---
-data "aws_iam_policy_document" "vercel_read_medium" {
-  statement {
-    actions   = ["s3:GetObject"]
-    resources = [local.medium_objects]
-  }
-}
-
-resource "aws_iam_user_policy" "vercel_read_medium" {
-  name   = "tradereye-read-medium"
-  user   = var.vercel_iam_user
-  policy = data.aws_iam_policy_document.vercel_read_medium.json
 }

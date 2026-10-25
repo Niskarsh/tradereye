@@ -32,5 +32,5 @@ Created and updated by Terraform: `infra/terraform/medium-collector.tf` (setup a
 - Lambda `tradereye-medium-collector`: Node.js 22.x, code = `infra/medium-collector/index.mjs` (no packages; the AWS SDK
   is built in), timeout 1 min, env `BUCKET`. Its role: `s3:GetObject` / `s3:PutObject` on `<bucket>/medium/*`, plus logs.
 - EventBridge Scheduler schedule `tradereye-medium-collector`: rate(3 hours), Asia/Kolkata, target that Lambda, payload `{}`.
-- The IAM user whose key is in Vercel gets a separate policy `tradereye-read-medium` (`s3:GetObject` on `medium/*`).
+- tradereye reads `medium/*` with its existing bucket access (`infra/terraform/app-user.tf`).
 - Cost: 8 runs a day, inside the free tiers of Scheduler and Lambda.
