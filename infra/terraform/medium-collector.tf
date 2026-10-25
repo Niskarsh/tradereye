@@ -40,6 +40,12 @@ data "aws_iam_policy_document" "medium_collector_s3" {
     actions   = ["s3:GetObject", "s3:PutObject"]
     resources = [local.medium_objects]
   }
+  # Without list rights S3 answers "access denied" instead of "not found" for a file that does not exist yet (the
+  # first run), which would stop the collector. Only key names are listable, never other files' contents.
+  statement {
+    actions   = ["s3:ListBucket"]
+    resources = [local.bucket_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "medium_collector_s3" {
