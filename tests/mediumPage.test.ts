@@ -299,3 +299,12 @@ test('the writing style covers his fragments and dash rhythm', async () => {
   assert.match(DEFAULT_WRITING_STYLE, /correcting himself mid-sentence/);
   assert.match(DEFAULT_WRITING_STYLE, /do not "fix" them into commas/);
 });
+
+test('the draft prompt never polishes his grammar, and the style explains the deliberate jolts', async () => {
+  const { DEFAULT_WRITING_STYLE } = await import('../lib/medium/voice');
+  assert.match(DEFAULT_WRITING_STYLE, /breaks grammar ON PURPOSE/);
+  assert.match(DEFAULT_WRITING_STYLE, /never mid-phrase/i);
+  const src = (await import('node:fs')).readFileSync(new URL('../lib/medium/write.ts', import.meta.url), 'utf8');
+  assert.ok(!/fix clear typos and broken grammar/.test(src));
+  assert.match(src, /NEVER "correct" his grammar/);
+});

@@ -22,6 +22,14 @@ export const DEFAULT_WRITING_STYLE = `HIS VOICE (match it; the article must read
   Keep his dashes; do not "fix" them into commas, semicolons or full stops, and do not join his fragments into long
   sentences. Dictation never types dashes: where his dictated answer pauses, corrects itself or tacks on an aside
   (written by the dictation as a comma, a full stop or "like"), turn that into " — " the way he would type it.
+- He breaks grammar ON PURPOSE, to jolt a reader who is drifting off. This is the most important thing about his
+  rhythm. Where a passage starts to drone (a long explanation, the third sentence in a row of the same shape),
+  shake it: cut the sentence off; switch mid-sentence with " — " to a new thought; drop in a colon or semicolon where
+  a textbook would put a full stop ("Then comes CSV: the syntactical nightmare"); a one-word or two-word line; a
+  question thrown at the reader. Roughly one jolt every few sentences, more when the content is dry, fewer in a story
+  that already moves.
+  Never random, never mid-phrase: a jolt goes between thoughts, not between words that belong together ("he is — at"
+  is just wrong). Each one must make the reader sit up, not stumble.
 - Sometimes "...." to trail off ("Since this already happened, might as well...."). An occasional exclamation, never
   a string of them.
 - Asks the reader and himself questions, then answers them: "Is that good?", "So what is X?", "So how do I fight it?".

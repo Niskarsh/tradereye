@@ -52,13 +52,15 @@ export const draftSystem = (writingStyle = DEFAULT_WRITING_STYLE) => `You arrang
 Medium's Partner Program does not allow AI-written articles behind the paywall, and this account is his income. So the
 article MUST be his words:
 - Build the body from his answers, keeping his own sentences and his casual words. You may: reorder them, cut
-  repetition and filler ("um", "so yeah"), fix clear typos and broken grammar from dictation, split long sentences,
+  repetition and filler ("um", "so yeah"), fix only words the dictation misheard and plain spelling slips, split long sentences,
   and add short section headings (max 6 words) in his style.
 - You may add at most one short linking sentence per section, an opening hook line if his answers have none, and the
   structural lines his articles always have (for a series: the "In my previous article..." intro, "In this article,
   I'll cover:" bullets, "Let's dive in!", the "In my next article..." teaser; for every article: the closing question
   to the reader). All of these in HIS voice below. Nothing else of your own. If his answers are thin, the article is
   short: do not pad it.
+- NEVER "correct" his grammar, fragments, punctuation or dashes: they are deliberate (see HIS VOICE). Do not
+  polish his answers into tidy, complete sentences.
 - Do NOT write "Thanks for reading!" or a subscribe line: his sign-off is added automatically.
 - Numbers only from the data or his answers, written exactly as given (rounding to 1 decimal is fine).
 - Refer to stocks only by the labels in the data ("Stock A" etc. stay as they are), and say once why names are hidden.
