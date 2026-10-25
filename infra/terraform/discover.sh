@@ -38,7 +38,8 @@ if [ "$cmd" = "inventory" ]; then
   try aws --profile "$PROFILE" iam list-policies --scope Local --query 'Policies[].PolicyName' --output text | tr '\t' '\n' | sed 's/^/    /'
   echo "CloudFront distributions:"; try aws --profile "$PROFILE" cloudfront list-distributions --query 'DistributionList.Items[].[Id, DomainName]' --output text | sed 's/^/    /'
   for r in $(aws --profile "$PROFILE" --region "$REGION" ec2 describe-regions --query 'Regions[].RegionName' --output text); do
-    a() { aws --profile "$PROFILE" --region "$r" "$@" 2>/dev/null; }
+    echo "  ...checking $r" >&2
+    a() { aws --profile "$PROFILE" --region "$r" --cli-connect-timeout 5 --cli-read-timeout 15 "$@" 2>/dev/null; }
     found=""
     x=$(a ec2 describe-instances --query "Reservations[].Instances[?State.Name!='terminated'].[InstanceId, State.Name, PublicIpAddress, Tags[?Key=='Name']|[0].Value]" --output text); [ -n "$x" ] && found+="  EC2 machines (id, state, public IP, name):\n$(echo "$x" | sed 's/^/    /')\n"
     x=$(a ec2 describe-addresses --query 'Addresses[].[PublicIp, AllocationId, InstanceId]' --output text); [ -n "$x" ] && found+="  Elastic IPs (ip, allocation, machine):\n$(echo "$x" | sed 's/^/    /')\n"
