@@ -265,3 +265,30 @@ test('image hooks are checked like the text: secrets, recent tickers and made-up
   assert.ok(c.unknownNumbers.includes('40'));
   assert.equal(c.blocked, true);
 });
+
+/* ---------------- his voice ---------------- */
+
+test('sign-off is added once at the end, before the disclaimer, and does not count against his words', async () => {
+  const { withSignOff, DEFAULT_SIGN_OFF } = await import('../lib/medium/voice');
+  const d = withDisclaimer(withSignOff('I had it live in three hours.\n\nThanks for reading!\nold subscribe line'), false);
+  assert.equal(d.split('Thanks for reading!').length, 2);
+  assert.ok(!d.includes('old subscribe line'));
+  assert.ok(d.indexOf('Subscribe here') < d.indexOf(DISCLAIMER_MARK));
+  assert.ok(yourWordsShare(d, ['I had it live in three hours']) > 0.95);
+  assert.equal(withSignOff('Body.', ''), 'Body.');
+  assert.ok(DEFAULT_SIGN_OFF.includes('https://medium.com/@niskarshk/subscribe'));
+});
+
+test('links in the draft become real links when pasted into Medium', () => {
+  const h = toMediumHtml('Make sure you get my articles — [Subscribe here](https://medium.com/@niskarshk/subscribe).', []);
+  assert.match(h, /<a href="https:\/\/medium\.com\/@niskarshk\/subscribe">Subscribe here<\/a>/);
+  assert.ok(!toMediumHtml('[x](javascript:alert(1))', []).includes('<a '));
+});
+
+test('settings carry the writing style and sign-off, an empty sign-off stays empty', async () => {
+  const { DEFAULT_WRITING_STYLE, DEFAULT_SIGN_OFF } = await import('../lib/medium/voice');
+  assert.equal(defaultSettings().writingStyle, DEFAULT_WRITING_STYLE);
+  assert.equal(cleanSettings({}).signOff, DEFAULT_SIGN_OFF);
+  assert.equal(cleanSettings({ signOff: '' }).signOff, '');
+  assert.equal(cleanSettings({ writingStyle: '  ' }).writingStyle, DEFAULT_WRITING_STYLE);
+});

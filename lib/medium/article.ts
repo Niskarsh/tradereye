@@ -9,6 +9,7 @@
  */
 
 import { cleanAiImages, DEFAULT_STYLE, sectionsWithoutImage, type AiImage } from './prompts';
+import { beforeSignOff, DEFAULT_SIGN_OFF, DEFAULT_WRITING_STYLE } from './voice';
 
 export type Format = 'weekly' | 'vs-algo' | 'building' | 'monthly';
 export const FORMATS: { id: Format; name: string; what: string }[] = [
@@ -102,7 +103,10 @@ export function seriesLinks(a: Pick<Article, 'format' | 'material'>, heads: Arti
 /* ---------------- settings: publications and secret terms ---------------- */
 
 export interface Publication { name: string; url: string; fits: Format[]; never?: boolean; note?: string }
-export interface Settings { v: 1; publications: Publication[]; secretTerms: string[]; /** the shared look of every Gemini prompt */ imageStyle: string }
+export interface Settings { v: 1; publications: Publication[]; secretTerms: string[]; /** the shared look of every Gemini prompt */ imageStyle: string;
+  /** how he writes (lib/medium/voice.ts), given to the Draft call */ writingStyle: string;
+  /** added under every article before the disclaimer */ signOff: string;
+}
 
 const ALL: Format[] = ['weekly', 'vs-algo', 'building', 'monthly'];
 /** The publications he writes for (Oct 2026), ranked best fit first per format. */
@@ -124,7 +128,7 @@ export const DEFAULT_PUBLICATIONS: Publication[] = [
   { name: 'Lampshade of ILLUMINATION', url: 'https://medium.com/lampshade-of-illumination', fits: [], never: true,
     note: 'publishes only AI-generated content: would label his work AI on his Partner Program account' },
 ];
-export const defaultSettings = (): Settings => ({ v: 1, publications: DEFAULT_PUBLICATIONS.map((p) => ({ ...p, fits: [...p.fits] })), secretTerms: [], imageStyle: DEFAULT_STYLE });
+export const defaultSettings = (): Settings => ({ v: 1, publications: DEFAULT_PUBLICATIONS.map((p) => ({ ...p, fits: [...p.fits] })), secretTerms: [], imageStyle: DEFAULT_STYLE, writingStyle: DEFAULT_WRITING_STYLE, signOff: DEFAULT_SIGN_OFF });
 
 /** Publications that fit this format, best first. Never one marked `never`. */
 export function suggestPublications(format: Format, pubs: Publication[]): Publication[] {
@@ -145,6 +149,9 @@ export function cleanSettings(x: unknown): Settings {
         ...(p.never ? { never: true } : {}), ...(p.note ? { note: String(p.note).slice(0, 160) } : {}),
       })),
     imageStyle: String(s.imageStyle ?? '').trim().slice(0, 1500) || DEFAULT_STYLE,
+    writingStyle: String(s.writingStyle ?? '').trim().slice(0, 6000) || DEFAULT_WRITING_STYLE,
+    // an empty sign-off is allowed (he may not want one); only a missing field falls back to the default
+    signOff: s.signOff === undefined ? DEFAULT_SIGN_OFF : String(s.signOff).trim().slice(0, 600),
     secretTerms: [...new Set((Array.isArray(s.secretTerms) ? s.secretTerms : []).map((t) => String(t).trim()).filter((t) => t.length >= 2))].slice(0, 200).map((t) => t.slice(0, 80)),
   };
 }
@@ -205,7 +212,7 @@ export function unknownNumbers(draft: string, sources: string[]): string[] {
 const words = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
 /** The article's own text: no headings, image markers or disclaimer. */
 export function bodyText(draft: string): string {
-  return draft.split('\n').filter((l) => !/^\s*#{1,3}\s/.test(l) && !/^\s*\[IMAGE [^\]]+\]\s*$/.test(l) && !l.includes(DISCLAIMER_MARK)).join('\n');
+  return beforeSignOff(draft).split('\n').filter((l) => !/^\s*#{1,3}\s/.test(l) && !/^\s*\[IMAGE [^\]]+\]\s*$/.test(l) && !l.includes(DISCLAIMER_MARK)).join('\n');
 }
 
 /**
@@ -286,7 +293,9 @@ export function withDisclaimer(draft: string, oldPrices: boolean): string {
 }
 
 const html = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const inline = (s: string) => html(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
+const inline = (s: string) => html(s)
+  .replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${u.replace(/"/g, '&quot;')}">${t}</a>`)
+  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
 /**
  * The draft as HTML for Medium's editor (pasted as rich text keeps headings, bold, italics, lists, quotes and
@@ -317,7 +326,7 @@ export function toMediumHtml(draft: string, images: { id: string; title: string;
 }
 
 /** The same draft as plain text (the clipboard's fallback). */
-export const toPlain = (draft: string) => draft.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/^\s*#{1,3}\s+/gm, '').replace(/\*([^*]+)\*/g, '$1');
+export const toPlain = (draft: string) => draft.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, '$1 ($2)').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/^\s*#{1,3}\s+/gm, '').replace(/\*([^*]+)\*/g, '$1');
 
 /* ---------------- what Claude returns, cleaned ---------------- */
 

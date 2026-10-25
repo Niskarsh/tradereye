@@ -8,6 +8,7 @@ import {
   type Article, type ArticleHead, type Format, type ImageSpec, type Kit, type Patch, type Settings,
 } from '@/lib/medium/article';
 import { aiCaption, buildPrompt, DEFAULT_STYLE, type AiImage } from '@/lib/medium/prompts';
+import { DEFAULT_SIGN_OFF, DEFAULT_WRITING_STYLE } from '@/lib/medium/voice';
 
 /**
  * Socials -> Medium. Medium's API is closed and no browser automation is used: tradereye prepares everything from his
@@ -89,6 +90,8 @@ export default function MediumPage() {
   const [url, setUrl] = useState('');
   const [terms, setTerms] = useState('');
   const [style, setStyle] = useState('');
+  const [voice, setVoice] = useState('');
+  const [signOff, setSignOff] = useState('');
 
   const run = useCallback(async (what: string, f: () => Promise<void>) => {
     setBusy(what); setErr('');
@@ -99,7 +102,7 @@ export default function MediumPage() {
   useEffect(() => {
     void run('load', async () => {
       const [p, s] = await Promise.all([api<Periods>('/api/medium/periods'), api<Settings>('/api/medium/settings'), loadList()]);
-      setPeriods(p); setSettings(s); setTerms(s.secretTerms.join('\n')); setStyle(s.imageStyle);
+      setPeriods(p); setSettings(s); setTerms(s.secretTerms.join('\n')); setStyle(s.imageStyle); setVoice(s.writingStyle); setSignOff(s.signOff);
       setWeek(p.week); setMonth(p.month); setFromIt(String(p.iterations[0] ?? '')); setToIt(String(p.iterations[0] ?? '')); // one iteration = one part of the series
     });
   }, [run, loadList]);
@@ -185,7 +188,7 @@ export default function MediumPage() {
   });
   const saveSettings = (next: Settings) => run('settings', async () => {
     const s = await api<Settings>('/api/medium/settings', { method: 'PUT', body: next });
-    setSettings(s); setTerms(s.secretTerms.join('\n')); setStyle(s.imageStyle);
+    setSettings(s); setTerms(s.secretTerms.join('\n')); setStyle(s.imageStyle); setVoice(s.writingStyle); setSignOff(s.signOff);
   });
 
   const checks = useMemo(() => (a && draft ? checkDraft({ draft, answers, material: a.material, kit }, settings?.secretTerms ?? []) : null), [a, draft, answers, kit, settings]);
@@ -222,6 +225,15 @@ export default function MediumPage() {
           <div className="mt-3 flex gap-2">
             <button type="button" className={btn} disabled={busy === 'settings'} onClick={() => saveSettings({ ...settings, imageStyle: style })}>Save style</button>
             <button type="button" className={ghost} onClick={() => setStyle(DEFAULT_STYLE)}>Reset to default</button>
+          </div>
+          <h2 className="mt-6 text-lg font-semibold text-white">Writing style</h2>
+          <p className="mt-1 text-sm text-ink-3">How you write, given to the Draft call so the article sounds like you. Built from your own Medium articles; edit it as your voice changes.</p>
+          <textarea className={`${input} mt-3 h-64 font-mono text-[12px]`} value={voice} onChange={(e) => setVoice(e.target.value)} />
+          <h3 className="mt-4 text-sm font-semibold text-ink">Sign-off (added under every article, before the disclaimer)</h3>
+          <textarea className={`${input} mt-2 h-20`} value={signOff} onChange={(e) => setSignOff(e.target.value)} placeholder="Empty = no sign-off" />
+          <div className="mt-3 flex gap-2">
+            <button type="button" className={btn} disabled={busy === 'settings'} onClick={() => saveSettings({ ...settings, writingStyle: voice, signOff })}>Save writing style</button>
+            <button type="button" className={ghost} onClick={() => { setVoice(DEFAULT_WRITING_STYLE); setSignOff(DEFAULT_SIGN_OFF); }}>Reset to default</button>
           </div>
           <h2 className="mt-6 text-lg font-semibold text-white">Publications you write for</h2>
           <p className="mt-1 text-sm text-ink-3">Suggested per format, best fit first. Tick the formats each one fits.</p>

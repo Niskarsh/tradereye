@@ -34,6 +34,14 @@ index, otherwise from `lib/medium/early.ts` (numbers copied from docs/algo-lab.m
 recap of every earlier iteration and the chart shows them all; the publish kit lists the earlier parts already
 published ("Earlier in this series", copyable) so readers can start at part 1.
 
+### His voice
+The Draft call gets his writing style (`lib/medium/voice.ts`, editable in Settings → Writing style), built from his
+own Medium articles: casual first person to "you", hook in the first line, 1-3 sentence paragraphs, one-line
+punchlines, spaced em dashes, questions he answers himself, self-deprecating honesty, dry dialogue jokes in captions,
+and his series pattern ("In my previous article...", "Let's dive in!", "In my next article..."). His sign-off
+("Thanks for reading!" + subscribe link, Settings) is added by code under every article, before the disclaimer, and
+does not count against the your-words share.
+
 ### Written for people who have never traded
 Medium readers are mostly not traders. The data Claude gets is in plain words, with a glossary (R, charges, stop, short,
 exam months, confidence score...) it must use to explain each term the first time. Versions are never letters
