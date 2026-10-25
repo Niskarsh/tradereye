@@ -7,6 +7,7 @@ import {
   ARTICLE_DISCLAIMER, checkDraft, FORMATS, OLD_PRICES_LINE, seriesLinks, suggestPublications, toMediumHtml, toPlain, withDisclaimer, YOUR_WORDS_MIN,
   type Article, type ArticleHead, type Format, type ImageSpec, type Kit, type Patch, type Settings,
 } from '@/lib/medium/article';
+import { aiCaption, buildPrompt, DEFAULT_STYLE, type AiImage } from '@/lib/medium/prompts';
 
 /**
  * Socials -> Medium. Medium's API is closed and no browser automation is used: tradereye prepares everything from his
@@ -87,6 +88,7 @@ export default function MediumPage() {
   const [kit, setKit] = useState<Kit>({ title: '', subtitle: '', tags: [], captions: {} });
   const [url, setUrl] = useState('');
   const [terms, setTerms] = useState('');
+  const [style, setStyle] = useState('');
 
   const run = useCallback(async (what: string, f: () => Promise<void>) => {
     setBusy(what); setErr('');
@@ -97,7 +99,7 @@ export default function MediumPage() {
   useEffect(() => {
     void run('load', async () => {
       const [p, s] = await Promise.all([api<Periods>('/api/medium/periods'), api<Settings>('/api/medium/settings'), loadList()]);
-      setPeriods(p); setSettings(s); setTerms(s.secretTerms.join('\n'));
+      setPeriods(p); setSettings(s); setTerms(s.secretTerms.join('\n')); setStyle(s.imageStyle);
       setWeek(p.week); setMonth(p.month); setFromIt(String(p.iterations[0] ?? '')); setToIt(String(p.iterations[0] ?? '')); // one iteration = one part of the series
     });
   }, [run, loadList]);
@@ -183,7 +185,7 @@ export default function MediumPage() {
   });
   const saveSettings = (next: Settings) => run('settings', async () => {
     const s = await api<Settings>('/api/medium/settings', { method: 'PUT', body: next });
-    setSettings(s); setTerms(s.secretTerms.join('\n'));
+    setSettings(s); setTerms(s.secretTerms.join('\n')); setStyle(s.imageStyle);
   });
 
   const checks = useMemo(() => (a && draft ? checkDraft({ draft, answers, material: a.material, kit }, settings?.secretTerms ?? []) : null), [a, draft, answers, kit, settings]);
@@ -195,7 +197,6 @@ export default function MediumPage() {
   const saveLabel = { saved: 'All changes saved', unsaved: 'Saving soon…', saving: 'Saving…', error: 'Not saved: retrying on your next edit' }[saveState];
   const disclaimer = `${ARTICLE_DISCLAIMER}${a?.material.oldPrices ? ` ${OLD_PRICES_LINE}` : ''}`;
   const kicker = a ? FORMATS.find((f) => f.id === a.format)!.name : '';
-  const bannerBg = a?.material.images.find((i) => i.data.kind !== 'banner');
   const changed = a?.material.changes ?? [];
 
   return (
@@ -215,6 +216,13 @@ export default function MediumPage() {
           <p className="mt-1 text-sm text-ink-3">One per line: feature names, thresholds, rule words. Any of these in a draft, title or caption blocks copying. Stored encrypted.</p>
           <textarea className={`${input} mt-3 h-32 font-mono`} value={terms} onChange={(e) => setTerms(e.target.value)} placeholder={'e.g. a feature name\na threshold like 2.5 ATR'} />
           <div className="mt-3"><button type="button" className={btn} disabled={busy === 'settings'} onClick={() => saveSettings({ ...settings, secretTerms: terms.split('\n') })}>Save secret terms</button></div>
+          <h2 className="mt-6 text-lg font-semibold text-white">Image style</h2>
+          <p className="mt-1 text-sm text-ink-3">Added to every Gemini prompt, so all your images share one look.</p>
+          <textarea className={`${input} mt-3 h-28`} value={style} onChange={(e) => setStyle(e.target.value)} />
+          <div className="mt-3 flex gap-2">
+            <button type="button" className={btn} disabled={busy === 'settings'} onClick={() => saveSettings({ ...settings, imageStyle: style })}>Save style</button>
+            <button type="button" className={ghost} onClick={() => setStyle(DEFAULT_STYLE)}>Reset to default</button>
+          </div>
           <h2 className="mt-6 text-lg font-semibold text-white">Publications you write for</h2>
           <p className="mt-1 text-sm text-ink-3">Suggested per format, best fit first. Tick the formats each one fits.</p>
           <div className="mt-3 space-y-2">
@@ -368,10 +376,21 @@ export default function MediumPage() {
 
             <section className={card}>
               <h2 className="text-lg font-semibold text-white">3. Images</h2>
-              <p className="mt-1 text-xs text-ink-4">Drawn from your real data. Download each and upload it in Medium where its [IMAGE …] line is (the feature image goes first).</p>
-              <div className="mt-3 grid gap-4 xl:grid-cols-2">
-                {a.material.images.map((s) => <ImageCard key={s.id} spec={s} title={kit.title || a.material.period.label} kicker={kicker} bg={s.data.kind === 'banner' ? bannerBg : undefined} caption={kit.captions[s.id] ?? s.caption} />)}
+              <p className="mt-1 text-xs text-ink-4">One Gemini prompt for the cover and one per section, written with the draft (no extra Claude cost). Copy a prompt, generate in Gemini, then upload the image in Medium where its [IMAGE …] line is (the cover goes first). Edit the hook or scene freely; the shared style and the rules are added to every prompt.</p>
+              {!kit.ai?.length && <p className="mt-3 text-sm text-ink-3">{a.draft ? 'This draft was made before image prompts existed: press Redraft to get them.' : 'The prompts come with the draft.'}</p>}
+              <div className="mt-3 space-y-4">
+                {(kit.ai ?? []).map((img) => <PromptCard key={img.id} img={img} style={settings?.imageStyle || DEFAULT_STYLE}
+                  onChange={(next) => setKit({ ...kit, ai: (kit.ai ?? []).map((x) => (x.id === img.id ? next : x)) })} />)}
               </div>
+              {checks && checks.missingImages.length > 0 && kit.ai?.length ? <p className="mt-3 text-xs text-data-caution">No image for: {checks.missingImages.join(', ')}. Redraft, or write one yourself.</p> : null}
+              {a.material.images.some((s) => s.data.kind !== 'banner') && (
+                <details className="mt-5">
+                  <summary className="cursor-pointer text-sm text-ink-3">Real-data charts (optional, drawn from your data)</summary>
+                  <div className="mt-3 grid gap-4 xl:grid-cols-2">
+                    {a.material.images.filter((s) => s.data.kind !== 'banner').map((s) => <ImageCard key={s.id} spec={s} title={kit.title || a.material.period.label} kicker={kicker} caption={kit.captions[s.id] ?? s.caption} />)}
+                  </div>
+                </details>
+              )}
             </section>
 
             {a.kit && (
@@ -413,7 +432,7 @@ export default function MediumPage() {
                     <p className="mt-1 text-xs text-ink-3">{disclaimer}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                    <CopyButton label="Copy article (formatted)" text={toPlain(finalDraft)} html={toMediumHtml(finalDraft, a.material.images.map((s) => ({ ...s, caption: kit.captions[s.id] ?? s.caption })))} disabled={!draft || checks?.blocked} />
+                    <CopyButton label="Copy article (formatted)" text={toPlain(finalDraft)} html={toMediumHtml(finalDraft, [...a.material.images.map((s) => ({ id: s.id, title: s.title, caption: kit.captions[s.id] ?? s.caption })), ...(kit.ai ?? []).map((x) => ({ id: x.id, title: x.section || 'Cover', caption: aiCaption(x.caption) }))])} disabled={!draft || checks?.blocked} />
                     {checks?.blocked && <span className="text-xs text-data-red-text">Copy is blocked until the flagged text is removed.</span>}
                     <span className={`text-xs ${saveState === 'saved' ? 'text-ink-4' : 'text-data-caution'}`}>{saveLabel}</span>
                   </div>
@@ -436,6 +455,29 @@ export default function MediumPage() {
           </>)}
         </main>
       </div>
+    </div>
+  );
+}
+
+function PromptCard({ img, style, onChange }: { img: AiImage; style: string; onChange: (next: AiImage) => void }) {
+  const prompt = buildPrompt(img, style);
+  return (
+    <div className="rounded-xl border border-line bg-brand-bg p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-ink">{img.id === 'cover' ? 'Cover (top image, the feed preview)' : <>[IMAGE {img.id}] {img.section}</>}</p>
+        <CopyButton text={prompt} label="Copy prompt" />
+      </div>
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-ink-3">Hook in the image <span className="normal-case text-ink-4">(max 6 words, empty = no text)</span>
+        <input className={`${input} mt-1 normal-case`} value={img.hook} onChange={(e) => onChange({ ...img, hook: e.target.value })} />
+      </label>
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-ink-3">Scene
+        <textarea className={`${input} mt-1 h-24 normal-case`} value={img.scene} onChange={(e) => onChange({ ...img, scene: e.target.value })} />
+      </label>
+      <div className="mt-3">
+        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold uppercase tracking-wide text-ink-3">Caption (under the image in Medium)</p><CopyButton text={aiCaption(img.caption)} /></div>
+        <input className={`${input} mt-1`} value={img.caption} onChange={(e) => onChange({ ...img, caption: e.target.value })} />
+      </div>
+      <details className="mt-3"><summary className="cursor-pointer text-xs text-ink-3">The full prompt</summary><pre className="mt-2 whitespace-pre-wrap text-xs text-ink-2">{prompt}</pre></details>
     </div>
   );
 }

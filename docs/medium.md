@@ -12,10 +12,14 @@ data and he pastes it into Medium and publishes by hand (Medium's own "Schedule 
    dictating (Chrome speech recognition, `components/medium/Dictate.tsx`).
 3. **Draft** (one Claude call, on the button, needs 3 answers of 15+ words): Claude only reorders, trims and adds short
    headings to HIS answers, plus the publish kit (title, subtitle, 5 tags, image captions). Editable inline.
-4. **Images**, drawn in the browser from the article's data (`components/medium/render.ts`), each with its own PNG
-   download: feature image (title over the article's own chart / bars, faint), trade charts (5-minute candles from the
-   saved 1-minute ones, his entries / adds / exits via `tradeMarks`, his real stop only), equity curve, Me vs Algo
-   scoreboard, Algo Lab exam bars. The draft marks where each goes with `[IMAGE <id>]`.
+4. **Images**: tradereye does not make them. The Draft call also writes a Gemini prompt for the cover and one per
+   `## ` section (`lib/medium/prompts.ts`); code puts `[IMAGE s1]`, `[IMAGE s2]`, ... under each heading. He copies a
+   prompt, generates in Gemini, and uploads the image in Medium. Each prompt = his scene + the hook rule (the hook,
+   max 6 words, is the only readable text, written on an object in the scene) + the shared style (Settings → Image
+   style: cinematic photo, amber-gold and emerald-teal light, shallow depth of field) + what to avoid (logos, brands,
+   real people, readable numbers or charts as data). Captions always end "(AI-generated image)": Medium requires AI
+   images to be captioned as such. Hooks are checked like the text (secret terms, recent tickers, made-up numbers).
+   The old canvas charts from real data are still there, collapsed, as optional extras.
 5. **Publish kit**: copy buttons for each field and for the whole article as rich text (headings, bold, lists survive
    Medium's paste). Suggested publication from settings.
 6. **Published**: he pastes the story's link back; the list shows Draft / Published.
