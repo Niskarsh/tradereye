@@ -145,17 +145,18 @@ test('Algo Lab material: strategy names and what-changed lines stay out until he
   const e: LedgerEntry = {
     iteration: 7, runId: 'r7', createdAt: Date.parse('2026-08-12T00:00:00Z'), code: 'abc', best: 'tight',
     changes: ['added the SECRET-FEATURE input', 'more months of data'],
-    lines: [{ id: 'tight', name: 'Tight bracket (1 ATR stop, 1.5 ATR target)', n: 400, netR: 38.2, gross: null, t: 2.1, monthsGreen: 9, monthsTraded: 14, dev: 20, exam: -3.1, ic: null }],
+    lines: [{ id: 'tight', name: 'Tight bracket (1 ATR stop, 1.5 ATR target)', n: 400, netR: 0.052, gross: null, t: 2.1, monthsGreen: 9, monthsTraded: 14, dev: 0.04, exam: -0.031, ic: null }],
   };
   const m = buildingMaterial({ from: '7', to: '7', label: 'Iterations 7–7' }, [e]);
   const facts = m.facts.join('\n');
   assert.ok(!/Tight bracket|ATR stop|SECRET-FEATURE|more months/.test(facts));
-  assert.match(facts, /Strategy A 400 trades, \+38\.2R overall, t 2\.1, 9\/14 months green, development months \+20\.0R, exam months −3\.1R \(FAILED the exam\)/);
+  assert.match(facts, /Strategy A 400 trades, \+0\.05R a trade overall, t 2\.1, 9\/14 months green, decide months \+0\.04R a trade, exam months −0\.03R a trade \(FAILED the exam\)/);
+  assert.match(facts, /This is part 7 of the series/);
   assert.equal(m.changes?.length, 2);
   const shared = factsFor(m, [1]).join('\n');
   assert.match(shared, /more months of data/);
   assert.ok(!/SECRET-FEATURE/.test(shared));
-  assert.deepEqual(m.images.find((i) => i.data.kind === 'iterations')?.data, { kind: 'iterations', bars: [{ label: '#7', value: -3.1, note: 'exam' }] });
+  assert.deepEqual(m.images.find((i) => i.data.kind === 'iterations')?.data, { kind: 'iterations', bars: [{ label: '#7', value: -0.03, note: 'exam' }] });
 });
 
 test('strategy letters: keep a letter id, map descriptive ids by order', () => {
@@ -178,4 +179,32 @@ test('a ticker that is also a word only blocks in capitals', () => {
   assert.deepEqual(tickerHits('that was a good idea', ['IDEA']), []);
   assert.deepEqual(tickerHits('I sold IDEA early', ['IDEA']), ['IDEA']);
   assert.deepEqual(tickerHits('#idea', ['IDEA']), ['IDEA']);
+});
+
+test('iterations 1-4 come from the notes; a later part gets a one-line recap of each earlier one', async () => {
+  const { EARLY_NOTES } = await import('../lib/medium/early');
+  const { recapOf } = await import('../lib/medium/material');
+  assert.deepEqual(EARLY_NOTES.map((n) => n.iteration), [1, 2, 3, 4]);
+  const first = buildingMaterial({ from: '1', to: '1', label: 'Iteration 1' }, [], [EARLY_NOTES[0]]);
+  assert.match(first.facts.join('\n'), /This is part 1 of the series .* It is the first part\./);
+  assert.match(first.facts.join('\n'), /701 trades, −0\.20R a trade/);
+  // the notes' what-changed lines are offered unticked, never in the facts
+  assert.equal(first.changes?.length, EARLY_NOTES[0].changes.length);
+  assert.ok(!first.facts.join('\n').includes('calendar in disguise'));
+  const third = buildingMaterial({ from: '3', to: '3', label: 'Iteration 3' }, [], [EARLY_NOTES[2]], EARLY_NOTES.slice(0, 2).map(recapOf));
+  const f = third.facts.join('\n');
+  assert.match(f, /Earlier parts covered iterations 1–2/);
+  assert.match(f, /Before this \(iteration 1, recap only\)/);
+  const bars = third.images.find((i) => i.data.kind === 'iterations')!.data as { bars: { label: string }[] };
+  assert.deepEqual(bars.bars.map((b) => b.label), ['#1', '#2', '#3']);
+  // no input names, thresholds or rules in the notes the article can draw on
+  for (const n of EARLY_NOTES) assert.ok(!/ATR|Nifty|VWAP|RVOL|½|¾/i.test([n.facts, ...n.changes].join(' ')), `iteration ${n.iteration}`);
+});
+
+test('series links: published earlier parts, oldest first', async () => {
+  const { seriesLinks } = await import('../lib/medium/article');
+  const h = (id: string, it: number, url?: string) => ({ id, format: 'building' as const, period: '', title: `T${it}`, createdAt: 0, updatedAt: 0, iterations: [it, it] as [number, number], ...(url ? { published: { url, at: 0 } } : {}) });
+  const heads = [h('c', 3, 'https://medium.com/x/3'), h('a', 1, 'https://medium.com/x/1'), h('b', 2), h('d', 5, 'https://medium.com/x/5')];
+  const m = buildingMaterial({ from: '4', to: '4', label: 'Iteration 4' }, []);
+  assert.deepEqual(seriesLinks({ format: 'building', material: m }, heads).map((x) => x.label), ['Part 1', 'Part 3']);
 });

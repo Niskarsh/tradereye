@@ -4,7 +4,7 @@ import { Check, ChevronDown, Copy, Download, ExternalLink, Loader2, Sparkles, Tr
 import Dictate from '@/components/medium/Dictate';
 import { drawImage, fileName } from '@/components/medium/render';
 import {
-  ARTICLE_DISCLAIMER, checkDraft, FORMATS, OLD_PRICES_LINE, suggestPublications, toMediumHtml, toPlain, YOUR_WORDS_MIN,
+  ARTICLE_DISCLAIMER, checkDraft, FORMATS, OLD_PRICES_LINE, seriesLinks, suggestPublications, toMediumHtml, toPlain, withDisclaimer, YOUR_WORDS_MIN,
   type Article, type ArticleHead, type Format, type ImageSpec, type Kit, type Patch, type Settings,
 } from '@/lib/medium/article';
 
@@ -98,7 +98,7 @@ export default function MediumPage() {
     void run('load', async () => {
       const [p, s] = await Promise.all([api<Periods>('/api/medium/periods'), api<Settings>('/api/medium/settings'), loadList()]);
       setPeriods(p); setSettings(s); setTerms(s.secretTerms.join('\n'));
-      setWeek(p.week); setMonth(p.month); setFromIt(String(p.iterations[0] ?? '')); setToIt(String(p.iterations[p.iterations.length - 1] ?? ''));
+      setWeek(p.week); setMonth(p.month); setFromIt(String(p.iterations[0] ?? '')); setToIt(String(p.iterations[0] ?? '')); // one iteration = one part of the series
     });
   }, [run, loadList]);
 
@@ -109,32 +109,70 @@ export default function MediumPage() {
     if (format === 'weekly' && !week) setWeek(periods.week);
   }, [format, periods, week]);
 
+  // Drafts save themselves: answers, draft text and kit are sent 1.5 s after the last change (no Claude call, just S3),
+  // so he can stop at any point and pick the article up later from the list until it is published.
+  const sent = useRef<{ id: string; answers: string; draft: string; kit: string } | null>(null);
+  const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved');
   const take = (x: Article) => {
-    setA(x); setAnswers(x.questions.map((_, i) => x.answers[i] ?? '')); setDraft(x.draft);
-    setKit(x.kit ?? { title: '', subtitle: '', tags: [], captions: {} }); setUrl(x.published?.url ?? '');
+    const ans = x.questions.map((_, i) => x.answers[i] ?? ''), k = x.kit ?? { title: '', subtitle: '', tags: [], captions: {} };
+    sent.current = { id: x.id, answers: JSON.stringify(ans), draft: x.draft, kit: JSON.stringify(k) };
+    setA(x); setAnswers(ans); setDraft(x.draft); setKit(k); setUrl(x.published?.url ?? ''); setSaveState('saved');
   };
-  const open = (id: string) => run('open', async () => take((await api<{ article: Article }>(`/api/medium/article?id=${id}`)).article));
+  const pending = useCallback((): Patch | null => {
+    const s0 = sent.current;
+    if (!a || !s0 || s0.id !== a.id) return null;
+    const p: Patch = {};
+    if (JSON.stringify(answers) !== s0.answers) p.answers = answers;
+    if (draft !== s0.draft) p.draft = draft;
+    if (a.kit && JSON.stringify(kit) !== s0.kit) p.kit = kit;
+    return Object.keys(p).length ? p : null;
+  }, [a, answers, draft, kit]);
+  const flush = useCallback(async () => {
+    const p = pending();
+    if (!p || !a) return;
+    const snap = { id: a.id, answers: JSON.stringify(answers), draft, kit: JSON.stringify(kit) };
+    setSaveState('saving');
+    try {
+      const x = (await api<{ article: Article }>('/api/medium/article', { method: 'PUT', body: { id: a.id, ...p } })).article;
+      sent.current = snap;
+      setA(x); // the page keeps what he typed; the saved copy has the disclaimer put back
+      setSaveState('saved');
+      void loadList();
+    } catch (e) { setSaveState('error'); setErr(`Not saved: ${(e as Error).message}`); }
+  }, [pending, a, answers, draft, kit, loadList]);
+  useEffect(() => {
+    if (!pending()) return;
+    setSaveState('unsaved');
+    const t = setTimeout(() => void flush(), 1500);
+    return () => clearTimeout(t);
+  }, [pending, flush]);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (pending()) e.preventDefault(); };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [pending]);
+  const open = (id: string) => run('open', async () => { await flush(); take((await api<{ article: Article }>(`/api/medium/article?id=${id}`)).article); });
   // a save refreshes only what it saved: other unsaved edits on the page (draft text, kit fields) stay as typed
   const save = (patch: Patch) => run('save', async () => {
+    await flush();
     const x = (await api<{ article: Article }>('/api/medium/article', { method: 'PUT', body: { id: a!.id, ...patch } })).article;
     setA(x);
-    if (patch.draft !== undefined) setDraft(x.draft);
-    if (patch.kit) setKit(x.kit ?? kit);
     if (patch.publishedUrl !== undefined) setUrl(x.published?.url ?? '');
     await loadList();
   });
 
   const create = () => run('create', async () => {
+    await flush();
     const body = { format, week: format === 'weekly' || format === 'vs-algo' ? week : undefined, month: format === 'monthly' ? month : undefined, fromIteration: format === 'building' ? Number(fromIt) : undefined, toIteration: format === 'building' ? Number(toIt) : undefined };
     take((await api<{ article: Article }>('/api/medium/articles', { method: 'POST', body })).article);
     await loadList();
   });
   const ask = () => run('questions', async () => {
-    if (a && answers.some((x, i) => x !== (a.answers[i] ?? ''))) await api('/api/medium/article', { method: 'PUT', body: { id: a.id, answers } });
+    await flush();
     take((await api<{ article: Article }>('/api/medium/questions', { method: 'POST', body: { id: a!.id } })).article);
   });
   const write = () => run('draft', async () => {
-    await api('/api/medium/article', { method: 'PUT', body: { id: a!.id, answers } });
+    await flush();
     if (a?.draft && !window.confirm('Replace the current draft (and its title / tags) with a new one? Your edits to it will be lost.')) return;
     take((await api<{ article: Article }>('/api/medium/draft', { method: 'POST', body: { id: a!.id } })).article);
     await loadList();
@@ -147,7 +185,10 @@ export default function MediumPage() {
   const checks = useMemo(() => (a && draft ? checkDraft({ draft, answers, material: a.material, kit }, settings?.secretTerms ?? []) : null), [a, draft, answers, kit, settings]);
   const pubs = useMemo(() => (a && settings ? suggestPublications(a.format, settings.publications) : []), [a, settings]);
   const answered = answers.filter((x) => x.trim().split(/\s+/).filter(Boolean).length >= 15).length;
-  const dirtyDraft = !!a && draft !== a.draft;
+  const finalDraft = a && draft.trim() ? withDisclaimer(draft, a.material.oldPrices) : draft; // what gets copied: the disclaimer always on
+  const series = a ? seriesLinks(a, list) : [];
+  const seriesText = series.length ? `Earlier in this series:\n${series.map((x) => `${x.label}: ${x.title} ${x.url}`).join('\n')}` : '';
+  const saveLabel = { saved: 'All changes saved', unsaved: 'Saving soon…', saving: 'Saving…', error: 'Not saved: retrying on your next edit' }[saveState];
   const disclaimer = `${ARTICLE_DISCLAIMER}${a?.material.oldPrices ? ` ${OLD_PRICES_LINE}` : ''}`;
   const kicker = a ? FORMATS.find((f) => f.id === a.format)!.name : '';
   const bannerBg = a?.material.images.find((i) => i.data.kind !== 'banner');
@@ -214,7 +255,7 @@ export default function MediumPage() {
               {format === 'building' && (periods?.iterations.length
                 ? <div className="flex gap-2">
                   <label className="flex-1 text-ink-3">From<select className={`${input} mt-1`} value={fromIt} onChange={(e) => setFromIt(e.target.value)}>{periods.iterations.map((i) => <option key={i}>{i}</option>)}</select></label>
-                  <label className="flex-1 text-ink-3">To<select className={`${input} mt-1`} value={toIt} onChange={(e) => setToIt(e.target.value)}>{periods.iterations.map((i) => <option key={i}>{i}</option>)}</select></label>
+                  <label className="flex-1 text-ink-3">To (same = one part)<select className={`${input} mt-1`} value={toIt} onChange={(e) => setToIt(e.target.value)}>{periods.iterations.map((i) => <option key={i}>{i}</option>)}</select></label>
                 </div>
                 : <p className="text-ink-3">No kept Algo Lab iterations found.</p>)}
             </div>
@@ -232,7 +273,7 @@ export default function MediumPage() {
                 <li key={h.id}>
                   <button type="button" onClick={() => open(h.id)} className={`w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5 ${a?.id === h.id ? 'bg-white/5' : ''}`}>
                     <span className="block truncate font-semibold text-ink">{h.title}</span>
-                    <span className="flex items-center gap-2 text-xs text-ink-3">{h.period}
+                    <span className="flex items-center gap-2 text-xs text-ink-3">{h.period} · {new Date(h.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                       {h.published ? <span className="rounded border border-data-green/60 px-1 text-[10px] font-bold uppercase text-data-green">Published</span> : <span className="rounded border border-line-strong px-1 text-[10px] font-bold uppercase text-ink-3">Draft</span>}
                     </span>
                   </button>
@@ -280,7 +321,7 @@ export default function MediumPage() {
                     <p className="text-sm font-semibold text-ink">{i + 1}. {q}</p>
                     <textarea className={`${input} mt-2 h-28`} value={answers[i] ?? ''} placeholder="Type or dictate…"
                       onChange={(e) => setAnswers((x) => x.map((v, j) => (j === i ? e.target.value : v)))}
-                      onBlur={() => { if (answers[i] !== (a.answers[i] ?? '')) void save({ answers }); }} />
+                      onBlur={() => void flush()} />
                     <div className="mt-1 flex items-center gap-2">
                       <Dictate onText={(t) => setAnswers((x) => x.map((v, j) => (j === i ? `${v}${v && !v.endsWith(' ') ? ' ' : ''}${t}` : v)))} />
                       <span className="text-xs text-ink-4">{(answers[i] ?? '').trim().split(/\s+/).filter(Boolean).length} words</span>
@@ -300,10 +341,7 @@ export default function MediumPage() {
               <p className="mt-1 text-xs text-ink-4">One Claude call: it only orders, trims and adds headings to your answers. Edit freely below; the disclaimer is re-added on every save. {answered}/3 answers ready.</p>
               {(a.draft || draft) && (<>
                 <textarea className={`${input} mt-3 h-[28rem] font-mono text-[13px] leading-relaxed`} value={draft} onChange={(e) => setDraft(e.target.value)} />
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button type="button" className={btn} disabled={!dirtyDraft || !!busy} onClick={() => save({ draft })}>{busy === 'save' && <Loader2 className="size-4 animate-spin" />}Save draft</button>
-                  {dirtyDraft && <span className="text-xs text-data-caution">Unsaved changes</span>}
-                </div>
+                <p className={`mt-2 text-xs ${saveState === 'error' ? 'text-data-red-text' : saveState === 'saved' ? 'text-ink-4' : 'text-data-caution'}`}>{saveLabel}. Drafts keep until you publish: reopen from Articles any time.</p>
               </>)}
               {checks && (
                 <div className="mt-4 space-y-1.5 rounded-xl border border-line bg-brand-bg p-3 text-sm">
@@ -355,15 +393,21 @@ export default function MediumPage() {
                   {a.material.images.filter((s) => s.data.kind !== 'banner').map((s) => (
                     <Field key={s.id} label={`Caption · ${s.id}`} value={kit.captions[s.id] ?? ''} max={160} onChange={(v) => setKit({ ...kit, captions: { ...kit.captions, [s.id]: v } })} />
                   ))}
+                  {a.format === 'building' && (
+                    <div>
+                      <div className="flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-wide text-ink-3">Earlier in this series (paste near the top or the end)</p><CopyButton text={seriesText} /></div>
+                      {series.length ? <ul className="mt-1 space-y-0.5 text-xs text-ink-2">{series.map((x) => <li key={x.url}>{x.label}: <a className="text-brand-accent hover:underline" href={x.url} target="_blank" rel="noreferrer">{x.title}</a></li>)}</ul>
+                        : <p className="mt-1 text-xs text-ink-3">{Number(a.material.period.from) > 1 ? 'No earlier part published yet: publish them in order so readers can start at part 1.' : 'This is part 1.'}</p>}
+                    </div>
+                  )}
                   <div>
                     <div className="flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-wide text-ink-3">Disclaimer (already at the end of the article)</p><CopyButton text={disclaimer} /></div>
                     <p className="mt-1 text-xs text-ink-3">{disclaimer}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                    <button type="button" className={btn} disabled={!!busy} onClick={() => save({ kit })}>Save kit</button>
-                    <CopyButton label="Copy article (formatted)" text={toPlain(draft)} html={toMediumHtml(draft, a.material.images.map((s) => ({ ...s, caption: kit.captions[s.id] ?? s.caption })))} disabled={!draft || checks?.blocked || dirtyDraft} />
+                    <CopyButton label="Copy article (formatted)" text={toPlain(finalDraft)} html={toMediumHtml(finalDraft, a.material.images.map((s) => ({ ...s, caption: kit.captions[s.id] ?? s.caption })))} disabled={!draft || checks?.blocked} />
                     {checks?.blocked && <span className="text-xs text-data-red-text">Copy is blocked until the flagged text is removed.</span>}
-                    {dirtyDraft && <span className="text-xs text-data-caution">Save the draft first.</span>}
+                    <span className={`text-xs ${saveState === 'saved' ? 'text-ink-4' : 'text-data-caution'}`}>{saveLabel}</span>
                   </div>
                 </div>
               </section>
