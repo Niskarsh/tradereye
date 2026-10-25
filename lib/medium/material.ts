@@ -2,6 +2,7 @@ import { tradeMarks } from '../book/marks';
 import { resultOf, scoreR, mysteryCutoff, type ShortTrade, type WeekScore } from '../shorts/trades';
 import { stopFor } from '../shorts/spec';
 import type { LedgerEntry } from '../ml/ledger';
+import type { EarlyNote } from './early';
 import type { ArticleTrade, Candle, Format, ImageSpec, Material, TradeChart } from './article';
 
 /**
@@ -153,29 +154,66 @@ export function strategyLetter(id: string, order: string[]): string {
   return `Strategy ${String.fromCharCode(65 + ((i < 0 ? order.length : i) % 26))}`;
 }
 
-/** Building tradereye: Algo Lab iterations, process and results only. */
-export function buildingMaterial(period: Material['period'], entries: LedgerEntry[]): Material {
+/** R a trade, 2 decimals ("+0.05R"): Algo Lab results are per trade, so one decimal would hide them. */
+const rt = (n: number) => `${sgn(n, 2)}R a trade`;
+
+/**
+ * Building tradereye: Algo Lab iterations, process and results only. `entries` are iterations with results files (the
+ * kept ledger from 5 on, or an older run still in the run index); `notes` cover iterations 1-4 when no results file
+ * is left (lib/medium/early.ts). One iteration picked = one part of the series: earlier iterations are given as a
+ * one-line recap each, so the story can say where it came from.
+ */
+export function buildingMaterial(period: Material['period'], entries: LedgerEntry[], notes: EarlyNote[] = [], earlier: { iteration: number; line: string; bar?: { label: string; value: number; note?: string } }[] = []): Material {
   const its = [...entries].sort((a, b) => a.iteration - b.iteration);
   const order = [...new Set(its.flatMap((e) => e.lines.map((l) => l.id)))];
+  const from = Number(period.from), to = Number(period.to);
   const facts = [
-    `Algo Lab: ${its.length} iterations of a machine-learning model for NSE intraday trades, built by him on top of his own trade journal app (tradereye). ` +
-    'Each iteration trains on earlier months, picks on later ones, and only confirms on "exam" months (the last 6) it never trained on. R = profit in units of the risk taken, after charges.',
-    'What this article may NOT reveal (his edge): which features or inputs the model uses, any thresholds, stops, targets or rules. Talk about process, results, failures and lessons only.',
+    'Algo Lab: a machine-learning model for NSE intraday trades that he builds iteration by iteration, on top of his own trade journal app (tradereye). ' +
+    'Each iteration trains on earlier months, decides on later ones ("decide months"), and only confirms on "exam" months it never trained on. ' +
+    'R = profit in units of the risk taken; results are per trade, after charges unless said.',
+    from === to
+      ? `Series: one article per iteration. This is part ${from} of the series (iteration ${from}).${from > 1 ? ` Earlier parts covered iterations 1–${from - 1}.` : ' It is the first part.'}`
+      : `This article covers iterations ${from}–${to}.`,
+    'What this article may NOT reveal (his edge): which features or inputs the model uses, any thresholds, stops, targets or rules of the strategy. Talk about process, results, failures and lessons only.',
+    ...earlier.map((e) => `Before this (iteration ${e.iteration}, recap only): ${e.line}`),
   ];
-  const bars: { label: string; value: number; note?: string }[] = [];
+  type Row = { iteration: number; fact: string; bar?: { label: string; value: number; note?: string }; changes: string[] };
+  const rows: Row[] = notes.map((n) => ({
+    iteration: n.iteration, fact: `Iteration ${n.iteration} (${n.when}): ${n.facts}`,
+    bar: { label: `#${n.iteration}`, value: n.bar.value, note: n.bar.note }, changes: n.changes,
+  }));
   for (const e of its) {
     const best = e.lines.find((l) => l.id === e.best) ?? [...e.lines].sort((a, b) => b.netR - a.netR)[0];
-    const lines = e.lines.map((l) => `${strategyLetter(l.id, order)} ${l.n} trades, ${sgn(l.netR)}R overall, t ${l.t.toFixed(1)}, ${l.monthsGreen}/${l.monthsTraded} months green` +
-      `${l.dev !== null ? `, development months ${sgn(l.dev)}R` : ''}${l.exam !== null ? `, exam months ${sgn(l.exam)}R${l.exam < 0 ? ' (FAILED the exam)' : ''}` : ''}`);
-    facts.push(`Iteration ${e.iteration} (${dayLabel(new Date(e.createdAt).toISOString().slice(0, 10))}): ${lines.join('; ')}.`);
-    if (best) bars.push({ label: `#${e.iteration}`, value: r1(best.exam ?? best.netR), note: best.exam !== null ? 'exam' : 'overall' });
+    const lines = e.lines.map((l) => `${strategyLetter(l.id, order)} ${l.n} trades, ${rt(l.netR)} overall, t ${l.t.toFixed(1)}, ${l.monthsGreen}/${l.monthsTraded} months green` +
+      `${l.dev !== null ? `, decide months ${rt(l.dev)}` : ''}${l.exam !== null ? `, exam months ${rt(l.exam)}${l.exam < 0 ? ' (FAILED the exam)' : ''}` : ''}`);
+    rows.push({
+      iteration: e.iteration, fact: `Iteration ${e.iteration} (${dayLabel(new Date(e.createdAt).toISOString().slice(0, 10))}): ${lines.join('; ')}.`,
+      bar: best ? { label: `#${e.iteration}`, value: Math.round((best.exam ?? best.netR) * 100) / 100, note: best.exam !== null ? 'exam' : 'overall' } : undefined,
+      changes: e.changes,
+    });
   }
-  const changes = its.flatMap((e) => e.changes.map((text) => ({ iteration: e.iteration, text: text.slice(0, 400) })));
+  rows.sort((a, b) => a.iteration - b.iteration);
+  facts.push(...rows.map((r) => r.fact));
+  const changes = rows.flatMap((r) => r.changes.map((text) => ({ iteration: r.iteration, text: text.slice(0, 400) })));
+  const bars = [...earlier.map((e) => e.bar).filter((b): b is NonNullable<typeof b> => !!b), ...rows.map((r) => r.bar).filter((b): b is NonNullable<typeof b> => !!b)];
   const images = [banner(), {
-    id: 'iterations', title: 'Every iteration\'s exam result', caption: 'Net R of each iteration\'s best strategy on exam months it never trained on (overall when it had no exam). Red = failed.',
+    id: 'iterations', title: from === to ? `Iteration ${from} against the ones before` : 'Every iteration\'s result',
+    caption: 'R a trade of each iteration\'s best strategy, on exam months it never trained on where it had them (otherwise overall). Red = lost.',
     data: { kind: 'iterations', bars },
   } as ImageSpec];
   return { format: 'building', period, facts, trades: [], images, hiddenTickers: [], changes, oldPrices: false };
+}
+
+/** One-line recap of an iteration (results only), for the parts after it in the series. */
+export function recapOf(e: LedgerEntry | EarlyNote): { iteration: number; line: string; bar: { label: string; value: number; note?: string } } {
+  if ('facts' in e) return { iteration: e.iteration, line: e.facts, bar: { label: `#${e.iteration}`, value: e.bar.value, note: e.bar.note } };
+  const best = e.lines.find((l) => l.id === e.best) ?? [...e.lines].sort((a, b) => b.netR - a.netR)[0];
+  const v = best ? Math.round((best.exam ?? best.netR) * 100) / 100 : 0;
+  return {
+    iteration: e.iteration,
+    line: best ? `best strategy ${best.n} trades, ${rt(best.netR)} overall${best.exam !== null ? `, exam ${rt(best.exam)}${best.exam < 0 ? ' (failed)' : ''}` : ''}.` : 'no results.',
+    bar: { label: `#${e.iteration}`, value: v, note: best?.exam !== null ? 'exam' : 'overall' },
+  };
 }
 
 /** The facts Claude gets for an article: the material's, plus the "what changed" lines he ticked as safe. */

@@ -2,14 +2,15 @@ import { getChunk, putChunk } from '../book/s3';
 import { loadTradeCandles } from '../candles/store';
 import { lookupSecurityId } from '../dhan';
 import { LIVE_FROM } from '../algoLive/fills';
-import { getJson, ML_LEDGER_KEY } from '../setups/store';
-import type { LedgerEntry } from '../ml/ledger';
+import { getJson, INDEX_KEY, ML_LEDGER_KEY, mlKey, type RunIndexItem } from '../setups/store';
+import { ledgerEntry, type LedgerEntry, type MlResult } from '../ml/ledger';
+import { EARLY_NOTES, type EarlyNote } from './early';
 import { algoOrders, journalTradesBetween, season, weekdays } from '../shorts/source';
 import { dayCandles } from '../shorts/spec';
 import { istToday, splitMeAlgo, weekOf, type ShortTrade } from '../shorts/trades';
 import { freezeThrough, loadLedger, mergedWeeks, saveLedger } from '../shorts/season';
 import type { Format, Material } from './article';
-import { buildingMaterial, dayLabel, monthLabel, tradesMaterial, vsMaterial } from './material';
+import { buildingMaterial, dayLabel, monthLabel, recapOf, tradesMaterial, vsMaterial } from './material';
 
 /** Loads one format's real data for a period and turns it into Material (lib/medium/material.ts decides what goes in). */
 
@@ -35,11 +36,11 @@ export async function periods(now = Date.now()) {
   const today = istToday(now);
   const thisWeek = weekOf(today);
   const lastWeek = today >= addDays(thisWeek, 5) ? thisWeek : addDays(thisWeek, -7);
-  const [s, ledger] = await Promise.all([season(now).catch(() => ({ weeks: [] })), getJson<LedgerEntry[]>(store, ML_LEDGER_KEY).catch(() => undefined)]);
+  const [s, its] = await Promise.all([season(now).catch(() => ({ weeks: [] })), iterations().catch(() => new Map<number, LedgerEntry | EarlyNote>())]);
   return {
     week: lastWeek, month: prevMonth(today.slice(0, 7)), thisMonth: today.slice(0, 7),
     vsWeeks: s.weeks.map((w) => w.week), liveFrom: LIVE_FROM,
-    iterations: (ledger ?? []).map((e) => e.iteration).sort((a, b) => a - b),
+    iterations: [...its.keys()].sort((a, b) => a - b),
   };
 }
 
@@ -77,12 +78,47 @@ export async function loadMaterial(format: Format, p: PeriodInput, now = Date.no
     const { me, algo } = splitMeAlgo(trades.filter((t) => t.date >= week && t.date <= end), orders);
     return vsMaterial({ from: week, to: end, label: `${dayLabel(week)} – ${dayLabel(end)}` }, fw, seasonScore, weeks, me, algo, await minutes([...pick(me), ...pick(algo)]), now);
   }
-  const ledger = (await getJson<LedgerEntry[]>(store, ML_LEDGER_KEY)) ?? [];
-  const from = p.fromIteration ?? 0, to = p.toIteration ?? 1e9;
-  const entries = ledger.filter((e) => e.iteration >= from && e.iteration <= to);
-  if (!entries.length) throw new Error('No Algo Lab iterations in that range (the kept ledger starts at iteration 5).');
-  const its = entries.map((e) => e.iteration);
-  return buildingMaterial({ from: String(Math.min(...its)), to: String(Math.max(...its)), label: `Iterations ${Math.min(...its)}–${Math.max(...its)}` }, entries);
+  const all = await iterations();
+  const from = p.fromIteration ?? 1, to = p.toIteration ?? from;
+  const lo = Math.min(from, to), hi = Math.max(from, to);
+  const picked = [...all.values()].filter((e) => e.iteration >= lo && e.iteration <= hi);
+  if (!picked.length) throw new Error('No Algo Lab iterations in that range.');
+  const entries = picked.filter((e): e is LedgerEntry => !('facts' in e)), notes = picked.filter((e): e is EarlyNote => 'facts' in e);
+  // one iteration = one part of the series: the parts before it are recapped in a line each
+  const earlier = [...all.values()].filter((e) => e.iteration < lo).sort((a, b) => a.iteration - b.iteration).map(recapOf);
+  return buildingMaterial({ from: String(lo), to: String(hi), label: lo === hi ? `Iteration ${lo}` : `Iterations ${lo}–${hi}` }, entries, notes, earlier);
+}
+
+type AnyMl = MlResult & { overall?: { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number } };
+
+/**
+ * Every Algo Lab iteration that can be written about: the kept ledger (5 on), then any older run whose results are
+ * still in the run index, then the notes for 1-4 (lib/medium/early.ts) for whatever is still missing.
+ */
+export async function iterations(): Promise<Map<number, LedgerEntry | EarlyNote>> {
+  const [ledger, runs] = await Promise.all([getJson<LedgerEntry[]>(store, ML_LEDGER_KEY).catch(() => undefined), getJson<RunIndexItem[]>(store, INDEX_KEY).catch(() => undefined)]);
+  const out = new Map<number, LedgerEntry | EarlyNote>();
+  for (const e of ledger ?? []) out.set(e.iteration, e);
+  const kept = new Set((ledger ?? []).map((e) => e.runId));
+  const older = (runs ?? []).filter((r) => !kept.has(r.runId)).slice(0, 40);
+  const mls = await Promise.all(older.map((r) => getJson<AnyMl>(store, mlKey(r.runId)).catch(() => undefined)));
+  for (const ml of mls) {
+    if (!ml) continue;
+    let e: LedgerEntry;
+    if (ml.v === 1 && ml.overall) {
+      const o = ml.overall;
+      e = { iteration: 1, runId: ml.runId, createdAt: ml.createdAt, code: null, best: 'tight', changes: [], lines: [{ id: 'tight', name: 'tight', n: o.n, netR: o.netR, gross: null, t: o.t, monthsGreen: o.monthsGreen ?? 0, monthsTraded: o.monthsTraded ?? 0, dev: null, exam: null, ic: null }] };
+    } else e = ledgerEntry({ ...ml, iteration: ml.iteration ?? 2 });
+    const have = out.get(e.iteration);
+    if (!have || (!('facts' in have) && !kept.has(have.runId) && have.createdAt < e.createdAt)) out.set(e.iteration, e); // newest run of that iteration
+  }
+  for (const n of EARLY_NOTES) {
+    const have = out.get(n.iteration);
+    if (!have) out.set(n.iteration, n);
+    // a run's own results win, but its "what changed" lines are technical: the notes' plain-words lines are offered too
+    else if (!('facts' in have)) out.set(n.iteration, { ...have, changes: [...have.changes, ...n.changes.filter((c) => !have.changes.includes(c))] });
+  }
+  return out;
 }
 
 /** Only the trades that may get a chart: the biggest by R / ₹ either way (keeps the candle reads few). */
