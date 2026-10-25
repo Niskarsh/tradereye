@@ -1,0 +1,4 @@
+# Copy to backend.hcl (not committed) and fill in. Used once: terraform init -backend-config=backend.hcl
+bucket  = "your-tradereye-bucket"
+region  = "ap-south-1"
+profile = "tradereye-tf"
