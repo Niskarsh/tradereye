@@ -19,8 +19,8 @@ The file formats are shared with `lib/medium/collect.ts` (tradereye's reading si
 
 ## Checking it
 `GET /api/medium/status` (signed in; open it in the browser): whether it is collecting, the last run per feed, stories
-stored, and the tag trends so far. A wrong tag slug shows up as an error or 0 stories: fix it in `FEEDS` and paste the
-file into the Lambda again. The Lambda's own logs: Lambda -> Monitor -> View CloudWatch logs.
+stored, and the tag trends so far. A wrong tag slug shows up as an error or 0 stories: fix it in `FEEDS` and run `terraform apply`
+(infra/terraform). The Lambda's own logs: Lambda -> Monitor -> View CloudWatch logs.
 
 ## Trends (`trends()` in `lib/medium/collect.ts`)
 Counts the tags on every stored story, last 7 days against the average week of the 3 weeks before (only weeks the
@@ -28,9 +28,9 @@ collector was running). `surge` = last week / usual week. Until one full baselin
 last week's counts are given; it means something after about two weeks.
 
 ## AWS
+Created and updated by Terraform: `infra/terraform/medium-collector.tf` (setup and commands in `infra/terraform/README.md`).
 - Lambda `tradereye-medium-collector`: Node.js 22.x, code = `infra/medium-collector/index.mjs` (no packages; the AWS SDK
-  is built in), timeout 1 min, env `BUCKET` = the S3 bucket. Its role needs `s3:GetObject` and `s3:PutObject` on
-  `<bucket>/medium/*`.
-- EventBridge Scheduler schedule `tradereye-medium-collector`: rate(3 hours), target that Lambda, payload `{}`.
-- The S3 key tradereye uses (Vercel `AWS_ACCESS_KEY_ID`) needs `s3:GetObject` on `medium/*` to read it.
+  is built in), timeout 1 min, env `BUCKET`. Its role: `s3:GetObject` / `s3:PutObject` on `<bucket>/medium/*`, `s3:ListBucket` (so a missing file reads as "not found"), plus logs.
+- EventBridge Scheduler schedule `tradereye-medium-collector`: rate(3 hours), Asia/Kolkata, target that Lambda, payload `{}`.
+- tradereye reads `medium/*` with its existing bucket access (`infra/terraform/app-user.tf`).
 - Cost: 8 runs a day, inside the free tiers of Scheduler and Lambda.

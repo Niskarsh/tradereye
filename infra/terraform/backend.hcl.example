@@ -1,0 +1,6 @@
+# Copy to backend.hcl (not committed) and fill in. Used with: terraform init -backend-config=backend.hcl
+# The bucket here is the PRIVATE state bucket (tradereye-tfstate-<account id>), never the tradereye bucket: that one is
+# publicly readable, and the state holds secrets (e.g. CRON_SECRET).
+bucket  = "tradereye-tfstate-<account id>"
+region  = "ap-south-1"
+profile = "tradereye-tf"

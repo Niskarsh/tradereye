@@ -1,0 +1,10 @@
+# local Terraform files: never commit state, credentials or the filled-in settings
+.terraform/
+.build/
+*.tfstate
+*.tfstate.*
+backend.hcl
+terraform.tfvars
+crash.log
+imports.tf
+generated.tf
