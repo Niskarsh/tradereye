@@ -167,6 +167,10 @@ export default function MediumPage() {
     take((await api<{ article: Article }>('/api/medium/articles', { method: 'POST', body })).article);
     await loadList();
   });
+  const refresh = () => run('refresh', async () => {
+    await flush();
+    take((await api<{ article: Article }>('/api/medium/articles', { method: 'POST', body: { refresh: a!.id } })).article);
+  });
   const ask = () => run('questions', async () => {
     await flush();
     take((await api<{ article: Article }>('/api/medium/questions', { method: 'POST', body: { id: a!.id } })).article);
@@ -288,7 +292,10 @@ export default function MediumPage() {
           {a && (<>
             <section className={card}>
               <p className="text-xs font-bold uppercase tracking-wide text-brand-accent">{kicker}</p>
-              <h2 className="text-lg font-semibold text-white">{a.material.period.label}</h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold text-white">{a.material.period.label}</h2>
+                <button type="button" className={ghost} disabled={!!busy} onClick={refresh} title="Load this period's data again (your answers and draft stay)">{busy === 'refresh' && <Loader2 className="size-3.5 animate-spin" />}Refresh data</button>
+              </div>
               <details className="mt-2">
                 <summary className="cursor-pointer text-sm text-ink-3">The data Claude sees ({a.material.facts.length} lines{a.material.hiddenTickers.length ? `, ${a.material.hiddenTickers.length} recent tickers hidden as Stock A…` : ''})</summary>
                 <ul className="mt-2 space-y-1 text-xs text-ink-2">{a.material.facts.map((f, i) => <li key={i}>• {f}</li>)}</ul>
@@ -350,10 +357,11 @@ export default function MediumPage() {
                   </p>
                   {checks.secrets.length > 0 && <p className="text-data-red-text"><b>Blocked:</b> secret terms in the text: {checks.secrets.join(', ')}</p>}
                   {checks.tickers.length > 0 && <p className="text-data-red-text"><b>Blocked:</b> recent tickers (under 3 months, SEBI): {checks.tickers.join(', ')}. Use the Stock A… labels.</p>}
+                  {checks.jargon.length > 0 && <p className="text-data-caution">A beginner would get lost at: {checks.jargon.join('; ')}. Add a plain explanation.</p>}
                   {checks.advice.map((x, i) => <p key={i} className="text-data-caution">Reads as advice ({x.why}): “{x.phrase}”</p>)}
                   {checks.unknownNumbers.length > 0 && <p className="text-data-caution">Numbers not in your data or answers (check them): {checks.unknownNumbers.join(', ')}</p>}
                   {checks.missingImages.length > 0 && <p className="text-ink-3">Not placed yet: {checks.missingImages.map((id) => `[IMAGE ${id}]`).join(', ')}</p>}
-                  {!checks.blocked && !checks.advice.length && !checks.unknownNumbers.length && <p className="text-ink-3">No problems found.</p>}
+                  {!checks.blocked && !checks.advice.length && !checks.unknownNumbers.length && !checks.jargon.length && <p className="text-ink-3">No problems found.</p>}
                 </div>
               )}
             </section>

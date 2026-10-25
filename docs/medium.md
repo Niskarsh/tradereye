@@ -30,6 +30,14 @@ index, otherwise from `lib/medium/early.ts` (numbers copied from docs/algo-lab.m
 recap of every earlier iteration and the chart shows them all; the publish kit lists the earlier parts already
 published ("Earlier in this series", copyable) so readers can start at part 1.
 
+### Written for people who have never traded
+Medium readers are mostly not traders. The data Claude gets is in plain words, with a glossary (R, charges, stop, short,
+exam months, confidence score...) it must use to explain each term the first time. Versions are never letters
+("Strategy A"): "the version it kept", "comparison version 1". Questions may never ask him for a number, date, month or
+name (the data has all that is known); ones that do are dropped (`asksForFact`). The checks flag jargon a beginner would
+not know when it is not explained in the same sentence (`jargonHits`). **Refresh data** reloads an article's data with
+these rules, keeping its answers and draft.
+
 ### The guards (pure, `lib/medium/article.ts`, tested in `tests/mediumPage.test.ts`)
 - **His words**: the page shows how much of the draft is his answers (3-word runs); under 80% it warns. Medium does
   not allow AI-written stories behind the paywall, and his Partner Program account is the asset.
