@@ -292,3 +292,10 @@ test('settings carry the writing style and sign-off, an empty sign-off stays emp
   assert.equal(cleanSettings({ signOff: '' }).signOff, '');
   assert.equal(cleanSettings({ writingStyle: '  ' }).writingStyle, DEFAULT_WRITING_STYLE);
 });
+
+test('the writing style covers his fragments and dash rhythm', async () => {
+  const { DEFAULT_WRITING_STYLE } = await import('../lib/medium/voice');
+  assert.match(DEFAULT_WRITING_STYLE, /fragments and phrases/);
+  assert.match(DEFAULT_WRITING_STYLE, /correcting himself mid-sentence/);
+  assert.match(DEFAULT_WRITING_STYLE, /do not "fix" them into commas/);
+});

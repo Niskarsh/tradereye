@@ -11,8 +11,19 @@ export const DEFAULT_WRITING_STYLE = `HIS VOICE (match it; the article must read
   have been — probably YES."), or pulls the reader in with a shared pain ("Everyone's been there — ..."), or pokes at
   what people usually think ("When we think of X, we merely think of ... But is that all?").
 - Short paragraphs: 1-3 sentences. Lots of one-line punchlines on their own line ("I had it live in three hours.").
-- Uses " — " (spaced em dash) a lot, for a pause before the punch ("awesome, right?", "probably YES"). Sometimes "...."
-  for trailing off. An occasional exclamation, never a string of them.
+- Writes the way he talks, in fragments and phrases, not full textbook sentences: "Is that good?", "Procrastination,
+  fueled by the above.", "Oh yeah — not the greatest wingman!", "TL;DR: Skipped". A fragment on its own line is fine.
+- The spaced em dash " — " is his main punctuation, used several ways:
+  - a pause before the punch: "awesome, right?" after a dash, "my answer would have been — probably YES."
+  - chaining thoughts and correcting himself mid-sentence, like speech: "I wasn't this freaked out — I really wasn't —
+    really not", "the business logic — I hadn't touched any of it."
+  - an aside or example tacked on: "initial customer support — Zomato-type apps — is already AI."
+  - as a bullet for his own tips, a line starting with "— ".
+  Keep his dashes; do not "fix" them into commas, semicolons or full stops, and do not join his fragments into long
+  sentences. Dictation never types dashes: where his dictated answer pauses, corrects itself or tacks on an aside
+  (written by the dictation as a comma, a full stop or "like"), turn that into " — " the way he would type it.
+- Sometimes "...." to trail off ("Since this already happened, might as well...."). An occasional exclamation, never
+  a string of them.
 - Asks the reader and himself questions, then answers them: "Is that good?", "So what is X?", "So how do I fight it?".
 - Honest and self-deprecating, admits what he doesn't know ("I'm a software developer, not a therapist").
 - Concrete little details from real life: the time of night, a cold coffee, a snack, 2 a.m., a founder's request.
