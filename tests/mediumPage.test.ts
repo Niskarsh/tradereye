@@ -227,3 +227,41 @@ test('series links: published earlier parts, oldest first', async () => {
   const m = buildingMaterial({ from: '4', to: '4', label: 'Iteration 4' }, []);
   assert.deepEqual(seriesLinks({ format: 'building', material: m }, heads).map((x) => x.label), ['Part 1', 'Part 3']);
 });
+
+/* ---------------- Gemini image prompts ---------------- */
+
+test('every section gets an image line right under its heading; old section markers are replaced', async () => {
+  const { placeSectionMarkers, sectionsOf, sectionsWithoutImage } = await import('../lib/medium/prompts');
+  const d = placeSectionMarkers('Intro line.\n\n## First try\nText.\n[IMAGE s9]\n## The exam\nMore.\n[IMAGE best]');
+  assert.equal(d, 'Intro line.\n\n## First try\n\n[IMAGE s1]\nText.\n## The exam\n\n[IMAGE s2]\nMore.\n[IMAGE best]');
+  assert.deepEqual(sectionsOf(d), ['First try', 'The exam']);
+  const ai = [{ id: 's1', section: 'First try', hook: '', scene: 'x', caption: '' }];
+  assert.deepEqual(sectionsWithoutImage(d, ai), ['The exam']);
+  assert.deepEqual(sectionsWithoutImage(`${d}\n## Added later\nNew text.`, ai), ['The exam', 'Added later']);
+});
+
+test('prompts: hook max 6 words and the only text, style and rules always added, captions labelled as AI once', async () => {
+  const { buildPrompt, aiCaption, toAiImages, cleanAiImages, DEFAULT_STYLE, AI_LABEL } = await import('../lib/medium/prompts');
+  const p = buildPrompt({ hook: '"8 months. 8 losses. One stubborn developer."', scene: 'A laptop at dawn, the hook on its screen.' });
+  assert.match(p, /ONLY readable text in the image is "8 months\. 8 losses\. One stubborn"/);
+  assert.ok(p.includes(DEFAULT_STYLE));
+  assert.match(p, /Avoid: logos, brand names/);
+  assert.match(buildPrompt({ hook: '', scene: 'x' }), /no readable text anywhere/);
+  assert.equal(aiCaption('Hold my prompt.'), `Hold my prompt. ${AI_LABEL}`);
+  assert.equal(aiCaption(`Hold my prompt. ${AI_LABEL}`), `Hold my prompt. ${AI_LABEL}`);
+  const ai = toAiImages({ hook: 'h', scene: 'cover scene', caption: 'c' }, [{ hook: 'a', scene: 's1 scene', caption: 'x' }, { hook: 'b', scene: '', caption: '' }], ['One', 'Two']);
+  assert.deepEqual(ai.map((i) => [i.id, i.section]), [['cover', ''], ['s1', 'One']]);
+  assert.deepEqual(cleanAiImages([{ id: 'evil', scene: 'x' }, { id: 's2', section: 'Two', hook: 'h', scene: 's', caption: 'c' }]).map((i) => i.id), ['s2']);
+});
+
+test('image hooks are checked like the text: secrets, recent tickers and made-up numbers', () => {
+  const a = {
+    draft: 'Body text.', answers: [], material: { hiddenTickers: ['RELIANCE'], images: [], facts: ['lost in 8 of 9 months'] } as unknown as Material,
+    kit: { title: '', subtitle: '', tags: [], captions: {}, ai: [{ id: 'cover', section: '', hook: 'RELIANCE crashed 40%', scene: 'gap fade on screen', caption: '' }] },
+  };
+  const c = checkDraft(a, ['gap fade']);
+  assert.deepEqual(c.tickers, ['RELIANCE']);
+  assert.deepEqual(c.secrets, ['gap fade']);
+  assert.ok(c.unknownNumbers.includes('40'));
+  assert.equal(c.blocked, true);
+});

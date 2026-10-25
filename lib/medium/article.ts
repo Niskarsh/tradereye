@@ -8,6 +8,8 @@
  * plus SEBI: no tips or buy/sell calls, a risk disclaimer added by code, tickers only for trades over 92 days old.
  */
 
+import { cleanAiImages, DEFAULT_STYLE, sectionsWithoutImage, type AiImage } from './prompts';
+
 export type Format = 'weekly' | 'vs-algo' | 'building' | 'monthly';
 export const FORMATS: { id: Format; name: string; what: string }[] = [
   { id: 'weekly', name: 'Weekly trade log', what: 'The week\'s journal trades, wins and losses, one lesson' },
@@ -50,7 +52,14 @@ export interface Material {
   oldPrices: boolean;
 }
 
-export interface Kit { title: string; subtitle: string; tags: string[]; captions: Record<string, string>; publication?: string }
+export interface Kit {
+  title: string; subtitle: string; tags: string[];
+  /** captions of the optional real-data charts */
+  captions: Record<string, string>;
+  publication?: string;
+  /** Gemini prompts: the cover and one per section (lib/medium/prompts.ts) */
+  ai?: AiImage[];
+}
 export interface Article {
   v: 1; id: string; format: Format; createdAt: number; updatedAt: number;
   material: Material;
@@ -93,7 +102,7 @@ export function seriesLinks(a: Pick<Article, 'format' | 'material'>, heads: Arti
 /* ---------------- settings: publications and secret terms ---------------- */
 
 export interface Publication { name: string; url: string; fits: Format[]; never?: boolean; note?: string }
-export interface Settings { v: 1; publications: Publication[]; secretTerms: string[] }
+export interface Settings { v: 1; publications: Publication[]; secretTerms: string[]; /** the shared look of every Gemini prompt */ imageStyle: string }
 
 const ALL: Format[] = ['weekly', 'vs-algo', 'building', 'monthly'];
 /** The publications he writes for (Oct 2026), ranked best fit first per format. */
@@ -115,7 +124,7 @@ export const DEFAULT_PUBLICATIONS: Publication[] = [
   { name: 'Lampshade of ILLUMINATION', url: 'https://medium.com/lampshade-of-illumination', fits: [], never: true,
     note: 'publishes only AI-generated content: would label his work AI on his Partner Program account' },
 ];
-export const defaultSettings = (): Settings => ({ v: 1, publications: DEFAULT_PUBLICATIONS.map((p) => ({ ...p, fits: [...p.fits] })), secretTerms: [] });
+export const defaultSettings = (): Settings => ({ v: 1, publications: DEFAULT_PUBLICATIONS.map((p) => ({ ...p, fits: [...p.fits] })), secretTerms: [], imageStyle: DEFAULT_STYLE });
 
 /** Publications that fit this format, best first. Never one marked `never`. */
 export function suggestPublications(format: Format, pubs: Publication[]): Publication[] {
@@ -135,6 +144,7 @@ export function cleanSettings(x: unknown): Settings {
         fits: (Array.isArray(p.fits) ? p.fits : []).filter((f): f is Format => ALL.includes(f as Format)),
         ...(p.never ? { never: true } : {}), ...(p.note ? { note: String(p.note).slice(0, 160) } : {}),
       })),
+    imageStyle: String(s.imageStyle ?? '').trim().slice(0, 1500) || DEFAULT_STYLE,
     secretTerms: [...new Set((Array.isArray(s.secretTerms) ? s.secretTerms : []).map((t) => String(t).trim()).filter((t) => t.length >= 2))].slice(0, 200).map((t) => t.slice(0, 80)),
   };
 }
@@ -244,14 +254,15 @@ export const asksForFact = (q: string) =>
 export interface Checks { yourWords: number; jargon: string[]; secrets: string[]; tickers: string[]; advice: { phrase: string; why: string }[]; unknownNumbers: string[]; missingImages: string[]; blocked: boolean }
 /** Everything the page shows under the draft. Secret terms and recent tickers block copying. */
 export function checkDraft(a: Pick<Article, 'draft' | 'answers' | 'material' | 'kit'>, secretTerms: string[]): Checks {
-  const all = [a.draft, a.kit?.title ?? '', a.kit?.subtitle ?? '', ...Object.values(a.kit?.captions ?? {})].join('\n');
+  const ai = a.kit?.ai ?? [];
+  const all = [a.draft, a.kit?.title ?? '', a.kit?.subtitle ?? '', ...Object.values(a.kit?.captions ?? {}), ...ai.flatMap((i) => [i.hook, i.scene, i.caption])].join('\n');
   const secrets = secretHits(all, secretTerms), tickers = tickerHits(all, a.material.hiddenTickers);
-  const placed = new Set([...a.draft.matchAll(/\[IMAGE ([^\]]+)\]/g)].map((m) => m[1].trim()));
   return {
     yourWords: yourWordsShare(a.draft, a.answers), jargon: jargonHits(a.draft),
     secrets, tickers, advice: adviceHits(all),
-    unknownNumbers: unknownNumbers(bodyText(a.draft), [...a.material.facts, ...a.answers]),
-    missingImages: a.material.images.filter((i) => i.data.kind !== 'banner' && !placed.has(i.id)).map((i) => i.id),
+    // the image hooks too: a made-up number in the cover would be the most visible one of all
+    unknownNumbers: unknownNumbers([bodyText(a.draft), ...ai.map((i) => i.hook)].join('\n'), [...a.material.facts, ...a.answers]),
+    missingImages: sectionsWithoutImage(a.draft, ai),
     blocked: secrets.length > 0 || tickers.length > 0,
   };
 }
@@ -281,7 +292,7 @@ const inline = (s: string) => html(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</s
  * The draft as HTML for Medium's editor (pasted as rich text keeps headings, bold, italics, lists, quotes and
  * dividers). Image markers become a visible line saying which download goes there.
  */
-export function toMediumHtml(draft: string, images: ImageSpec[]): string {
+export function toMediumHtml(draft: string, images: { id: string; title: string; caption: string }[]): string {
   const out: string[] = [];
   let list: string[] = [];
   const flush = () => { if (list.length) { out.push(`<ul>${list.map((l) => `<li>${inline(l)}</li>`).join('')}</ul>`); list = []; } };
@@ -325,7 +336,7 @@ export function cleanTags(tags: unknown): string[] {
 export function cleanDraft(draft: unknown, images: ImageSpec[]): string {
   const ids = new Set(images.map((i) => i.id));
   return String(draft ?? '').slice(0, 30_000).split('\n')
-    .filter((l) => { const m = l.match(/^\s*\[IMAGE ([^\]]+)\]\s*$/); return !m || ids.has(m[1].trim()); })
+    .filter((l) => { const m = l.match(/^\s*\[IMAGE ([^\]]+)\]\s*$/); return !m || ids.has(m[1].trim()) || /^s\d+$/.test(m[1].trim()); })
     .join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -362,6 +373,7 @@ export function applyPatch(a: Article, p: Patch, pubs: Publication[], now = Date
     if (k.publication && pubs.find((x) => x.name === k.publication)?.never) return { article: a, error: `${k.publication} publishes only AI-generated content: not for your articles.` };
     next.kit = {
       title: clip(k.title, 100), subtitle: clip(k.subtitle, 160), tags: cleanTags(k.tags), publication: k.publication ? clip(k.publication, 80) : undefined,
+      ai: cleanAiImages(k.ai),
       captions: Object.fromEntries(Object.entries(k.captions ?? {}).filter(([id]) => a.material.images.some((i) => i.id === id)).map(([id, c]) => [id, clip(c, 160)])),
     };
   }

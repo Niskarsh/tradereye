@@ -2,6 +2,7 @@ import { jsonClaude, type ClaudeOptions } from '../copilot/claude';
 import { claudeOptions } from '../shorts/write';
 import { asksForFact, cleanDraft, cleanTags, FORMATS, withDisclaimer, type Article, type Kit } from './article';
 import { factsFor } from './material';
+import { placeSectionMarkers, sectionsOf, toAiImages } from './prompts';
 
 /**
  * The Medium page's two Claude calls, each only when he presses its button:
@@ -59,26 +60,50 @@ article MUST be his words:
 ${PLAIN}
 ${NEVER}
 
-Format of "draft" (plain text, markdown-lite): "## " section headings, "- " bullet lines, **bold** sparingly, "> " for
-one standout line of his. Put each image on its own line as [IMAGE <id>] where it belongs (ids listed below; not the
-banner, it goes on top automatically). No H1 title inside the draft.
+Format of "draft" (plain text, markdown-lite): "## " section headings (3 to 6 sections), "- " bullet lines, **bold**
+sparingly, "> " for one standout line of his. No H1 title and no image lines inside the draft (images are placed by
+code under each heading).
+
+Images: he generates them himself in Gemini from your prompts. Write one for the cover ("cover") and one for EACH
+"## " section, in the same order as the headings ("sections"). His taste, from his own Medium covers:
+- a photograph of a real-world scene, never a generic stock look: e.g. a laptop screen at dawn, a phone notification,
+  a search bar, a sticky note on a monitor, a notebook page, a book cover, a chai cup beside a keyboard
+- the hook is written INSIDE the scene on an object (the screen, the note, the book), not pasted on top
+- moody low-key light, warm amber-gold with an emerald-teal edge, shallow depth of field, ONE focal point
+- for an explainer section a clean flat illustration (simple shapes, his colours) is fine instead of a photo
+- decorative chart shapes are fine only blurred in the background: never a readable chart, axis or number as data
+- no logos, brands, app names (a "search bar", not Google), no real people
+For each image:
+- hook: the words shown in the image, max 6 words, punchy, true to the data or his answers (or "" for no text).
+  The cover hook is the scroll-stopper: a real number with tension, or a question a beginner would click.
+- scene: 2-4 sentences: the subject, where the hook is written, the setting, light and camera. Do not repeat the
+  shared style (it is added automatically) and do not put the hook text in the scene except as "the hook".
+- caption: one short witty line in his voice, like "Me: considers doing X / ChatGPT: 'Hold my prompt.'" (the AI
+  label is added automatically).
 
 Publish kit:
 - title: max 70 characters, specific, with a real number and tension, understandable by a non-trader.
 - subtitle: max 140 characters, says what the reader gets.
 - tags: exactly 5 Medium tags, lower case, the ones readers of this topic follow (e.g. "algorithmic trading",
   "day trading", "machine learning", "stock market", "trading psychology"); never tickers or brand names.
-- captions: one factual caption per image id (max 120 characters), from the data only.`;
+- captions: for the optional real-data charts listed below, one factual caption each (max 120 characters).`;
 
 export const QUESTIONS_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['questions'],
   properties: { questions: { type: 'array', items: { type: 'string' } } },
 } as const;
 
+const AI_IMAGE_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['hook', 'scene', 'caption'],
+  properties: { hook: { type: 'string' }, scene: { type: 'string' }, caption: { type: 'string' } },
+} as const;
+
 export const DRAFT_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['draft', 'title', 'subtitle', 'tags', 'captions'],
+  type: 'object', additionalProperties: false, required: ['draft', 'title', 'subtitle', 'tags', 'captions', 'cover', 'sections'],
   properties: {
     draft: { type: 'string' }, title: { type: 'string' }, subtitle: { type: 'string' },
+    cover: AI_IMAGE_SCHEMA,
+    sections: { type: 'array', items: AI_IMAGE_SCHEMA },
     tags: { type: 'array', items: { type: 'string' } },
     captions: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'caption'], properties: { id: { type: 'string' }, caption: { type: 'string' } } } },
   },
@@ -94,7 +119,7 @@ export const questionsMessage = (a: Article) => data(a);
 export function draftMessage(a: Article): string {
   const qa = a.questions.map((q, i) => `Q${i + 1}: ${q}\nHIS ANSWER: ${(a.answers[i] ?? '').trim() || '(no answer)'}`).join('\n\n');
   const imgs = a.material.images.filter((i) => i.data.kind !== 'banner').map((i) => `- ${i.id}: ${i.title}`).join('\n');
-  return `${data(a)}\n\nIMAGES (place each with [IMAGE <id>]):\n${imgs || '- none'}\n\nHIS ANSWERS (the article is made of these):\n${qa}`;
+  return `${data(a)}\n\nOPTIONAL REAL-DATA CHARTS (captions only):\n${imgs || '- none'}\n\nHIS ANSWERS (the article is made of these):\n${qa}`;
 }
 
 const clip = (s: unknown, n: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -110,16 +135,19 @@ export async function askQuestions(a: Article, o: ClaudeOptions = claudeOptions(
 }
 
 export async function writeDraft(a: Article, o: ClaudeOptions = claudeOptions()): Promise<{ draft: string; kit: Kit; costInr: number }> {
-  const r = await jsonClaude(DRAFT_SYSTEM, draftMessage(a), DRAFT_SCHEMA, { ...o, timeoutMs: 120_000 }, 6000);
-  const j = r.json as { draft?: string; title?: string; subtitle?: string; tags?: unknown; captions?: { id?: string; caption?: string }[] };
+  const r = await jsonClaude(DRAFT_SYSTEM, draftMessage(a), DRAFT_SCHEMA, { ...o, timeoutMs: 150_000 }, 9000);
+  const j = r.json as { draft?: string; title?: string; subtitle?: string; tags?: unknown; captions?: { id?: string; caption?: string }[]; cover?: unknown; sections?: unknown };
   if (!j.draft) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no draft.');
   const ids = new Set(a.material.images.map((i) => i.id));
   const captions: Record<string, string> = {};
   for (const i of a.material.images) if (i.caption) captions[i.id] = i.caption;
   for (const c of Array.isArray(j.captions) ? j.captions : []) if (c?.id && ids.has(c.id) && c.caption) captions[c.id] = clip(c.caption, 160);
+  // every section opens with its image: markers placed by code, prompts matched to the headings by order
+  const body = placeSectionMarkers(cleanDraft(String(j.draft).replace(/^\s*\[IMAGE [^\]]+\]\s*$/gm, ''), a.material.images));
+  const ai = toAiImages(j.cover, j.sections, sectionsOf(body));
   return {
-    draft: withDisclaimer(cleanDraft(j.draft, a.material.images), a.material.oldPrices),
-    kit: { title: clip(j.title, 100), subtitle: clip(j.subtitle, 160), tags: cleanTags(j.tags), captions },
+    draft: withDisclaimer(body, a.material.oldPrices),
+    kit: { title: clip(j.title, 100), subtitle: clip(j.subtitle, 160), tags: cleanTags(j.tags), captions, ai },
     costInr: r.costInr,
   };
 }
