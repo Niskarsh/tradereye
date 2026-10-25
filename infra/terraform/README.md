@@ -39,4 +39,4 @@ The resource names match `imports.tf`, so the first `terraform apply` imports th
 - The bucket is publicly readable as a whole; only the journal screenshots need it. Narrow it to their folders.
 - The Trade Assistant's security group allows SSH (22) and port 3000 from anywhere. With Cloudflare proxying, 3000 can
   be limited to Cloudflare's IP ranges, and SSH to your own IP.
-- CRON_SECRET was shared in a chat during the takeover: change it (new value in `terraform.tfvars` and in Vercel, apply).
+- Where every secret / variable lives, and which ones must match: `docs/env.md`.
