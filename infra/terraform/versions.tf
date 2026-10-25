@@ -1,5 +1,5 @@
 # tradereye's permanent AWS pieces, managed by Terraform (see README.md in this folder).
-# State lives in S3 (backend.hcl, not committed); S3 itself does the locking (use_lockfile), so no DynamoDB table.
+# No default_tags: they would change every imported resource. State lives in S3 (backend.hcl, not committed); S3 itself does the locking (use_lockfile), so no DynamoDB table.
 terraform {
   required_version = ">= 1.10"
 
@@ -26,7 +26,12 @@ provider "aws" {
   region  = var.region
   profile = var.aws_profile
 
-  default_tags {
-    tags = { app = "tradereye", managed_by = "terraform" }
-  }
+}
+
+# the Trade Assistant machine's region (the same as the bucket's unless set otherwise)
+provider "aws" {
+  alias   = "trade_assistant"
+  region  = coalesce(var.ec2_region, var.region)
+  profile = var.aws_profile
+
 }

@@ -4,3 +4,4 @@ bucket          = "your-tradereye-bucket"
 vercel_iam_user = "the-iam-user-whose-key-is-in-vercel"
 # aws_profile           = "tradereye-tf"
 # medium_collector_rate = "rate(3 hours)"
+# ec2_region            = "ap-south-1"   # only if the Trade Assistant machine is in another region

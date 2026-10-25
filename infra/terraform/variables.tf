@@ -24,3 +24,9 @@ variable "medium_collector_rate" {
   type        = string
   default     = "rate(3 hours)"
 }
+
+variable "ec2_region" {
+  description = "Region of the Trade Assistant EC2 machine, when it is not the bucket's region"
+  type        = string
+  default     = null
+}

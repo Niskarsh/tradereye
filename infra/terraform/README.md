@@ -18,6 +18,7 @@ Being brought in (hand-made earlier, taken over with `discover.sh` + `terraform 
 Never managed here: the Instagram timer's one-time wake-ups (`tr-ig-...`): tradereye creates and deletes those itself.
 
 ## Taking over the existing pieces (once)
+0. `./discover.sh inventory` lists everything in the account (all regions), to catch pieces nobody remembered.
 1. `./discover.sh users` lists IAM users and their keys, to tell which one Vercel and GitHub Actions use.
 2. `./discover.sh imports --users <vercel-user>,<github-user> --timer-role <role> [--ec2 <instance-id>]` writes
    `imports.tf` (read-only; changes nothing).
