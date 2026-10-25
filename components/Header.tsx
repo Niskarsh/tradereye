@@ -7,11 +7,11 @@ import { useSession } from '@/context/SessionContext';
 
 /**
  * Signed out: Home only, and "Sign in with Google" on the right.
- * Signed in (laptop / tablet): three menus, My Performance, My Live Trading and My Analysis, plus Socials and the account.
+ * Signed in (laptop / tablet): four menus, My Performance, My Live Trading, My Analysis and Socials, plus the account.
  * Phone: the same pages one below the other (no nesting), and sign in / out at the bottom.
  */
 
-interface Item { name: string; href: string }
+interface Item { name: string; href: string; exact?: boolean }
 const PERFORMANCE: Item[] = [
     { name: 'Home', href: '/' },
     { name: 'My Journal', href: '/journal' },
@@ -31,7 +31,11 @@ const ANALYSIS: Item[] = [
     { name: 'Reversal Study', href: '/study' },
     { name: 'Algo Lab', href: '/algo' },
 ];
-const SOCIALS = '/socials'; // connect YouTube / Instagram and make shorts (signed in only)
+// signed in only: Shorts & Reels (connect YouTube / Instagram, make and schedule shorts) and Medium (articles)
+const SOCIALS: Item[] = [
+    { name: 'Shorts & Reels', href: '/socials', exact: true },
+    { name: 'Medium', href: '/socials/medium' },
+];
 
 function classNames(...classes: (string | false | undefined)[]) {
     return classes.filter(Boolean).join(' ')
@@ -69,13 +73,14 @@ export default function Header() {
     const pathname = usePathname() || '/';
     const { status, owner, signIn, signOut } = useSession();
     const signedIn = status === 'owner';
-    const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`));
+    const isActive = (href: string, exact = false) => (href === '/' || exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
+    const itemActive = (i: Item) => isActive(i.href, i.exact);
     const link = 'whitespace-nowrap rounded-md px-2.5 py-2 text-sm font-medium';
     const idle = 'text-gray-300 hover:bg-white/5 hover:text-white';
     const on = 'bg-gray-950/50 text-white';
 
     const group = (title: string, items: Item[]) => {
-        const active = items.some((i) => isActive(i.href));
+        const active = items.some(itemActive);
         return (
             <Menu as="div" className="relative">
                 <MenuButton className={classNames(link, 'inline-flex items-center gap-1 focus:outline-none data-open:bg-white/5', active ? on : idle)}>
@@ -86,10 +91,10 @@ export default function Header() {
                     className="z-[60] mt-2 w-56 rounded-xl border border-line-strong bg-brand-bg/95 p-1.5 shadow-2xl backdrop-blur-md focus:outline-none transition duration-100 ease-out data-closed:scale-95 data-closed:opacity-0">
                     {items.map((i) => (
                         <MenuItem key={i.href}>
-                            <a href={i.href} aria-current={isActive(i.href) ? 'page' : undefined}
-                                className={classNames('flex items-center justify-between rounded-lg px-3 py-2 text-sm data-focus:bg-white/5 data-focus:text-white', isActive(i.href) ? 'text-brand-accent' : 'text-gray-300')}>
+                            <a href={i.href} aria-current={itemActive(i) ? 'page' : undefined}
+                                className={classNames('flex items-center justify-between rounded-lg px-3 py-2 text-sm data-focus:bg-white/5 data-focus:text-white', itemActive(i) ? 'text-brand-accent' : 'text-gray-300')}>
                                 {i.name}
-                                {isActive(i.href) && <span className="size-1.5 rounded-full bg-brand-accent" />}
+                                {itemActive(i) && <span className="size-1.5 rounded-full bg-brand-accent" />}
                             </a>
                         </MenuItem>
                     ))}
@@ -98,7 +103,7 @@ export default function Header() {
         );
     };
 
-    const flat = signedIn ? [...PERFORMANCE, ...LIVE_TRADING, ...ANALYSIS] : PERFORMANCE.slice(0, 1);
+    const flat = signedIn ? [...PERFORMANCE, ...LIVE_TRADING, ...ANALYSIS, ...SOCIALS] : PERFORMANCE.slice(0, 1);
 
     return (
         <>
@@ -132,7 +137,7 @@ export default function Header() {
                                         {group('My Performance', PERFORMANCE)}
                                         {group('My Live Trading', LIVE_TRADING)}
                                         {group('My Analysis', ANALYSIS)}
-                                        <a href={SOCIALS} aria-current={isActive(SOCIALS) ? 'page' : undefined} className={classNames(link, isActive(SOCIALS) ? on : idle)}>Socials</a>
+                                        {group('Socials', SOCIALS)}
                                         <Menu as="div" className="relative ml-2">
                                             <MenuButton className="flex items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/60" aria-label="Account">
                                                 <Avatar picture={owner?.picture} name={owner?.name} />
@@ -163,14 +168,11 @@ export default function Header() {
                             <div className="px-6 py-3 space-y-1">
                                 {status !== 'loading' && flat.map((item) => (
                                     <DisclosureButton key={item.href} as="a" href={item.href}
-                                        aria-current={isActive(item.href) ? 'page' : undefined}
-                                        className={classNames(isActive(item.href) ? on : idle, 'block rounded-md px-3 py-2 text-base font-medium')}>
+                                        aria-current={itemActive(item) ? 'page' : undefined}
+                                        className={classNames(itemActive(item) ? on : idle, 'block rounded-md px-3 py-2 text-base font-medium')}>
                                         {item.name}
                                     </DisclosureButton>
                                 ))}
-                                {signedIn && (
-                                    <DisclosureButton as="a" href={SOCIALS} aria-current={isActive(SOCIALS) ? 'page' : undefined} className={classNames(isActive(SOCIALS) ? on : idle, 'block rounded-md px-3 py-2 text-base font-medium')}>Socials</DisclosureButton>
-                                )}
                                 <div className="mt-2 border-t border-brand-card/60 pt-3">
                                     {status === 'loading' ? null : signedIn ? (
                                         <div className="flex items-center gap-3 px-1">
