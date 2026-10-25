@@ -8,10 +8,24 @@ Managed here:
   Asia/Kolkata) and its role, and read access to `medium/*` for the IAM user whose key is in Vercel (a separate policy;
   existing policies are not touched).
 
-Not managed here (on purpose):
-- the Instagram timer's one-time wake-ups (`tr-ig-...`): tradereye creates and deletes those itself.
-- the Instagram timer Lambda `tradereye-social-timer`, the bucket, the Vercel IAM user: created by hand earlier. They can
-  be brought in later with `terraform import`.
+Being brought in (hand-made earlier, taken over with `discover.sh` + `terraform import`, settings copied exactly):
+- the S3 bucket and its settings (CORS, public access block, encryption, ...)
+- the IAM users whose keys are in Vercel and in GitHub Actions, with their policies (their access keys are never
+  managed: Terraform never sees or stores a secret)
+- the Instagram timer: Lambda `tradereye-social-timer`, its role and log group, and the role Scheduler uses to run it
+- (if included) the Trade Assistant EC2 machine, its security group and Elastic IP
+
+Never managed here: the Instagram timer's one-time wake-ups (`tr-ig-...`): tradereye creates and deletes those itself.
+
+## Taking over the existing pieces (once)
+1. `./discover.sh users` lists IAM users and their keys, to tell which one Vercel and GitHub Actions use.
+2. `./discover.sh imports --users <vercel-user>,<github-user> --timer-role <role> [--ec2 <instance-id>]` writes
+   `imports.tf` (read-only; changes nothing).
+3. `terraform plan -generate-config-out=generated.tf` writes every imported piece's current settings as Terraform
+   (still changes nothing). Errors about the Lambda's code are expected at this step.
+4. Claude turns `generated.tf` into clean, committed files (no account ids or bucket name in the public repo).
+5. `terraform plan` must then show **0 to change, 0 to destroy** for the imported pieces: that proves the files match
+   AWS exactly. Only then `terraform apply` (it records them in state, and creates the Medium collector).
 
 ## One-time setup
 1. Install Terraform 1.10 or newer and the AWS CLI.

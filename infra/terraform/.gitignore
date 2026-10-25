@@ -6,3 +6,5 @@
 backend.hcl
 terraform.tfvars
 crash.log
+imports.tf
+generated.tf
