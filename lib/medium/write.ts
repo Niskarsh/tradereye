@@ -3,6 +3,7 @@ import { claudeOptions } from '../shorts/write';
 import { asksForFact, cleanDraft, cleanTags, FORMATS, withDisclaimer, type Article, type Kit } from './article';
 import { factsFor } from './material';
 import { placeSectionMarkers, sectionsOf, toAiImages } from './prompts';
+import { DEFAULT_SIGN_OFF, DEFAULT_WRITING_STYLE, withSignOff } from './voice';
 
 /**
  * The Medium page's two Claude calls, each only when he presses its button:
@@ -43,22 +44,30 @@ would tell a beginner.
   money in 8 of the 9 months it traded. What did you think when you saw that?").
 - Each question must make sense to him without looking anything up, and be answerable in a few spoken sentences.
   Max 35 words. No yes/no questions, no generic "what did you learn".
+- Ask casually, like a friend over chai, so his answers come out in his own spoken voice.
 ${PLAIN}
 ${NEVER}`;
 
-export const DRAFT_SYSTEM = `You arrange ${AUDIENCE}
+export const draftSystem = (writingStyle = DEFAULT_WRITING_STYLE) => `You arrange ${AUDIENCE}
 Medium's Partner Program does not allow AI-written articles behind the paywall, and this account is his income. So the
 article MUST be his words:
-- Build the body from his answers, keeping his own sentences. You may: reorder them, cut repetition and filler
-  ("um", "like", "so yeah"), fix grammar and typos, split long sentences, and add short section headings (max 6 words).
-- You may add at most one short linking sentence per section, and an opening line only if his answers have none.
-  Nothing else of your own. If his answers are thin, the article is short: do not pad it.
+- Build the body from his answers, keeping his own sentences and his casual words. You may: reorder them, cut
+  repetition and filler ("um", "so yeah"), fix clear typos and broken grammar from dictation, split long sentences,
+  and add short section headings (max 6 words) in his style.
+- You may add at most one short linking sentence per section, an opening hook line if his answers have none, and the
+  structural lines his articles always have (for a series: the "In my previous article..." intro, "In this article,
+  I'll cover:" bullets, "Let's dive in!", the "In my next article..." teaser; for every article: the closing question
+  to the reader). All of these in HIS voice below. Nothing else of your own. If his answers are thin, the article is
+  short: do not pad it.
+- Do NOT write "Thanks for reading!" or a subscribe line: his sign-off is added automatically.
 - Numbers only from the data or his answers, written exactly as given (rounding to 1 decimal is fine).
 - Refer to stocks only by the labels in the data ("Stock A" etc. stay as they are), and say once why names are hidden.
 - You MAY add short plain explanations of terms (a clause or one sentence) wherever a beginner would get lost; these
   are the only other words of your own allowed.
 ${PLAIN}
 ${NEVER}
+
+${writingStyle}
 
 Format of "draft" (plain text, markdown-lite): "## " section headings (3 to 6 sections), "- " bullet lines, **bold**
 sparingly, "> " for one standout line of his. No H1 title and no image lines inside the draft (images are placed by
@@ -78,8 +87,9 @@ For each image:
   The cover hook is the scroll-stopper: a real number with tension, or a question a beginner would click.
 - scene: 2-4 sentences: the subject, where the hook is written, the setting, light and camera. Do not repeat the
   shared style (it is added automatically) and do not put the hook text in the scene except as "the hook".
-- caption: one short witty line in his voice, like "Me: considers doing X / ChatGPT: 'Hold my prompt.'" (the AI
-  label is added automatically).
+- caption: one short witty line in his voice, like his own captions: a mini dialogue ("Google: 'Will AI steal my
+  job?' / AI: 'Hold my prompt!'"), a dry aside ("CSV: 1, Developer: 0"), or a teasing question ("Is your mind hooked
+  on something....?"). An emoji or two is fine. The AI label is added automatically.
 
 Publish kit:
 - title: max 70 characters, specific, with a real number and tension, understandable by a non-trader.
@@ -134,8 +144,8 @@ export async function askQuestions(a: Article, o: ClaudeOptions = claudeOptions(
   return { questions: qs, costInr: r.costInr };
 }
 
-export async function writeDraft(a: Article, o: ClaudeOptions = claudeOptions()): Promise<{ draft: string; kit: Kit; costInr: number }> {
-  const r = await jsonClaude(DRAFT_SYSTEM, draftMessage(a), DRAFT_SCHEMA, { ...o, timeoutMs: 150_000 }, 9000);
+export async function writeDraft(a: Article, voice: { writingStyle?: string; signOff?: string } = {}, o: ClaudeOptions = claudeOptions()): Promise<{ draft: string; kit: Kit; costInr: number }> {
+  const r = await jsonClaude(draftSystem(voice.writingStyle), draftMessage(a), DRAFT_SCHEMA, { ...o, timeoutMs: 150_000 }, 9000);
   const j = r.json as { draft?: string; title?: string; subtitle?: string; tags?: unknown; captions?: { id?: string; caption?: string }[]; cover?: unknown; sections?: unknown };
   if (!j.draft) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no draft.');
   const ids = new Set(a.material.images.map((i) => i.id));
@@ -146,7 +156,7 @@ export async function writeDraft(a: Article, o: ClaudeOptions = claudeOptions())
   const body = placeSectionMarkers(cleanDraft(String(j.draft).replace(/^\s*\[IMAGE [^\]]+\]\s*$/gm, ''), a.material.images));
   const ai = toAiImages(j.cover, j.sections, sectionsOf(body));
   return {
-    draft: withDisclaimer(body, a.material.oldPrices),
+    draft: withDisclaimer(withSignOff(body, voice.signOff ?? DEFAULT_SIGN_OFF), a.material.oldPrices),
     kit: { title: clip(j.title, 100), subtitle: clip(j.subtitle, 160), tags: cleanTags(j.tags), captions, ai },
     costInr: r.costInr,
   };

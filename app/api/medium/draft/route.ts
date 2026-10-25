@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     if (!a) return NextResponse.json({ error: 'NOT_FOUND', message: 'No such article.' }, { status: 404 });
     const answered = a.answers.filter((x) => x.trim().split(/\s+/).length >= 15).length;
     if (answered < 3) return NextResponse.json({ error: 'BAD_REQUEST', message: 'Answer at least 3 questions (a few sentences each) first: the article is made of your answers.' }, { status: 400 });
-    const r = await writeDraft(a);
+    const r = await writeDraft(a, { writingStyle: s.writingStyle, signOff: s.signOff });
     const publication = a.kit?.publication ?? suggestPublications(a.format, s.publications)[0]?.name;
     return NextResponse.json({ article: await saveArticle(mediumStore, { ...a, draft: r.draft, kit: { ...r.kit, publication }, costInr: Math.round((a.costInr + r.costInr) * 100) / 100 }), costInr: r.costInr });
   } catch (e) { return errorResponse(e); }
