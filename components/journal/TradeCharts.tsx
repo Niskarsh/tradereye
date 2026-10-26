@@ -14,7 +14,7 @@ import type { Candles } from '@/lib/dhan';
  * Tap a day on the daily chart to open it on the 10-minute chart.
  *
  * Data: /api/journal/candles reads the saved candles from S3 (Google sign-in is enough); anything missing comes from Dhan
- * once (needs the Dhan token that one time) and is saved, so opening the journal again needs no Dhan login. Loads when the card scrolls into view, one trade at a time.
+ * once (needs the Dhan token that one time) and is saved, so opening the journal again needs no Dhan login. Loads when the card scrolls into view (or at once with `eager`, as the journal does), one trade at a time.
  */
 
 interface Resp { symbol: string; securityId?: string; date: string; minute: Candles; nifty: Candles; daily?: Candles; live: boolean; counts: { fromS3: number; fromDhan: number; saved: number; dhanCalls: number; s3Errors: number; s3Error?: string; notSaved?: number } }
@@ -40,8 +40,10 @@ function useWide() {
   return wide;
 }
 
-export function TradeCharts({ symbol, date, direction, fills, token, securityId, initialStop, stopDist, lastStop, target, uploadedChart, uploading, onViewUploaded, onUpload }: {
+export function TradeCharts({ symbol, date, direction, fills, token, securityId, initialStop, stopDist, lastStop, target, uploadedChart, uploading, onViewUploaded, onUpload, eager = false }: {
   symbol: string; date: string; direction: string; fills: Fill[]; token: string;
+  /** start loading as soon as the page opens instead of when the card scrolls near the screen */
+  eager?: boolean;
   /** a chart screenshot uploaded by hand (older trades): shown on demand, not as a big box */
   uploadedChart?: string; uploading?: boolean; onViewUploaded?: (url: string) => void; onUpload?: (file: File) => void;
   securityId?: string; initialStop?: string; stopDist?: string; lastStop?: string; target?: string;
@@ -58,7 +60,7 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
 
   // load once the card is (nearly) on screen
   const box = useRef<HTMLDivElement>(null);
-  const [seen, setSeen] = useState(false);
+  const [seen, setSeen] = useState(eager);
   useEffect(() => {
     const el = box.current;
     if (!el || seen) return;
