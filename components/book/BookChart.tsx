@@ -14,7 +14,7 @@ export type { TradeMark };
  *    empty space on the right for them). Last price is a dashed gold line across the whole chart.
  *  - Bubbles: trades (green = buyers lifting the ask, red = sellers hitting
  *    the bid). 10-minute candles on the same clock as his chart. Shaded = not recorded.
- *  - Drag to pan; wheel zooms time (Ctrl + wheel: around the pointer); drag / wheel on the price scale zooms price;
+ *  - Drag to pan; wheel zooms time (Ctrl + wheel: around the pointer); drag / wheel on the price scale zooms price; drag the time scale to zoom time;
  *    double-click = back to live (or back to his trade, in the journal).
  *  - Journal: his entries / adds / exits as arrows with labels, the trade's time shaded, average entry dashed.
  *  - Crosshair with the exact price on the right and time at the bottom.
@@ -74,7 +74,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   const cv = useRef<HTMLCanvasElement>(null);
   const view = useRef<View>(focus ? focusView(focus) : { end: null, span: 10 * 60_000 });
   const mouse = useRef<{ x: number; y: number } | null>(null);
-  const drag = useRef<{ x: number; y: number; end: number; pLo: number; pHi: number; axis: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; end: number; pLo: number; pHi: number; axis: boolean; time: boolean; span: number; live: boolean } | null>(null);
   const geom = useRef({ W: 0, H: 0, plotW: 0, plotH: 0, t0: 0, t1: 0, pLo: 0, pHi: 1, panel: 0, dataEnd: 0 });
   const [rows, setRows] = useState<{ w: Wall; y: number }[]>([]);
   const [hoverWall, setHoverWall] = useState<string | null>(null);
@@ -431,10 +431,16 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   const onMove = (e: React.PointerEvent) => {
     const p = local(e); mouse.current = p;
     const gm = geom.current, d = drag.current;
+    if (!d && cv.current) cv.current.style.cursor = p.x >= gm.plotW && p.x < gm.plotW + PRICE_W ? 'ns-resize' : p.y >= gm.plotH ? 'ew-resize' : '';
     if (d) {
       if (d.axis) {
         const f = Math.exp((p.y - d.y) / 150), mid = (d.pLo + d.pHi) / 2, half = ((d.pHi - d.pLo) / 2) * f;
         view.current = { ...view.current, pLo: mid - half, pHi: mid + half };
+      } else if (d.time) {
+        // time scale, like TradingView: drag right = zoom in, left = zoom out; the right edge stays put (and live stays live)
+        const span = Math.max(60_000, Math.min(400 * 60_000, d.span * Math.exp(-(p.x - d.x) / 150)));
+        view.current = { ...view.current, span, end: d.live ? null : d.end };
+        setSpan(span);
       } else {
         const dt = ((p.x - d.x) / gm.plotW) * view.current.span;
         const dp = ((p.y - d.y) / gm.plotH) * (d.pHi - d.pLo);
@@ -456,7 +462,8 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   const onDown = (e: React.PointerEvent) => {
     const p = local(e), gm = geom.current;
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    drag.current = { x: p.x, y: p.y, end: gm.t1, pLo: gm.pLo, pHi: gm.pHi, axis: p.x >= gm.plotW && p.x < gm.plotW + PRICE_W };
+    drag.current = { x: p.x, y: p.y, end: gm.t1, pLo: gm.pLo, pHi: gm.pHi, axis: p.x >= gm.plotW && p.x < gm.plotW + PRICE_W,
+      time: p.y >= gm.plotH && p.x < gm.plotW, span: view.current.span, live: view.current.end === null };
   };
   const onUp = () => { drag.current = null; };
   /**

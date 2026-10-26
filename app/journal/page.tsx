@@ -554,6 +554,7 @@ export default function Journal() {
                                 {/* CHARTS rebuilt from saved candles (daily + 10-minute), entries / exits / signals marked */}
                                 <div className="pt-6 bg-zinc-950/30 border-t border-zinc-800/50">
                                 <TradeCharts
+                                    eager
                                     symbol={group.trades[0].Symbol}
                                     date={selectedDateState}
                                     direction={group.direction}
