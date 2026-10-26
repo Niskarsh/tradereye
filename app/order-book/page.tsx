@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellRing, ChevronLeft, ChevronRight, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, X } from 'lucide-react';
+import { Bell, BellRing, ChevronLeft, ChevronRight, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { BookChart, type AlertMark } from '@/components/book/BookChart';
@@ -156,6 +156,10 @@ export default function OrderBookPage() {
 
   const addSymbols = (syms: string[]) => saveList([...list.map((w) => w.symbol), ...syms.map((s) => s.trim().toUpperCase()).filter(Boolean)]);
   const removeSymbol = (sym: string) => saveList(list.filter((w) => w.symbol !== sym).map((w) => w.symbol));
+  // clear the whole list in one sheet write; first tap arms it for 4s, second tap clears
+  const [clearArmed, setClearArmed] = useState(false);
+  useEffect(() => { if (!clearArmed) return; const t = setTimeout(() => setClearArmed(false), 4000); return () => clearTimeout(t); }, [clearArmed]);
+  const clearAll = () => { if (!clearArmed) { setClearArmed(true); return; } setClearArmed(false); void saveList([]); };
 
   // screener screenshots -> symbols (Gemini)
   const readShots = async (files: File[]) => {
@@ -290,11 +294,17 @@ export default function OrderBookPage() {
         <section className="rounded-2xl bg-brand-card p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-black uppercase tracking-widest text-ink-3">Recording list ({list.length}/50)</span>
+            {list.length > 0 && (
+              <button onClick={clearAll} disabled={listBusy}
+                className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-bold disabled:opacity-60 ${clearArmed ? 'border-data-red-text bg-data-red-text/10 text-data-red-text' : 'border-line-strong text-ink-3 hover:text-ink'}`}>
+                <Trash2 className="h-3.5 w-3.5" />{clearArmed ? `Tap again to clear ${list.length}` : 'Clear all'}
+              </button>
+            )}
             {listBusy && <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-accent" />}
             {list.map((w) => (
               <span key={w.securityId} className="flex h-8 items-center gap-1 rounded-lg border border-line-strong pl-3 pr-1 text-xs font-bold">
                 <button onClick={() => addChart(w.symbol)} title="Open a chart">{w.symbol}</button>
-                <button onClick={() => removeSymbol(w.symbol)} aria-label={`Remove ${w.symbol}`} className="rounded p-1 text-ink-3 hover:text-ink"><X className="h-3 w-3" /></button>
+                <button onClick={() => removeSymbol(w.symbol)} disabled={listBusy} aria-label={`Remove ${w.symbol}`} className="rounded p-1 text-ink-3 hover:text-ink"><X className="h-3 w-3" /></button>
               </span>
             ))}
           </div>
