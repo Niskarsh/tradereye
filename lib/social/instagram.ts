@@ -41,9 +41,11 @@ async function readJson(res: Response, what: string): Promise<Record<string, unk
   const j = await res.json().catch(() => ({})) as Record<string, unknown> & { error?: { message?: string; code?: number } | string; error_message?: string; error_type?: string };
   if (!res.ok || j.error) {
     const e = typeof j.error === 'object' ? j.error : undefined;
-    const msg = e?.message ?? j.error_message ?? (typeof j.error === 'string' ? j.error : '') ?? '';
+    const msg = (e?.message ?? j.error_message ?? (typeof j.error === 'string' ? j.error : '') ?? '').replace(/\.+$/, '');
     const code = e?.code ?? 0;
-    const hint = code === 190 ? ' Connect Instagram again.' : '';
+    // 190 = token dead; 200 "API access blocked" = Meta blocked the app or the account (nothing in tradereye can fix it)
+    const hint = code === 190 ? ' Connect Instagram again.'
+      : code === 200 ? ' Meta blocked API access: check the Meta app dashboard and the Instagram app for alerts, then Reconnect.' : '';
     throw new InstagramError(`${what} failed: ${msg || `HTTP ${res.status}`}.${hint}`, res.status, code);
   }
   return j;
