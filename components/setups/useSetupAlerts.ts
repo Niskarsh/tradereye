@@ -19,6 +19,9 @@ export function useSetupAlerts(opts: {
   token: string;
   list: { symbol: string; securityId: string }[];
   onNew?: (a: SetupAlert) => void;
+  /** alerts switched off: keep scanning (and marking setups as seen) but show nothing, so switching on later
+   *  only brings alerts from that point on, not the ones that fired while they were off */
+  enabled?: boolean;
 }) {
   const [alerts, setAlerts] = useState<SetupAlert[]>([]);
   const [info, setInfo] = useState<ScanInfo>({ watching: 0 });
@@ -53,7 +56,11 @@ export function useSetupAlerts(opts: {
             seen.current.add(a.id);
             fresh.push(a);
           }
-          if (fresh.length) { setAlerts((all) => [...fresh, ...all].slice(0, 30)); for (const a of fresh) ref.current.onNew?.(a); }
+          if (fresh.length && ref.current.enabled !== false) { setAlerts((all) => [...fresh, ...all].slice(0, 30)); for (const a of fresh) ref.current.onNew?.(a); }
+          else if (fresh.length) {
+            // nothing shown, but remember them as seen across a refresh too
+            try { const v = JSON.parse(localStorage.getItem(KEY) ?? '{}'); localStorage.setItem(KEY, JSON.stringify({ date: today(), alerts: v.date === today() && Array.isArray(v.alerts) ? v.alerts : [], seen: [...seen.current] })); } catch { /* ignore */ }
+          }
           setInfo({ at: Date.now(), watching: list.length, runId: j.runId, noResults: !j.runId, error: j.errors?.length ? `${j.errors.length} stock(s) could not be read: ${j.errors[0].symbol} (${j.errors[0].message})` : undefined });
         } catch (e) { setInfo((i) => ({ ...i, at: Date.now(), watching: list.length, error: (e as Error).message })); }
       } else setInfo((i) => ({ ...i, watching: list.length }));
