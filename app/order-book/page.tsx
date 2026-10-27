@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellRing, ChevronLeft, ChevronRight, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, Trash2, X } from 'lucide-react';
+import { Bell, BellOff, BellRing, ChevronLeft, ChevronRight, ImagePlus, Loader2, Maximize2, Minimize2, Play, Plus, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { BookChart, type AlertMark } from '@/components/book/BookChart';
@@ -26,6 +26,9 @@ import { TARGET_LABEL, primaryOf, type TargetKey } from '@/lib/setups/cases';
  *
  * Setup alerts (My Setups): once a minute the list is also run through the backtested setups; only the ones whose
  * past numbers clear the bar show up, with that track record. They stack with the reversal alerts and work the same.
+ *
+ * Alerts on/off (header switch, remembered in this browser, off by default): off = recording and S3 saves carry on,
+ * but no cards and no desktop notifications; alerts that fire while off are dropped, never queued.
  */
 
 interface ChartCfg { id: string; symbol: string; date: string; focus?: { from: number; to: number; n?: number }; alert?: AlertMark } // date '' = today
@@ -37,6 +40,10 @@ type Alert = ReversalAlert & { opened?: boolean };
 const loadAlerts = (): Alert[] => {
   try { const v = JSON.parse(localStorage.getItem(ALERTS_KEY) ?? '[]'); return Array.isArray(v) ? v.filter((a) => istDate(a.at) === istDate(Date.now())) : []; } catch { return []; }
 };
+// alerts on/off switch (this browser only). Off = recording carries on, but no alert cards and no desktop
+// notifications; whatever fires while off is dropped, so switching on brings alerts from that moment only.
+const ALERTS_ON_KEY = 'tradereye-alerts-on';
+const loadAlertsOn = () => { try { return localStorage.getItem(ALERTS_ON_KEY) === '1'; } catch { return false; } };
 const clock = (t: number) => new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
 
 /** Screenshots are shrunk before upload (Gemini only needs to read tickers). */
@@ -67,10 +74,23 @@ export default function OrderBookPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [notifyPerm, setNotifyPerm] = useState<NotificationPermission | 'unsupported'>('default');
   const notes = useRef(new Map<string, Notification>());
+  const [alertsOn, setAlertsOn] = useState(false);
+  const alertsOnRef = useRef(false); alertsOnRef.current = alertsOn;
+  useEffect(() => { setAlertsOn(loadAlertsOn()); }, []);
+  const toggleAlerts = () => {
+    const on = !alertsOn;
+    alertsOnRef.current = on;
+    setAlertsOn(on);
+    try { localStorage.setItem(ALERTS_ON_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+    // switching off clears the desktop notifications already sitting in the tray (the cards on the page stay)
+    if (!on) { for (const n of notes.current.values()) n.close(); notes.current.clear(); }
+    // switching on for the first time: ask for desktop-notification permission right away
+    if (on && typeof Notification !== 'undefined' && Notification.permission === 'default') void askNotify();
+  };
   const openRef = useRef<(a: ReversalAlert) => void>(() => {});
   const openSetupRef = useRef<(a: SetupAlert) => void>(() => {});
   const setup = useSetupAlerts({
-    token, list,
+    token, list, enabled: alertsOn,
     onNew: (a) => {
       if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
       try {
@@ -91,6 +111,7 @@ export default function OrderBookPage() {
   useEffect(() => { try { localStorage.setItem(ALERTS_KEY, JSON.stringify(alerts)); } catch { /* ignore */ } }, [alerts]);
   useEffect(() => {
     rec.current!.onAlert = (a) => {
+      if (!alertsOnRef.current) return; // alerts off: keep recording, show nothing
       setAlerts((all) => [a, ...all].slice(0, 30));
       // desktop notification too (he may be on another tab): stays until he closes or clicks it
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -257,13 +278,18 @@ export default function OrderBookPage() {
             <h1 className="text-2xl font-black tracking-tighter">Order Book</h1>
             <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">Record your list · keep this tab open · charts are just views</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-ink-3">
               {info.status === 'recording' ? `Recording ${info.stocks} stocks${info.lastSave ? ` · saved ${new Date(info.lastSave).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}` : ''}${info.pending ? ` · ${info.pending} waiting to save` : ''}`
                 : info.status === 'loading' ? 'Starting: loading today from S3…'
                 : info.status === 'stopping' ? 'Stopping: saving the last minutes…'
                 : info.status === 'other-tab' ? 'Already recording in another tab' : 'Not recording'}
             </span>
+            <button onClick={toggleAlerts} aria-pressed={alertsOn}
+              title={alertsOn ? 'Alerts on: reversal and setup alerts show here and as desktop notifications. Tap to turn off (recording carries on).' : 'Alerts off: recording carries on, nothing pops up. Tap to get alerts from now on.'}
+              className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-black ${alertsOn ? 'border-brand-accent bg-brand-accent/10 text-brand-accent' : 'border-line-strong text-ink-3 hover:text-ink'}`}>
+              {alertsOn ? <BellRing className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}{alertsOn ? 'Alerts on' : 'Alerts off'}
+            </button>
             {recording && (
               <button onClick={() => {
                 const snap = rec.current!.feedLog();
@@ -333,7 +359,7 @@ export default function OrderBookPage() {
         </section>
 
         {/* reversal alerts: bottom right, on top of everything, until closed */}
-        <ReversalAlerts alerts={alerts} recording={recording} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} asks={asks} onAsk={askAlert}
+        <ReversalAlerts alerts={alerts} recording={recording && alertsOn} perm={notifyPerm} onOpen={openAlert} onDismiss={dismiss} onDismissAll={dismissAll} onAskPerm={askNotify} asks={asks} onAsk={askAlert}
           setups={setup.alerts} onOpenSetup={openSetup} onDismissSetup={dismissSetup} />
 
         {/* charts */}
