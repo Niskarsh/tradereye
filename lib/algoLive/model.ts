@@ -16,6 +16,8 @@ export interface LiveModel {
   threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number;
   /** (from Nov 2026) the facts this month's models lean on most: share of the trees' split gain */
   facts?: { f: string; label: string; share: number }[];
+  /** every fact's share of the split gain ({fact: share}, tiny ones left out) and every fact's plain name */
+  shares?: Record<string, number> | null; factLabels?: Record<string, string>;
   rules: { firstSlot: number; lastSlot: number; cap: number; stopAdr: number; targetAdr: number; exitSlot: number; riskInr: number };
   models: { baseline: number; trees: Tree[] }[];
   parity?: { rows: (number | null)[][]; pred: number[]; days: string[]; syms: string[]; slots: number[]; worst: number };

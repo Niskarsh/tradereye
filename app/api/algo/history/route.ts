@@ -17,7 +17,7 @@ type AnyMl = Record<string, any>; // eslint-disable-line @typescript-eslint/no-e
 /** one month as the walk-forward ran it for the live strategy (scripts/ml_walkforward.py, a strategy's `months`) */
 interface BtMonth {
   month: string; thr: number | null; note: string; n: number; netR: number; sumR: number; hit: number; exam: boolean; shadow?: boolean;
-  train?: [string, string]; val?: [string, string]; valN?: number; valR?: number | null; valSum?: number; facts?: [string, number][] | null;
+  train?: [string, string]; val?: [string, string]; valN?: number; valR?: number | null; valSum?: number; facts?: [string, number][] | null; shares?: Record<string, number> | null;
 }
 
 /**
@@ -53,7 +53,7 @@ export async function GET(req: Request) {
     }
     const months: BtMonth[] = (st?.months ?? []).map((m: AnyMl) => ({
       month: m.month, thr: m.thr, note: m.note, n: m.n, netR: m.netR, sumR: m.sumR, hit: m.hit, exam: !!m.exam, shadow: !!m.shadow,
-      train: m.train, val: m.val, valN: m.valN, valR: m.valR, valSum: m.valSum, facts: m.facts ?? null,
+      train: m.train, val: m.val, valN: m.valN, valR: m.valR, valSum: m.valSum, facts: m.facts ?? null, shares: m.shares ?? null,
     }));
 
     // every live model kept (one per month: the newest)
@@ -74,7 +74,7 @@ export async function GET(req: Request) {
         return {
           month: m.month, iteration: a.iteration, name: a.name, createdAt: m.createdAt, runAt: a.runAt, dataTo: m.dataTo ?? null,
           train: m.train, val: m.val, threshold: m.threshold, standAside: m.standAside, valTrades: m.valTrades, valR: m.valR, valDays: m.valDays,
-          trees: m.models.reduce((s, x) => s + x.trees.length, 0), factCount: m.features.length, facts: m.facts ?? null,
+          trees: m.models.reduce((s, x) => s + x.trees.length, 0), factCount: m.features.length, facts: m.facts ?? null, shares: m.shares ?? null, factLabels: m.factLabels ?? null,
           inUse: !!current && current.month === m.month && current.createdAt === m.createdAt,
         };
       }))).filter((x) => !!x) as AnyMl[];
