@@ -104,6 +104,13 @@ def main(d, month=None):
     ml.log('bar', thr, 'made', best_sum, 'on', 0 if vtr is None else len(vtr), 'validation trades', 'TRADE' if ok else 'STAND ASIDE')
 
     models = [export_model(m) for m in ens.models]
+    # (model history) what this month's models lean on: each fact's share of the trees' split gain, top 15
+    gain = np.zeros(len(feats))
+    ml.add_gain(gain, ens.models, cols)
+    labels = {f['k']: f['l'] for f in head['features']}
+    for c in ml.RANKED:
+        labels[c + '_rk'] = f"Rank vs other stocks: {labels.get(c, c)} (0 = lowest, 1 = highest)"
+    facts = [{'f': f, 'label': labels.get(f, f), 'share': sh} for f, sh in (ml.top_facts(gain, feats, 15) or [])]
     # parity: rows from the latest month in the data (or the validation months), their facts and sklearn's prediction
     pool = np.flatnonzero(mi == ti) if (mi == ti).any() else np.flatnonzero(val)
     pick = np.random.default_rng(1).choice(pool, min(PARITY_ROWS, len(pool)), replace=False)
@@ -125,6 +132,7 @@ def main(d, month=None):
         'threshold': None if not ok else float(thr), 'standAside': not ok,  # (float, finite)
         'valTrades': 0 if vtr is None else int(len(vtr)), 'valR': None if vtr is None or not len(vtr) else round(float(vtr['net'].mean()), 4),
         'valDays': int(vpart['day'].nunique()),
+        'facts': facts,
         'rules': {'firstSlot': st['firstSlot'], 'lastSlot': st['lastSlot'], 'cap': st['cap'], 'stopAdr': 0.5, 'targetAdr': st['targetAdr'], 'exitSlot': 360, 'riskInr': ml.RISK},
         'models': models,
         'parity': {'rows': [[None if not np.isfinite(v) else float(v) for v in X[r, cols]] for r in pick[:60]],
