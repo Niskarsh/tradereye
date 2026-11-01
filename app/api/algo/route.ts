@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { getChunk, putChunk } from '@/lib/book/s3';
-import { INDEX_KEY, ML_LEDGER_KEY, RUN_ID, getJson, mlKey, type RunIndexItem } from '@/lib/setups/store';
+import { INDEX_KEY, ML_LEDGER_KEY, RUN_ID, getJson, mlIterKey, mlKey, type RunIndexItem } from '@/lib/setups/store';
+import { loadModel } from '@/lib/algoLive/engine';
+import { liveStore } from '@/lib/algoLive/store';
+import { activeOf } from '@/lib/algoLive/active';
 import { ledgerEntry, type LedgerEntry, type MlResult } from '@/lib/ml/ledger';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +32,10 @@ function slim(ml: AnyMl | undefined) {
   return { ...ml, strategies: (ml.strategies ?? []).map(({ trades: _t, tradeCols: _c, ...s }: AnyMl) => s) }; // eslint-disable-line @typescript-eslint/no-unused-vars
 }
 
-/** GET ?run=<id> -> the Algo Lab results of that run (default: the latest run that has them), and every earlier iteration's headline. */
+/**
+ * GET ?run=<id> -> the Algo Lab results of that run (default: the latest run that has them), every iteration's headline
+ * (each one can be opened with ?run=), and which iteration Algo Live is trading (from its model in S3).
+ */
 export async function GET(req: Request) {
   const g = ownerGuard(req);
   if (!g.ok) return g.res;
@@ -39,15 +45,23 @@ export async function GET(req: Request) {
     const ids = runs.map((r) => r.runId).slice(0, 15);
     const all = await Promise.all(ids.map((id) => getJson<AnyMl>(store, mlKey(id)).catch(() => undefined)));
     const found = ids.map((id, i) => ({ id, ml: all[i] })).filter((x): x is { id: string; ml: AnyMl } => !!x.ml);
-    let ml: AnyMl | undefined = found[0]?.ml;
-    if (want && RUN_ID.test(want)) ml = found.find((x) => x.id === want)?.ml ?? (await getJson<AnyMl>(store, mlKey(want)));
     // every iteration from 5 on comes from the ledger (kept for good); older ones from the recent runs
     const ledger = (await getJson<LedgerEntry[]>(store, ML_LEDGER_KEY)) ?? [];
+    let ml: AnyMl | undefined = found[0]?.ml;
+    if (want && RUN_ID.test(want)) {
+      // a recent run, else the copy kept with its iteration (the run's own folder may be gone by now)
+      ml = found.find((x) => x.id === want)?.ml;
+      const e = ledger.find((x) => x.runId === want);
+      if (!ml && e) ml = await getJson<AnyMl>(store, mlIterKey(e.iteration, want)).catch(() => undefined);
+      if (!ml) ml = await getJson<AnyMl>(store, mlKey(want)).catch(() => undefined);
+      if (!ml) return NextResponse.json({ error: 'NOT_FOUND', message: `No Algo Lab results are saved for run ${want}.` }, { status: 404 });
+    }
     const kept = new Set(ledger.map((e) => e.runId));
     const history: Head[] = [
       ...ledger.map((e) => ({ runId: e.runId, createdAt: e.createdAt, iteration: e.iteration, code: e.code, lines: e.lines })),
       ...found.filter((x) => !kept.has(x.id)).map((x) => headOf(x.ml)),
     ].sort((a, b) => b.createdAt - a.createdAt);
-    return NextResponse.json({ ml: slim(ml), history });
+    const model = await loadModel(liveStore).catch(() => undefined);
+    return NextResponse.json({ ml: slim(ml), history, live: model ? activeOf(model) : null });
   } catch (e) { return errorResponse(e); }
 }

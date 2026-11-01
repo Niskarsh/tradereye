@@ -22,6 +22,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 import ml_walkforward as ml  # noqa: E402
 
 STRATEGY = 'fCap2'
+# the Algo Lab iteration that picked STRATEGY for Algo Live, and its name as that iteration called it. Change all three
+# together, and only when a new iteration is actually adopted (re-running the backtest does not change them: it only
+# brings newer data). The model records them, so Algo Live and Algo Lab show what is really trading.
+ITERATION = 10
+STRATEGY_NAME = 'F to 10:55, first 2 a day'
 PARITY_ROWS = 400
 
 
@@ -111,7 +116,7 @@ def main(d, month=None):
     if worst > 1e-4:
         raise SystemExit('the exported trees do not reproduce sklearn')
     out = {
-        'v': 1, 'strategy': STRATEGY, 'month': month, 'createdAt': int(datetime.datetime.now().timestamp() * 1000),
+        'v': 1, 'strategy': STRATEGY, 'iteration': ITERATION, 'strategyName': STRATEGY_NAME, 'month': month, 'createdAt': int(datetime.datetime.now().timestamp() * 1000),
         'code': os.environ.get('GITHUB_SHA'), 'runId': head.get('runId'), 'dataTo': head.get('to'),
         'train': [months[max(0, ti - ml.VAL_MONTHS - ml.TRAIN_MONTHS)], months[ti - ml.VAL_MONTHS - 1]],
         'val': [months[ti - ml.VAL_MONTHS], months[ti - 1]],

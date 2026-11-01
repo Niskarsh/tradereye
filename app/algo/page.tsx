@@ -380,10 +380,10 @@ function Tiles({ items }: { items: [string, string, string?][] }) {
 const TH = 'px-2 py-1.5 text-right';
 const HEAD = 'border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3';
 
-function History({ history }: { history: Head[] }) {
+function History({ history, active, viewing, open }: { history: Head[]; active: number | null; viewing?: string; open: (runId: string) => void }) {
   if (!history.length) return null;
   return (
-    <Card title="Iterations so far" sub="Every run of the Algo Lab, newest first. From iteration 5 on, each one is kept for good (its results, every trade, and its code version), so we can always go back. Earlier months decide the next step; the exam months (the last 6) only confirm. If we try many things, one will look green by luck: a real edge stays green on both.">
+    <Card title="Iterations so far" sub="Tap an iteration to open its results. Every run of the Algo Lab, newest first. From iteration 5 on, each one is kept for good (its results, every trade, and its code version), so we can always go back. Earlier months decide the next step; the exam months (the last 6) only confirm. If we try many things, one will look green by luck: a real edge stays green on both.">
       <div className="-mx-2 overflow-x-auto">
         <table className="w-full min-w-[640px] text-xs">
           <thead><tr className={HEAD}>
@@ -392,8 +392,12 @@ function History({ history }: { history: Head[] }) {
           </tr></thead>
           <tbody>
             {history.flatMap((h) => h.lines.map((l, i) => (
-              <tr key={`${h.runId}${l.id}`} className="border-b border-line/60 font-mono tabular-nums">
-                <td className="px-2 py-1.5 font-sans font-bold">{i === 0 ? h.iteration : ''}</td>
+              <tr key={`${h.runId}${l.id}`} className={`border-b border-line/60 font-mono tabular-nums ${h.runId === viewing ? 'bg-brand-accent/10' : ''}`}>
+                <td className="px-2 py-1.5 font-sans font-bold">{i === 0 && (
+                  <button className="text-left underline decoration-dotted" onClick={() => open(h.runId)}>
+                    {h.iteration}{h.iteration === active && <span className="ml-1 rounded bg-data-green/15 px-1 text-[9px] font-black uppercase tracking-widest text-data-green">Live</span>}
+                  </button>
+                )}</td>
                 <td className="px-2 py-1.5 font-sans text-ink-3">{i === 0 ? <>{new Date(h.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} {codeLink(h.code)}</> : ''}</td>
                 <td className="px-2 py-1.5 font-sans">{l.name}</td>
                 <td className={TH}>{l.n}</td>
@@ -582,18 +586,68 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
   );
 }
 
+/** which iteration Algo Live is trading (its model in S3; lib/algoLive/active.ts) */
+interface Live { iteration: number | null; strategy: string; name: string; month: string; runId: string | null; runAt: string | null; dataTo: string | null; createdAt: number; standAside: boolean }
+
+const dayMon = (ms: number) => new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' });
+
+/** the iteration picker and what Algo Live trades: always at the top, so a page never passes for what is live when it is not */
+function Picker({ history, live, ml, run, open }: { history: Head[]; live: Live | null; ml: Ml | null | undefined; run: string; open: (runId: string) => void }) {
+  const viewing = ml?.runId ?? '';
+  const activeRuns = live?.iteration != null ? history.filter((h) => h.iteration === live.iteration) : [];
+  const dataRun = live?.runId ? history.find((h) => h.runId === live.runId) : undefined;
+  const isActive = !!ml && live?.iteration != null && ml.iteration === live.iteration;
+  const latest = history[0]?.runId;
+  return (
+    <Card title="Iteration" sub="Every iteration saved in S3. Pick one to see its results.">
+      <select className="w-full rounded-lg border border-line bg-brand-bg px-3 py-2 text-sm font-bold" value={run || viewing} onChange={(e) => open(e.target.value)}>
+        {!viewing && <option value="">Loading…</option>}
+        {history.map((h) => (
+          <option key={h.runId} value={h.runId}>
+            {`Iteration ${h.iteration} · run ${dayMon(h.createdAt)}${h.iteration === live?.iteration ? ' · ALGO LIVE' : ''}${h.runId === latest ? ' · latest' : ''}`}
+          </option>
+        ))}
+      </select>
+      {live ? (
+        <div className="mt-3 rounded-lg border border-data-green/40 bg-data-green/10 px-3 py-2 text-xs">
+          <p className="text-sm"><b>Algo Live trades iteration {live.iteration ?? '?'}</b>: {live.name}.</p>
+          <p className="mt-1 text-ink-2">
+            This month&apos;s model ({mon(live.month)}{live.standAside ? ', standing aside' : ''}) was trained on the data of the backtest run of {live.runAt ?? 'an unknown date'}{live.dataTo ? ` (data to ${fmtDate(live.dataTo)})` : ''}
+            {dataRun && dataRun.iteration !== live.iteration ? `. That run's code was iteration ${dataRun.iteration}, but only its data is used: the strategy is still iteration ${live.iteration}'s.` : '.'}
+          </p>
+          {!isActive && activeRuns.length > 0 && (
+            <button className="mt-2 rounded-lg border border-data-green/60 px-3 py-1 text-xs font-bold text-data-green" onClick={() => open(activeRuns[0].runId)}>View iteration {live.iteration}</button>
+          )}
+        </div>
+      ) : <p className="mt-3 text-xs text-ink-3">Algo Live has no model yet, so no iteration is live.</p>}
+      {ml && live && !isActive && <p className="mt-2 text-xs font-bold text-brand-accent">You are looking at iteration {ml.iteration}. Algo Live does not use it: it is research only.</p>}
+      {ml && isActive && <p className="mt-2 text-xs font-bold text-data-green">You are looking at the iteration Algo Live uses.</p>}
+    </Card>
+  );
+}
+
 export default function AlgoPage() {
   const [ml, setMl] = useState<Ml | null | undefined>(undefined);
   const [history, setHistory] = useState<Head[]>([]);
+  const [live, setLive] = useState<Live | null>(null);
+  const [run, setRun] = useState<string | null>(null); // null until the address is read; '' = the latest
   const [pick, setPick] = useState('');
   const [err, setErr] = useState('');
+  useEffect(() => { setRun(new URLSearchParams(window.location.search).get('run') ?? ''); }, []);
   useEffect(() => {
-    fetch('/api/algo').then(async (r) => {
+    if (run === null) return;
+    setMl(undefined); setErr(''); setPick('');
+    fetch(`/api/algo${run ? `?run=${encodeURIComponent(run)}` : ''}`, { cache: 'no-store' }).then(async (r) => {
       const j = await r.json();
       if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
-      setMl(j.ml); setHistory(j.history ?? []);
+      setMl(j.ml); setHistory(j.history ?? []); setLive(j.live ?? null);
     }).catch((e) => setErr((e as Error).message));
-  }, []);
+  }, [run]);
+  const open = (id: string) => {
+    window.history.replaceState(null, '', id ? `?run=${encodeURIComponent(id)}` : window.location.pathname);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setRun(id);
+  };
   const v2 = ml && ml.v === 2 ? ml : undefined;
   const s = v2 ? v2.strategies.find((x) => x.id === (pick || v2.best)) ?? v2.strategies[0] : undefined;
   return (
@@ -603,6 +657,7 @@ export default function AlgoPage() {
           <h1 className="text-2xl font-black tracking-tighter">Algo Lab</h1>
           <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">Machine learning on every stock, every 10 minutes · trained on the past, tested month by month on what it had not seen</p>
         </header>
+        {(history.length > 0 || live) && <Picker history={history} live={live} ml={ml} run={run ?? ''} open={open} />}
         {err && <p className="text-xs text-data-red-text">{err}</p>}
         {ml === undefined && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>}
         {ml === null && <Card title="No results yet" sub="Made by the backtest run: press Re-run on My Analysis → My Setups. The model step adds about an hour after the backtest."><span /></Card>}
@@ -627,7 +682,7 @@ export default function AlgoPage() {
             )}
             <CapCard ml={v2} />
             <LiquidityCard ml={v2} />
-            <LiveFillsCard ml={v2} />
+            {v2.strategies.some((x) => x.id === 'fCap2') && <LiveFillsCard ml={v2} />}
             <div className="flex flex-wrap gap-2">
               {v2.strategies.map((x) => (
                 <button key={x.id} onClick={() => setPick(x.id)}
@@ -639,7 +694,7 @@ export default function AlgoPage() {
             <StrategyView s={s} ml={v2} />
           </>
         )}
-        <History history={history} />
+        <History history={history} active={live?.iteration ?? null} viewing={ml?.runId} open={open} />
       </div>
     </div>
   );
