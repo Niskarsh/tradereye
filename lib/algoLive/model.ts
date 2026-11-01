@@ -14,6 +14,8 @@ export interface LiveModel {
   /** the facts ranked across the stocks at the same minute (pandas rank(pct=True)) */
   ranked: string[];
   threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number;
+  /** (from Nov 2026) the facts this month's models lean on most: share of the trees' split gain */
+  facts?: { f: string; label: string; share: number }[];
   rules: { firstSlot: number; lastSlot: number; cap: number; stopAdr: number; targetAdr: number; exitSlot: number; riskInr: number };
   models: { baseline: number; trees: Tree[] }[];
   parity?: { rows: (number | null)[][]; pred: number[]; days: string[]; syms: string[]; slots: number[]; worst: number };

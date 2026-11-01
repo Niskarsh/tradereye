@@ -297,6 +297,15 @@ def add_gain(acc, models, cols):
         pass
 
 
+def top_facts(gain, feats, k=10):
+    """(model history) the k facts with the biggest share of one month's split gain: [[fact, share], ...]"""
+    tot = float(gain.sum())
+    if tot <= 0:
+        return None
+    order = np.argsort(-gain)[:k]
+    return [[feats[i], round(float(gain[i] / tot), 4)] for i in order if gain[i] > 0]
+
+
 def period_stats(tr, months):
     s = stats(tr['net'], tr['gross'])
     s['monthsGreen'] = sum(1 for m in months if m['n'] > 0 and m['sumR'] > 0)
@@ -371,6 +380,15 @@ def main(d):
                 best_thr, best_sum = choose_bar(vpart, vl, vs, st)
                 ok = best_thr is not None and best_sum > 0
                 tr = pick_dir(tpart, tl, ts, best_thr if ok else 1e18, st)
+                # (model history) how the chosen bar did on the bar months, and what this month's models leaned on
+                vtr = pick_dir(vpart, vl, vs, best_thr, st) if best_thr is not None else None
+                if vtr is not None and len(vtr):
+                    mval = {'valN': int(len(vtr)), 'valR': round(float(vtr['net'].mean()), 4), 'valSum': round(float(vtr['net'].sum()), 2)}
+                else:
+                    mval = {'valN': 0, 'valR': None, 'valSum': 0}
+                mg = np.zeros(len(feats))
+                add_gain(mg, (ml.models if ml else []) + (ms.models if ms else []), cols)
+                mfacts = top_facts(mg, feats)
                 ics = [spearman(tl_all, tpart[st['L']].values) if ml else None, spearman(ts_all, tpart[st['S']].values) if ms else None]
                 ics = [x for x in ics if x is not None]
                 ic = float(np.mean(ics)) if ics else None
@@ -393,13 +411,16 @@ def main(d):
                 tr = pick_neutral(tc, best_thr) if ok else pd.DataFrame(columns=EMPTY)
                 ic = spearman(mn.predict(X[test]), tpart['excess'].values)
                 add_gain(r['gain'], mn.models, ncols)
+                mval, mfacts = {}, None
             tr = tr.assign(month=months[ti])
             r['trades'].append(tr)
             s = stats(tr['net'], tr['gross'])
             s.update({'month': months[ti], 'thr': None if best_thr is None else round(best_thr, 4),
                       'note': '' if ok else f'stood aside (not profitable on the {VAL_MONTHS} months before)',
                       'ic': None if ic is None else round(ic, 4), 'exam': exam_from <= months[ti] < SHADOW_FROM, 'shadow': months[ti] >= SHADOW_FROM,
-                      'baseL': round(float(np.nanmean(tpart[st['L']])), 3), 'baseS': round(float(np.nanmean(tpart[st['S']])), 3)})
+                      'baseL': round(float(np.nanmean(tpart[st['L']])), 3), 'baseS': round(float(np.nanmean(tpart[st['S']])), 3),
+                      'train': [months[max(0, ti - VAL_MONTHS - TRAIN_MONTHS)], months[ti - VAL_MONTHS - 1]],
+                      'val': [months[ti - VAL_MONTHS], months[ti - 1]], 'facts': mfacts, **mval})
             r['months'].append(s)
             if ic is not None and months[ti] < exam_from:  # the signal headline: decide months only
                 r['ic'].append(ic)
@@ -530,6 +551,7 @@ def main(d):
         'best': best['id'], 'locked': LOCKED, 'overall': best['overall'], 'shard': SHARD, 'seedOffset': SEED_OFF,
         'decideFrom': DECIDE_FROM, 'shadowFrom': SHADOW_FROM, 'untouched': untouched, 'volChoice': vol_choice(out),
         'strategies': out,
+        'factLabels': labels,  # (model history) every fact's plain name, for the per-month facts
     }
     json.dump(result, open(os.path.join(d, 'ml.json' if SHARD == 'main' else f'ml-{SHARD}.json'), 'w'))
 

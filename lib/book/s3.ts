@@ -29,3 +29,15 @@ export async function listSlots(folder: string): Promise<string[]> {
   const r = await s3().send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: `${folder}/`, MaxKeys: 100 }));
   return ((r.Contents ?? []) as { Key?: string }[]).map((o) => o.Key?.match(/\/(\d{4})\.gz$/)?.[1]).filter((x): x is string => !!x).sort();
 }
+
+/** Every key under a prefix (paged). Needs s3:ListBucket on that prefix (the app user has it on setups/*). */
+export async function listKeys(prefix: string, max = 1000): Promise<string[]> {
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const r = await s3().send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: prefix, ContinuationToken: token, MaxKeys: 1000 }));
+    for (const o of (r.Contents ?? []) as { Key?: string }[]) if (o.Key) keys.push(o.Key);
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token && keys.length < max);
+  return keys;
+}

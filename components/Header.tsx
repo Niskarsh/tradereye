@@ -30,6 +30,7 @@ const ANALYSIS: Item[] = [
     { name: 'My Setups', href: '/setups' },
     { name: 'Reversal Study', href: '/study' },
     { name: 'Algo Lab', href: '/algo' },
+    { name: 'Model history', href: '/model-history' },
 ];
 // signed in only: Shorts & Reels (connect YouTube / Instagram, make and schedule shorts) and Medium (articles)
 const SOCIALS: Item[] = [
