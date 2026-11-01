@@ -76,8 +76,10 @@ export async function loadSettings(store: Store): Promise<Settings> {
 export async function saveSettings(store: Store, s: Settings): Promise<void> { await putJson(store, SETTINGS_KEY, s); }
 
 let modelCache: { at: number; m: LiveModel } | null = null;
-export async function loadModel(store: Store): Promise<LiveModel | undefined> {
-  if (modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.m;
+/** the live model, kept 10 minutes; `fresh` (or a kept model for another month) reads it again, so a new month's model
+ * shows the moment it is saved */
+export async function loadModel(store: Store, fresh = false): Promise<LiveModel | undefined> {
+  if (!fresh && modelCache && Date.now() - modelCache.at < 10 * 60_000 && modelCache.m.month === istNow().date.slice(0, 7)) return modelCache.m;
   const m = await getJson<LiveModel>(store, MODEL_KEY);
   if (m) modelCache = { at: Date.now(), m };
   return m;

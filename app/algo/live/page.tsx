@@ -23,6 +23,7 @@ interface State { date: string; list: Item[]; listAt?: number; candidates?: numb
 interface ModelInfo { month: string; train: [string, string]; val: [string, string]; threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number; createdAt: number; trees: number; parityWorst: number | null; rules: { firstSlot: number; lastSlot: number; cap: number; riskInr: number };
   active?: { iteration: number | null; name: string; runId: string | null; runAt: string | null; dataTo: string | null } }
 interface Snap { now: number; date: string; state: State; record: string[]; model: ModelInfo | null; scaler: boolean; settings?: { riskInr: number } }
+interface ModelRun { id: number; status: string; conclusion: string | null; createdAt: number; updatedAt: number; url: string }
 interface Pos { symbol: string; netQty: number; realized: number; unrealized: number }
 
 const SLOTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -57,7 +58,36 @@ export default function AlgoLivePage() {
   const lastTry = useRef(new Map<number, number>());
   const squaredOff = useRef(false);
 
-  const refresh = useCallback(async () => { try { setSnap(await api('/api/algo-live/state')); } catch (e) { setErr((e as Error).message); } }, [api]);
+  const refresh = useCallback(async (fresh = false) => { try { setSnap(await api(`/api/algo-live/state${fresh ? '?fresh=1' : ''}`)); } catch (e) { setErr((e as Error).message); } }, [api]);
+
+  // this month's model: started from here (the "Algo Live model" GitHub workflow), its run followed until it finishes
+  const [mrun, setMrun] = useState<ModelRun | null | undefined>(undefined);
+  const [mmsg, setMmsg] = useState('');
+  const [mstart, setMstart] = useState(0); // when it was started from here (0 = not)
+  const readModelRun = useCallback(async () => {
+    try { const j = await api('/api/algo-live/model'); setMrun(j.run); return j.run as ModelRun | null; }
+    catch (e) { setMmsg((e as Error).message); return undefined; }
+  }, [api]);
+  useEffect(() => { readModelRun(); }, [readModelRun]);
+  const following = mstart > 0 || (!!mrun && mrun.status !== 'completed');
+  useEffect(() => {
+    if (!following) return;
+    const t = setInterval(async () => {
+      const r = await readModelRun();
+      if (r && r.status === 'completed' && (!mstart || r.createdAt >= mstart - 60_000)) {
+        setMstart(0);
+        if (r.conclusion === 'success') refresh(true);
+      }
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [following, mstart, readModelRun, refresh]);
+  const makeModel = async () => {
+    if (snap?.model && snap.model.month === ist(Date.now()).date.slice(0, 7) && !window.confirm('This month already has its model. Make it again?')) return;
+    setMmsg(''); setBusy('model');
+    try { await api('/api/algo-live/model', {}); setMstart(Date.now()); setMmsg('Started on GitHub: it takes a few minutes. You can leave this page.'); }
+    catch (e) { setMmsg((e as Error).message); }
+    finally { setBusy(''); }
+  };
   useEffect(() => { refresh(); const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [refresh]);
 
   const st = snap?.state, model = snap?.model;
@@ -142,7 +172,7 @@ export default function AlgoLivePage() {
         {!snap && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>}
         {snap && (
           <>
-            <Card title="The model" sub={model ? `Trades ${mon(model.month)} · learned from ${mon(model.train[0])}–${mon(model.train[1])} · bar set on ${mon(model.val[0])}–${mon(model.val[1])} · ${model.trees} trees · made ${new Date(model.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'No live model yet: run the "Algo Live model" workflow on GitHub (Actions tab).'}>
+            <Card title="The model" sub={model ? `Trades ${mon(model.month)} · learned from ${mon(model.train[0])}–${mon(model.train[1])} · bar set on ${mon(model.val[0])}–${mon(model.val[1])} · ${model.trees} trees · made ${new Date(model.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'No live model yet: press Make this month\'s model below.'}>
               {model?.active && (
                 <div className="mb-2 rounded-lg border border-data-green/40 bg-data-green/10 px-3 py-2">
                   <p className="text-sm"><b>Active iteration: {model.active.iteration ?? '?'}</b> · {model.active.name}</p>
@@ -156,9 +186,30 @@ export default function AlgoLivePage() {
                 <p className="text-sm">
                   {model.standAside ? <b className="text-brand-accent">Standing aside this month: no bar made money on the 3 months before.</b>
                     : <>Bar <b className="font-mono">{rr(model.threshold)}</b> predicted · on the 3 months before: {model.valTrades} trades in {model.valDays} days, <b className="font-mono">{rr(model.valR)}</b> a trade.</>}
-                  {model.month !== today.date.slice(0, 7) && <b className="block text-data-red-text">This model is for {mon(model.month)}: re-run the backtest and the model workflow for this month.</b>}
+                  {model.month !== today.date.slice(0, 7) && <b className="block text-data-red-text">This model is for {mon(model.month)}: re-run the backtest on My Setups, then press Make this month&apos;s model below.</b>}
                 </p>
               )}
+              <div className="mt-2 rounded-lg border border-line px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={`${btn} ${!model || model.month !== today.date.slice(0, 7) ? 'border-brand-accent bg-brand-accent/15 text-brand-accent' : ''}`}
+                    disabled={!!busy || following || mrun === undefined} onClick={makeModel}>
+                    {busy === 'model' ? 'Starting…' : following ? 'Making the model…' : "Make this month's model"}
+                  </button>
+                  {following && <Loader2 className="h-4 w-4 animate-spin text-ink-3" />}
+                </div>
+                <p className="mt-1 text-[11px] text-ink-3">
+                  Trains {mon(today.date.slice(0, 7))}&apos;s model from the latest finished backtest (run the backtest on My Setups first, once a month). Takes a few minutes on GitHub.
+                </p>
+                {mrun && (
+                  <p className="mt-1 text-[11px]">
+                    {mrun.status !== 'completed' ? <span className="text-ink-2">Running on GitHub since {clock(mrun.createdAt)}…</span>
+                      : mrun.conclusion === 'success' ? <span className="text-data-green">Last run done {new Date(mrun.updatedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })}.</span>
+                        : <span className="text-data-red-text">Last run {mrun.conclusion ?? 'stopped'} ({new Date(mrun.updatedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })}): the old model stays.</span>}
+                    {' '}<a className="underline text-ink-3" href={mrun.url} target="_blank" rel="noreferrer">See it on GitHub</a>
+                  </p>
+                )}
+                {mmsg && <p className="mt-1 text-[11px] text-ink-2">{mmsg}</p>}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button className={btn} disabled={!token || !!busy} onClick={() => scalerCall('ping')}>Check trading-scaler</button>
                 {!snap.scaler && <span className="text-[11px] text-data-red-text">TRADING_SCALER_URL / TE_SHARED_SECRET are not set on Vercel.</span>}

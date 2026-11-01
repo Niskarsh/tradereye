@@ -29,3 +29,20 @@ export async function dispatchWorkflow(file: string, inputs: Record<string, stri
   if (res.status === 404) throw new DispatchError('NOT_FOUND', `GitHub cannot find the workflow on "${ref}" (is the change merged to ${ref}?) or the token has no access to ${repo}.`);
   throw new DispatchError('FAILED', `GitHub answered HTTP ${res.status} when starting ${what}.`);
 }
+
+export interface WorkflowRun { id: number; status: string; conclusion: string | null; createdAt: number; updatedAt: number; url: string }
+
+/** The newest run of a workflow of this repo (same token: "Actions: Read and write" includes read), or null if none. */
+export async function latestWorkflowRun(file: string, env: Record<string, string | undefined> = process.env, fetchImpl: typeof fetch = fetch): Promise<WorkflowRun | null> {
+  const token = env.GH_DISPATCH_TOKEN?.trim();
+  if (!token) throw new DispatchError('NO_TOKEN', 'GH_DISPATCH_TOKEN is not set in Vercel (see My Setups → How to set up).');
+  const repo = env.GH_REPO?.trim() || 'Niskarsh/tradereye';
+  const res = await fetchImpl(`https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?per_page=1&event=workflow_dispatch`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, cache: 'no-store',
+  });
+  if (res.status === 401 || res.status === 403) throw new DispatchError('BAD_TOKEN', 'GitHub refused GH_DISPATCH_TOKEN when reading the workflow runs.');
+  if (!res.ok) throw new DispatchError('FAILED', `GitHub answered HTTP ${res.status} when reading the workflow runs.`);
+  const j = (await res.json()) as { workflow_runs?: { id: number; status: string; conclusion: string | null; created_at: string; updated_at: string; html_url: string }[] };
+  const r = j.workflow_runs?.[0];
+  return r ? { id: r.id, status: r.status, conclusion: r.conclusion, createdAt: Date.parse(r.created_at), updatedAt: Date.parse(r.updated_at), url: r.html_url } : null;
+}

@@ -12,7 +12,7 @@ export async function GET(req: Request) {
   if (!g.ok) return g.res;
   const { date } = istNow();
   let state, model, settings;
-  try { [state, model, settings] = await Promise.all([loadState(liveStore, date), loadModel(liveStore), loadSettings(liveStore)]); }
+  try { [state, model, settings] = await Promise.all([loadState(liveStore, date), loadModel(liveStore, new URL(req.url).searchParams.has('fresh')), loadSettings(liveStore)]); }
   catch (e) { return NextResponse.json({ error: 'S3', message: `Could not read Algo Live's files in S3: ${(e as Error).message}` }, { status: 502 }); }
   const m = model ? (({ models, parity, ...rest }) => ({ ...rest, trees: models.reduce((a, x) => a + x.trees.length, 0), parityWorst: parity?.worst ?? null, active: activeOf(rest) }))(model) : null;
   return NextResponse.json({ now: Date.now(), date, state, record: recordList(state.list), model: m, settings, scaler: !!(process.env.TRADING_SCALER_URL && process.env.TE_SHARED_SECRET) });
