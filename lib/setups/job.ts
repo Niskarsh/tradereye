@@ -11,7 +11,7 @@ import { encodeMoments, gzipBytes } from '../study/moments';
 import { gridDay } from '../ml/grid';
 import { GridWriter } from '../ml/writer';
 import { analyze } from '../study/analyze';
-import { INDEX_KEY, STATUS_KEY, dailyKey, getJson, momentsKey, monthKey, putJson, signalsKey, studyKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
+import { INDEX_KEY, STATUS_KEY, dailyKey, dataCheckKey, type DataCheck, getJson, momentsKey, monthKey, putJson, signalsKey, studyKey, summaryKey, type RunIndexItem, type RunStatus, type Store } from './store';
 
 /**
  * The backtest, start to finish (run by the GitHub Action; see scripts/setups-backtest.ts):
@@ -169,6 +169,9 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
 
   // ---- 4. replay
   let done = 0, skipped = 0;
+  // the data check: per month, how many screener stock-days were replayed and why the others were not
+  const check = new Map<string, { planned: number; done: number; noCandles: number; noNifty: number; stocks: Set<string> }>();
+  const checkOf = (d: string) => { const m = d.slice(0, 7); let c = check.get(m); if (!c) check.set(m, (c = { planned: 0, done: 0, noCandles: 0, noNifty: 0, stocks: new Set() })); return c; };
   const moments: Moment[] = [];
   const grid = deps.gridDir ? new GridWriter(deps.gridDir) : undefined;
   /** first-10-minute volume vs usual, per day and stock: the 20 busiest are "in play" that day */
@@ -184,7 +187,10 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
     const dailyDates = p.daily.t.map(dateOf);
     for (const d of p.days) {
       const i = byDate.get(d), n = niftyByDate.get(d);
-      if (i === undefined || !n) { skipped++; continue; }
+      const ck = checkOf(d);
+      ck.planned++;
+      if (i === undefined || !n) { skipped++; if (i === undefined) ck.noCandles++; else ck.noNifty++; continue; }
+      ck.done++; ck.stocks.add(p.symbol);
       const cut = dailyDates.findIndex((x) => x >= d);
       const end = cut < 0 ? dailyDates.length : cut;
       const daily: Candles = { t: p.daily.t.slice(0, end), o: p.daily.o.slice(0, end), h: p.daily.h.slice(0, end), l: p.daily.l.slice(0, end), c: p.daily.c.slice(0, end), v: p.daily.v.slice(0, end) };
@@ -214,6 +220,16 @@ export async function runBacktest(runId: string, deps: JobDeps): Promise<JobResu
     universe: { source, symbols: plan.length, stockDays },
     params: { ...params, priceMin: screener.priceMin, priceMax: screener.priceMax, avgVolMin: screener.avgVolMin, years },
   });
+  // the data check (My Setups shows it): every month of the run's data, complete or not
+  const inData = sessions.filter((d) => d >= fromAll && d <= to);
+  const dataCheck: DataCheck = {
+    v: 1, runId, createdAt: now(), from: fromAll, to,
+    months: [...new Set(inData.map((d) => d.slice(0, 7)))].sort().map((m) => {
+      const c = check.get(m), days = inData.filter((d) => d.startsWith(m));
+      return { month: m, sessions: days.length, niftyDays: days.filter((d) => niftyByDate.has(d)).length, planned: c?.planned ?? 0, done: c?.done ?? 0, noCandles: c?.noCandles ?? 0, noNifty: c?.noNifty ?? 0, stocks: c?.stocks.size ?? 0 };
+    }),
+  };
+  await putJson(deps.store, dataCheckKey(runId), dataCheck).catch(() => {});
   for (const c of CASES) await putJson(deps.store, signalsKey(runId, c.id), pack(signals.filter((s) => s.case === c.id)));
   await putJson(deps.store, summaryKey(runId), summary);
   // the reversal study (rules searched on year 1, traded on year 2)

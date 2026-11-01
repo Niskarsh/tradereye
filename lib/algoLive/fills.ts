@@ -105,7 +105,7 @@ export function summarize(rows: FillRow[]): FillSummary {
   };
 }
 
-function tradingDays(from: string, to: string): string[] {
+export function tradingDays(from: string, to: string): string[] {
   const out: string[] = [];
   for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`) && out.length < MAX_DAYS; t += 86400_000) {
     const d = new Date(t);

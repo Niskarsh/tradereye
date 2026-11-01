@@ -51,6 +51,18 @@ export const momentsKey = (runId: string, dir: 1 | -1) => `setups/runs/${runId}/
 export const claudeRulesKey = (runId: string) => `setups/runs/${runId}/claude-rules.json.gz`;
 /** Algo Lab: the walk-forward model results of a run (scripts/ml_walkforward.py) */
 export const mlKey = (runId: string) => `setups/runs/${runId}/ml.json.gz`;
+/** the data check of a run: how complete each month of its data was (lib/setups/job.ts) */
+export const dataCheckKey = (runId: string) => `setups/runs/${runId}/datacheck.json.gz`;
+export interface DataCheckMonth {
+  month: string;
+  /** trading days (Nifty 500 daily sessions) in the run's period that month, and how many had Nifty 500 1-min candles */
+  sessions: number; niftyDays: number;
+  /** stock-days the screener passed, how many were replayed, and why the rest were not */
+  planned: number; done: number; noCandles: number; noNifty: number;
+  /** stocks replayed at least once that month */
+  stocks: number;
+}
+export interface DataCheck { v: 1; runId: string; createdAt: number; from: string; to: string; months: DataCheckMonth[] }
 /**
  * Algo Lab iterations, kept for good (never pruned with the run index): the ledger of every iteration from 5 on (its
  * run, its code version, its headline numbers) and a copy of each iteration's full results, so we can always go back.

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { getChunk, listKeys, putChunk } from '@/lib/book/s3';
-import { INDEX_KEY, ML_LEDGER_KEY, getJson, mlIterKey, mlKey, type RunIndexItem } from '@/lib/setups/store';
-import type { LedgerEntry } from '@/lib/ml/ledger';
+import { getJson } from '@/lib/setups/store';
+import { newestWithStrategy } from '@/lib/ml/find';
 import { loadModel } from '@/lib/algoLive/engine';
 import { liveStore } from '@/lib/algoLive/store';
 import { activeOf } from '@/lib/algoLive/active';
@@ -35,22 +35,8 @@ export async function GET(req: Request) {
     const active = current ? activeOf(current) : null;
     const strategy = current?.strategy ?? 'fCap2';
 
-    // the newest Algo Lab result that has the live strategy: recent runs first, then the copies kept with each iteration
-    const runs = ((await getJson<RunIndexItem[]>(store, INDEX_KEY)) ?? []).map((r) => r.runId).slice(0, 15);
-    const ledger = ((await getJson<LedgerEntry[]>(store, ML_LEDGER_KEY)) ?? []).slice().sort((a, b) => b.createdAt - a.createdAt);
-    const tries: { runId: string; key: string }[] = [
-      ...runs.map((runId) => ({ runId, key: mlKey(runId) })),
-      ...ledger.map((e) => ({ runId: e.runId, key: mlIterKey(e.iteration, e.runId) })),
-    ];
-    let ml: AnyMl | undefined, st: AnyMl | undefined;
-    const seen = new Set<string>();
-    for (const t of tries) {
-      if (seen.has(t.runId)) continue;
-      seen.add(t.runId);
-      const m = await getJson<AnyMl>(store, t.key).catch(() => undefined);
-      const s = m?.strategies?.find((x: AnyMl) => x.id === strategy);
-      if (s) { ml = m; st = s; break; }
-    }
+    const found = await newestWithStrategy(store, strategy);
+    const ml = found?.ml, st = found?.st;
     const months: BtMonth[] = (st?.months ?? []).map((m: AnyMl) => ({
       month: m.month, thr: m.thr, note: m.note, n: m.n, netR: m.netR, sumR: m.sumR, hit: m.hit, exam: !!m.exam, shadow: !!m.shadow,
       train: m.train, val: m.val, valN: m.valN, valR: m.valR, valSum: m.valSum, facts: m.facts ?? null, shares: m.shares ?? null,
