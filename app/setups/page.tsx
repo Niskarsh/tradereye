@@ -1,18 +1,17 @@
 "use client";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { ProgressBar } from '@/components/ui/progress';
-import { Card, Delta, PeriodCtx, StatCells, StatHead, Verdict, pct, rr } from '@/components/setups/parts';
-import { CASE_BY_ID, EXIT_KEYS, EXIT_LABEL, primaryOf, STRETCH_AT_LEAST, STRETCH_UNDER, TARGET_KEYS, TARGET_LABEL, hhmm, type CaseId, type OutKey, type Signal } from '@/lib/setups/cases';
-import { DIMS, applyFilter, statsOf, unpack, type DimKey, type Filter, type Packed, type Stats, type Summary } from '@/lib/setups/stats';
+import { Card, rr } from '@/components/setups/parts';
+import type { Summary } from '@/lib/setups/stats';
 import type { RunIndexItem, RunStatus } from '@/lib/setups/store';
 
 /**
- * My Setups: every setup tested on two years of the stocks his screener would have shown, with numbers after Dhan's
- * charges. Re-run fetches only what is new (a finished month of candles is never fetched again) and the page shows
- * what changed against the run before.
+ * My Setups: the backtest Re-run (it feeds the Algo Lab and each month's Algo Live model), and below it what matters
+ * after a run: whether its data is complete enough to make this month's model, and whether Algo Live has been trading
+ * what the backtest says it should. Re-run fetches only what is new (a finished month of candles is never fetched again).
  */
 
 type Status = (RunStatus & { stale?: boolean }) | null;
@@ -26,7 +25,6 @@ export default function SetupsPage() {
   const [data, setData] = useState<Data | null>(null);
   const [run, setRun] = useState('');
   const [err, setErr] = useState('');
-  const [open, setOpen] = useState<CaseId | null>(null);
   const [starting, setStarting] = useState(false);
   const [help, setHelp] = useState(false);
 
@@ -66,9 +64,7 @@ export default function SetupsPage() {
     } catch (e) { setErr((e as Error).message); } finally { setStarting(false); }
   };
 
-  const s = data?.summary ?? null, prev = data?.previous ?? null;
-  const minHit = data?.minHit ?? 0.6;
-  const prevCase = (id: CaseId) => prev?.cases.find((c) => c.id === id);
+  const s = data?.summary ?? null;
 
   return (
     <div className="min-h-screen bg-brand-bg text-ink font-sans pb-24">
@@ -105,23 +101,8 @@ export default function SetupsPage() {
           </Card>
         )}
 
-        {s && (
-          <PeriodCtx.Provider value={{ months: Math.max(1, (Date.parse(s.period.to) - Date.parse(s.period.from)) / (30.44 * 86400_000)), riskInr: Number(s.params.riskInr) || 300 }}>
-            <p className="text-[11px] text-ink-3">
-              R before costs = is there an edge at all; ₹ / month = R after costs × ₹{Number(s.params.riskInr) || 300} risk × trades per month, if you took every one.{' '}
-              {fmtDate(s.period.from)} – {fmtDate(s.period.to)} · {s.universe.symbols} stocks on {s.universe.stockDays.toLocaleString('en-IN')} stock-days · {s.universe.signals.toLocaleString('en-IN')} past trades · {s.universe.source}
-              {prev && <> · ▲▼ = hit rate change in points vs the run of {fmtTime(prev.createdAt)}</>}
-            </p>
-            {s.v !== 2 && (
-              <p className="rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">This run used the old rules (1-minute triggers, no swing stops, no discretionary exits). Press Re-run for the 10-minute version.</p>
-            )}
-            <CaseTable summary={s} minHit={minHit} prevCase={prevCase} hasPrev={!!prev} open={open} onOpen={(id) => setOpen(open === id ? null : id)} />
-            {open && s.v === 2 && <CaseDetail key={`${s.runId}-${open}`} summary={s} minHit={minHit} id={open} prev={prev?.v === 2 ? prevCase(open) : undefined} onClose={() => setOpen(null)} />}
-            <Rules summary={s} previous={prev} />
-          </PeriodCtx.Provider>
-        )}
-
-        <MyTrades />
+        {!!data?.runs.length && <DataCheckCard runId={run || data.runs[0].runId} />}
+        {!!data?.runs.length && <LiveCheckCard key={data.runs[0].runId} />}
 
         <HowItWorks open={help} onToggle={() => setHelp((h) => !h)} />
       </div>
@@ -141,330 +122,156 @@ function RunLine({ status }: { status: Status }) {
   );
 }
 
-function CaseTable({ summary, minHit, prevCase, hasPrev, open, onOpen }: { summary: Summary; minHit: number; prevCase: (id: CaseId) => Summary['cases'][number] | undefined; hasPrev: boolean; open: CaseId | null; onOpen: (id: CaseId) => void }) {
-  const groups = [
-    { title: 'Delivery: held for days or weeks (daily candles, delivery charges)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'DELIVERY' },
-    { title: 'Research: published and institutional strategies', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'RESEARCH' },
-    { title: 'Combined: several conditions together', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'COMBINED' },
-    { title: 'Momentum building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'MOMENTUM' },
-    { title: 'Reversal building blocks (one condition each)', pick: (id: CaseId) => CASE_BY_ID.get(id)?.group === 'BLOCK' && CASE_BY_ID.get(id)?.family === 'REVERSAL' },
-  ];
-  return (
-    <Card title="Every setup" sub={`Hit rate = target before stop (momentum: 1R, reversal: its level; research cases held to their exit time: made money after charges). Alert-worthy = 50+ trades, ${Math.round(minHit * 100)}%+ hit, makes money after charges, steady in both halves. Tap a setup for its stops, exits, stretch steps and times.`}>
-      <div className="-mx-2 overflow-x-auto">
-        <table className="w-full min-w-[560px] text-xs">
-          <thead>
-            <tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
-              <th className="px-2 py-1.5 text-left">Setup</th>
-              <th className="px-2 py-1.5 text-right">Trades</th>
-              <th className="px-2 py-1.5 text-right">Hit</th>
-              <th className="hidden px-2 py-1.5 text-right md:table-cell">R before costs</th>
-              <th className="px-2 py-1.5 text-right">R after costs</th>
-              <th className="hidden px-2 py-1.5 text-right md:table-cell">₹ / month</th>
-              <th className="hidden px-2 py-1.5 text-right sm:table-cell">1st / 2nd half</th>
-              {hasPrev && <th className="px-2 py-1.5 text-right">vs last</th>}
-              <th className="px-2 py-1.5 text-right">Verdict</th>
-            </tr>
-          </thead>
-          {groups.map((g) => (
-            <tbody key={g.title}>
-              <tr><td colSpan={9} className="px-2 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.2em] text-brand-accent">{g.title}</td></tr>
-              {summary.cases.filter((c) => g.pick(c.id)).map((c) => {
-                const info = CASE_BY_ID.get(c.id)!;
-                return (
-                  <tr key={c.id} onClick={() => onOpen(c.id)} className={`cursor-pointer border-b border-line/60 hover:bg-white/5 ${open === c.id ? 'bg-white/5' : ''}`}>
-                    <td className="px-2 py-1.5">
-                      <span className="flex items-center gap-1.5">
-                        {open === c.id ? <ChevronDown className="h-3.5 w-3.5 text-brand-accent" /> : <ChevronRight className="h-3.5 w-3.5 text-ink-3" />}
-                        <span className="font-mono text-[10px] text-ink-3">{c.id}</span>
-                        <span className="font-bold">{info.name}</span>
-                        <span className={`text-[9px] font-black uppercase ${info.family === 'MOMENTUM' ? 'text-data-green' : 'text-data-red-text'}`}>{info.family === 'MOMENTUM' ? 'mom' : 'rev'}</span>
-                        {c.all.fill !== undefined && <span className="text-[10px] text-ink-3">· filled {pct(c.all.fill)}</span>}
-                      </span>
-                    </td>
-                    <StatCells s={c.all} />
-                    {hasPrev && <td className="px-2 py-1.5 text-right font-mono"><Delta now={c.all} before={prevCase(c.id)?.all} /></td>}
-                    <td className="px-2 py-1.5 text-right"><Verdict s={c.all} minHit={minHit} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          ))}
-        </table>
-      </div>
-    </Card>
-  );
-}
+/* ---------- after a run: is its data complete enough for this month's model? ---------- */
 
-/** Every past trade of one case, unzipped in the browser (one small file per case). */
-function useSignals(runId: string, id: CaseId) {
-  const [sigs, setSigs] = useState<Signal[] | null>(null);
+interface CheckMonth { month: string; sessions: number; niftyDays: number; planned: number; done: number; noCandles: number; noNifty: number; stocks: number; cover: number | null; ok: boolean }
+interface Check {
+  runId: string; createdAt: number; from: string; to: string; detailed: boolean; before: { runId: string; createdAt: number; to: string } | null;
+  forMonth: string; tone: 'good' | 'warn' | 'bad'; verdict: string; issues: { month: string; text: string; recent: boolean }[]; months: CheckMonth[];
+}
+const monShort = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+const TONE = { good: 'border-data-green/50 bg-data-green/10 text-data-green', warn: 'border-data-caution/50 bg-data-caution/10 text-data-caution', bad: 'border-data-red/50 bg-data-red/10 text-data-red-text' };
+
+function DataCheckCard({ runId }: { runId: string }) {
+  const [c, setC] = useState<Check | null | undefined>(undefined);
   const [err, setErr] = useState('');
+  const [all, setAll] = useState(false);
   useEffect(() => {
-    let off = false;
-    (async () => {
-      const r = await fetch(`/api/setups/signals?run=${encodeURIComponent(runId)}&case=${id}`);
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message ?? `HTTP ${r.status}`);
-      const text = await new Response(r.body!.pipeThrough(new DecompressionStream('gzip'))).text();
-      if (!off) setSigs(unpack(JSON.parse(text) as Packed));
-    })().catch((e) => { if (!off) setErr((e as Error).message); });
-    return () => { off = true; };
-  }, [runId, id]);
-  return { sigs, err };
-}
-
-function CaseDetail({ summary, minHit, id, prev, onClose }: { summary: Summary; minHit: number; id: CaseId; prev?: Summary['cases'][number]; onClose: () => void }) {
-  const info = CASE_BY_ID.get(id)!;
-  const c = summary.cases.find((x) => x.id === id)!;
-  const { sigs, err } = useSignals(summary.runId, id);
-  const [f, setF] = useState<Filter>({});
-  const filtered = useMemo(() => (sigs ? applyFilter(sigs, f) : []), [sigs, f]);
-  const [exitKey, setExitKey] = useState<OutKey>(primaryOf(id));
-  const fs = useMemo(() => (sigs ? statsOf(filtered, exitKey, summary.period.mid) : undefined), [sigs, filtered, exitKey, summary.period.mid]);
-  const anyFilter = Object.values(f).some((v) => (Array.isArray(v) ? v.length : v !== undefined));
-  const toggle = (k: DimKey, v: string) => setF((x) => { const cur = x[k] ?? []; const nxt = cur.includes(v) ? cur.filter((y) => y !== v) : [...cur, v]; return { ...x, [k]: nxt }; });
-  // where it works best: the alert buckets of this case, best first
-  const buckets = Object.entries(summary.lookup).filter(([k]) => k.startsWith(`${id}|`) && k.split('|').length >= 3)
-    .sort((a, b) => b[1].hit - a[1].hit || b[1].netR - a[1].netR).slice(0, 8);
-  const outLabel = (k: OutKey) => (k.startsWith('T') ? (k === 'TS' ? `${TARGET_LABEL.TS} (${info.target})` : TARGET_LABEL[k as 'T1' | 'T15']) : EXIT_LABEL[k as keyof typeof EXIT_LABEL]);
-
+    setC(undefined); setErr('');
+    fetch(`/api/setups/check?run=${encodeURIComponent(runId)}`, { cache: 'no-store' }).then(async (r) => {
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setC(j.check);
+    }).catch((e) => setErr((e as Error).message));
+  }, [runId]);
+  const shown = c ? (all ? c.months : c.months.slice(0, 4)) : [];
   return (
-    <Card title={`${id} · ${info.name}`} sub={info.source ? `${info.rule} Evidence: ${info.source}.` : info.rule} right={<button onClick={onClose} aria-label="Close" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}>
-      <p className="text-[11px] text-ink-3">
-        Stops: {pct(c.slices.stopType?.SWING ? c.slices.stopType.SWING.n / Math.max(1, c.all.n) : 0)} at a solid swing, the rest at 2x ATR (no solid swing).
-        {c.skippedFar > 0 && <> {c.skippedFar.toLocaleString('en-IN')} more times the setup appeared but the solid swing was beyond 2x ATR, so it was not taken.</>}
-      </p>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <MiniTable title="Systematic exits (hit = target before stop)" first="Exit" rows={TARGET_KEYS.map((k) => ({ label: outLabel(k), s: c.byOut[k], before: prev?.byOut?.[k] }))} />
-        <MiniTable title="Discretionary exits (hit = made money after charges)" first="Exit when" rows={EXIT_KEYS.map((k) => ({ label: outLabel(k), s: c.byOut[k], before: prev?.byOut?.[k] }))} />
-        {c.stretchUnder && (
-          <MiniTable title="% of daily range moved, under" first="Stretch" rows={STRETCH_UNDER.map((t) => ({ label: `under ${t}%`, s: c.stretchUnder![`under ${t}%`], before: prev?.stretchUnder?.[`under ${t}%`] }))} />
-        )}
-        {c.stretchAtLeast && (
-          <MiniTable title="% of daily range moved, at least" first="Stretch" rows={STRETCH_AT_LEAST.map((t) => ({ label: `${t}%+`, s: c.stretchAtLeast![`${t}%+`], before: prev?.stretchAtLeast?.[`${t}%+`] }))} />
-        )}
-        {c.tests && c.tests.length > 0 && <TestsTable rows={c.tests} />}
-        {buckets.length > 0 && (
-          <MiniTable title="Where it works best (50+ trades each)" first="Stretch · time · Nifty open → trade" rows={buckets.map(([k, s]) => ({ label: k.split('|').slice(1).join(' · '), s }))} />
-        )}
-        {c.combos.length > 0 && (
-          <MiniTable title="Together with another setup (same way, within 30 min)" first="With" rows={c.combos.map((x) => ({ label: `${x.with} ${CASE_BY_ID.get(x.with)?.name ?? ''}`, s: x.stats }))} />
-        )}
-        {c.slices.slot30 && (
-          <MiniTable title="When it sets up (30-minute slots)" first="From" rows={Object.entries(c.slices.slot30).map(([k, s]) => ({ label: k, s }))} />
-        )}
-      </div>
-
-      <div className="space-y-2 rounded-xl border border-line bg-brand-bg p-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-widest text-ink-3">
-            Combine any slices · exit
-            <select value={exitKey} onChange={(e) => setExitKey(e.target.value as OutKey)} className="h-7 max-w-[260px] rounded-md border border-line-strong bg-brand-bg px-1.5 text-[11px] font-bold normal-case tracking-normal text-ink-2 outline-none">
-              {[...TARGET_KEYS, ...EXIT_KEYS].map((k) => <option key={k} value={k}>{outLabel(k)}</option>)}
-            </select>
+    <Card title="This run's data" sub="Is it complete enough to make this month's Algo Live model? The model learns from the last 33 months; the last 3 set its bar.">
+      {err && <p className="text-xs text-data-red-text">{err}</p>}
+      {c === undefined && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Checking…</p>}
+      {c && (
+        <>
+          <p className={`rounded-xl border px-3 py-2 text-sm font-bold ${TONE[c.tone]}`}>{c.verdict}</p>
+          <p className="text-xs text-ink-2">
+            {fmtDate(c.from)} – {fmtDate(c.to)}
+            {c.before && (c.before.to < c.to ? <> · new since the run of {fmtTime(c.before.createdAt)}: {fmtDate(c.before.to)} → {fmtDate(c.to)}</> : <> · no new days since the run of {fmtTime(c.before.createdAt)}</>)}
           </p>
-          {anyFilter && <button onClick={() => setF({})} className="text-[11px] font-bold text-brand-accent">Clear</button>}
-        </div>
-        {DIMS.map((d) => {
-          const counts = c.slices[d.key] ?? {};
-          const vals = d.values.filter((v) => counts[v]);
-          if (vals.length < 2) return null;
-          return (
-            <div key={d.key} className="flex flex-wrap items-center gap-1.5">
-              <span className="w-36 shrink-0 text-[11px] text-ink-3">{d.label}</span>
-              {vals.map((v) => {
-                const on = (f[d.key] ?? []).includes(v);
-                return (
-                  <button key={v} onClick={() => toggle(d.key, v)} title={`${counts[v].n} trades, ${pct(counts[v].hit)} hit, ${rr(counts[v].netR)}`}
-                    className={`h-7 rounded-md border px-2 text-[11px] font-bold ${on ? 'border-brand-accent bg-brand-accent/15 text-brand-accent' : 'border-line-strong text-ink-2'}`}>
-                    {v} <span className={`font-mono font-normal ${counts[v].netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{pct(counts[v].hit)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
-        {err && <p className="text-xs text-data-red-text">{err}</p>}
-        {!sigs && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading the past trades…</p>}
-        {sigs && fs && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-2 text-xs">
-            <span className="font-bold">{anyFilter ? 'These slices' : 'All trades'}:</span>
-            <span><b className="font-mono">{fs.n}</b> trades</span>
-            <span><b className="font-mono">{pct(fs.hit)}</b> hit</span>
-            <span className={fs.netR > 0 ? 'text-data-green' : 'text-data-red-text'}><b className="font-mono">{rr(fs.netR)}</b> per trade after costs</span>
-            <span className="text-ink-3">halves {pct(fs.h1.hit)} / {pct(fs.h2.hit)}</span>
-            <span className="text-ink-3">avg {fs.min} min</span>
-            <Verdict s={fs} minHit={minHit} />
-          </div>
-        )}
-        {sigs && filtered.length > 0 && <RecentTrades sigs={filtered} target={exitKey} />}
-      </div>
+          {c.issues.length > 0 && (
+            <ul className="space-y-1 text-xs">
+              {c.issues.map((x) => <li key={x.month} className={x.recent ? 'text-data-red-text' : 'text-data-caution'}><b>{monShort(x.month)}{x.recent ? ' (bar month)' : ''}:</b> {x.text}</li>)}
+            </ul>
+          )}
+          {!c.detailed && <p className="text-[11px] text-ink-3">This run was made before the month-by-month check existed: the verdict comes from its dates only. The next Re-run adds the full check.</p>}
+          {c.detailed && (
+            <>
+              <div className="-mx-2 overflow-x-auto">
+                <table className="w-full min-w-[420px] text-xs">
+                  <thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
+                    <th className="px-2 py-1.5 text-left">Month</th><th className="px-2 py-1.5 text-right">Days</th><th className="px-2 py-1.5 text-right">Stocks</th><th className="px-2 py-1.5 text-right">Stock-days</th><th className="px-2 py-1.5 text-right">Complete</th>
+                  </tr></thead>
+                  <tbody>
+                    {shown.map((m) => (
+                      <tr key={m.month} className="border-b border-line/60 font-mono tabular-nums">
+                        <td className="px-2 py-1.5 font-sans font-bold">{monShort(m.month)}</td>
+                        <td className={`px-2 py-1.5 text-right ${m.niftyDays < m.sessions ? 'text-data-red-text' : ''}`}>{m.sessions}{m.niftyDays < m.sessions ? ` (${m.sessions - m.niftyDays} no Nifty)` : ''}</td>
+                        <td className="px-2 py-1.5 text-right">{m.stocks}</td>
+                        <td className="px-2 py-1.5 text-right">{m.done.toLocaleString('en-IN')}</td>
+                        <td className={`px-2 py-1.5 text-right font-bold ${m.ok ? 'text-data-green' : 'text-data-red-text'}`}>{m.cover === null ? '–' : `${(Math.floor(m.cover * 1000) / 10).toFixed(1)}%`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-ink-3">Days = trading days · Stocks = stocks in your ₹250–340, 5-lakh universe that month · Complete = share of their stock-days replayed with full 1-minute candles (97%+ counts as complete).</p>
+              {c.months.length > 4 && <button className="text-[11px] font-bold text-brand-accent underline" onClick={() => setAll(!all)}>{all ? 'Show the last 4 months' : `Show all ${c.months.length} months the model learns from`}</button>}
+            </>
+          )}
+        </>
+      )}
     </Card>
   );
 }
 
-/** Which test of the day's high / low, and at what time each test set up. */
-function TestsTable({ rows }: { rows: { test: string; stats: Stats; bySlot: Record<string, Stats> }[] }) {
-  return (
-    <div className="lg:col-span-2">
-      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">By test of the day&apos;s high / low, and when that test set up</p>
-      <div className="-mx-2 overflow-x-auto">
-        <table className="w-full text-xs">
-          <StatHead first="Test" />
-          <tbody>
-            {rows.map((r) => (
-              <React.Fragment key={r.test}>
-                <tr className="border-b border-line/60">
-                  <td className="px-2 py-1.5 font-bold">{r.test === '1' ? '1st test' : r.test === '2' ? '2nd test' : '3rd test or later'}</td>
-                  <StatCells s={r.stats} />
-                </tr>
-                <tr className="border-b border-line/60">
-                  <td colSpan={7} className="px-2 pb-2 pt-0.5">
-                    <span className="flex flex-wrap gap-1">
-                      {Object.entries(r.bySlot).map(([slot, s]) => (
-                        <span key={slot} title={`${s.n} trades, ${pct(s.hit)} hit, ${rr(s.netR)} after costs`}
-                          className={`rounded-md border px-1.5 py-0.5 font-mono text-[10px] ${s.n < 20 ? 'border-line text-ink-4' : s.netR > 0 ? 'border-data-green/50 text-data-green' : 'border-line-strong text-ink-2'}`}>
-                          {slot} · {s.n} · {pct(s.hit)}
-                        </span>
-                      ))}
-                    </span>
-                  </td>
-                </tr>
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-1 text-[10px] text-ink-3">Chips: the 30-minute slot the test happened in · trades · hit rate. Green = makes money after charges (20+ trades).</p>
-    </div>
-  );
-}
+/* ---------- is Algo Live trading what the backtest says it should? ---------- */
 
-function MiniTable({ title, first, rows }: { title: string; first: string; rows: { label: string; s?: Stats; before?: Stats }[] }) {
-  const hasBefore = rows.some((r) => r.before);
-  return (
-    <div>
-      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">{title}</p>
-      <div className="-mx-2 overflow-x-auto">
-        <table className="w-full text-xs">
-          <StatHead first={first} />
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label} className="border-b border-line/60">
-                <td className="px-2 py-1.5">{r.label} {hasBefore && <span className="ml-1 font-mono text-[10px]"><Delta now={r.s} before={r.before} /></span>}</td>
-                <StatCells s={r.s} />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+type Kind = 'same' | 'other-time' | 'missed' | 'extra';
+interface LRow { symbol: string; kind: Kind; btTime?: string; liveTime?: string; btR?: number; liveR?: number | null; exit?: string; why: string }
+interface LDay { date: string; inBacktest: boolean; ran: boolean; bar: number | null; rows: LRow[] }
+interface LTotals { days: number; btTrades: number; liveTrades: number; same: number; missed: number; extra: number; btR: number; liveR: number; liveClosed: number }
+interface LResult { days: LDay[]; totals: LTotals; dataTo: string; run: { runId: string; iteration: number } }
+const KIND: Record<Kind, { label: string; cls: string }> = {
+  same: { label: 'Same', cls: 'bg-data-green/15 text-data-green' },
+  'other-time': { label: 'Other time', cls: 'bg-data-caution/15 text-data-caution' },
+  missed: { label: 'Missed live', cls: 'bg-data-red/15 text-data-red-text' },
+  extra: { label: 'Live only', cls: 'bg-brand-accent/15 text-brand-accent' },
+};
+const tone = (x: number | null | undefined) => (x == null || x === 0 ? 'text-ink-2' : x > 0 ? 'text-data-green' : 'text-data-red-text');
 
-function RecentTrades({ sigs, target }: { sigs: Signal[]; target: OutKey }) {
-  const [n, setN] = useState(12);
-  const last = sigs.filter((s) => s.out).slice(-n).reverse();
+function LiveCheckCard() {
+  const [res, setRes] = useState<LResult | null | undefined>(undefined);
+  const [msg, setMsg] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/setups/live-check', { cache: 'no-store' }).then(async (r) => {
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setRes(j.result); if (!j.result) setMsg(j.message ?? '');
+    }).catch((e) => { setRes(null); setMsg((e as Error).message); });
+  }, []);
+  const t = res?.totals;
+  const verdict = !t || !t.btTrades ? null
+    : t.missed === 0 && t.extra === 0 ? { cls: TONE.good, text: `Live took exactly the backtest's trades on all ${t.days} days.` }
+      : t.missed + t.extra <= Math.max(1, Math.round(t.btTrades * 0.2)) ? { cls: TONE.warn, text: `Mostly the same: ${t.same} of ${t.btTrades} backtest trades taken live, ${t.missed} missed, ${t.extra} live only. Check the reasons below.` }
+        : { cls: TONE.bad, text: `Live is not trading the tested system: ${t.missed} of ${t.btTrades} backtest trades missed and ${t.extra} live only. Until this closes, the backtest's numbers don't describe your results.` };
   return (
-    <div className="border-t border-line pt-2">
-      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">Latest examples (check them on your chart)</p>
-      <div className="-mx-2 overflow-x-auto">
-        <table className="w-full min-w-[520px] text-[11px]">
-          <tbody>
-            {last.map((s) => {
-              const o = s.out?.[target];
+    <Card title="Backtest vs live" sub="Every day Algo Live has run: the trades the backtest's F took that day next to what Algo Live actually took, and why they differ. R is before charges on both sides.">
+      {res === undefined && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Comparing…</p>}
+      {res === null && <p className="text-xs text-ink-3">{msg || 'Nothing to compare yet.'}</p>}
+      {res && t && (
+        <>
+          {verdict ? <p className={`rounded-xl border px-3 py-2 text-sm font-bold ${verdict.cls}`}>{verdict.text}</p>
+            : <p className="text-xs text-ink-3">No backtest trades on the live days yet.</p>}
+          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Days compared</p><p className="font-mono font-bold">{t.days}</p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Same trades</p><p className="font-mono font-bold">{t.same} / {t.btTrades}</p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Backtest R</p><p className={`font-mono font-bold ${tone(t.btR)}`}>{rr(t.btR)}</p></div>
+            <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Live R</p><p className={`font-mono font-bold ${tone(t.liveR)}`}>{rr(t.liveR)}{t.liveClosed < t.liveTrades ? <span className="text-[10px] font-normal text-ink-3"> ({t.liveClosed} of {t.liveTrades} closed)</span> : null}</p></div>
+          </div>
+          <p className="text-[11px] text-ink-3">Backtest: iteration {res.run.iteration}&apos;s run, data to {fmtDate(res.dataTo)}. Later days show live trades only until the next Re-run. Live R comes from your journal&apos;s exits.</p>
+          <ul>
+            {res.days.map((d) => {
+              const bad = d.rows.filter((r) => r.kind !== 'same').length;
               return (
-                <tr key={`${s.symbol}${s.date}${s.slot}${s.dir}`} className="border-b border-line/40">
-                  <td className="px-2 py-1 font-mono text-ink-3">{s.date} {hhmm(s.slot)}</td>
-                  <td className="px-2 py-1 font-bold">{s.symbol}</td>
-                  <td className={`px-2 py-1 font-bold ${s.dir === 1 ? 'text-data-green' : 'text-data-red-text'}`}>{s.dir === 1 ? 'LONG' : 'SHORT'}</td>
-                  <td className="px-2 py-1 font-mono">@ {s.entry} · stop {s.stop}{s.stopType === 'ATR2' ? ' (2x ATR)' : ''} · target {s.target}</td>
-                  <td className="px-2 py-1 font-mono text-ink-3">{s.stretch}% range{s.testNo ? ` · test ${s.testNo} (${s.tests.map(hhmm).join(', ')})` : ''}</td>
-                  <td className={`px-2 py-1 text-right font-mono ${o && o.net > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{s.case === 'M9' && !s.out?.filled ? 'not filled' : o ? `${o.hit ? 'hit' : 'miss'} ${rr(o.net)}` : '–'}</td>
-                </tr>
+                <li key={d.date} className="border-b border-line/60">
+                  <button className="flex w-full items-center gap-2 py-2 text-left text-xs" onClick={() => setOpen(open === d.date ? null : d.date)}>
+                    <span className="w-24 shrink-0 font-bold">{fmtDate(d.date).replace(/ \d{4}$/, '')}</span>
+                    <span className="flex-1 text-ink-2">{!d.inBacktest ? 'not in the backtest yet' : !d.rows.length ? 'no trades either side' : bad ? `${bad} difference${bad > 1 ? 's' : ''}` : 'all the same'}</span>
+                    <span className="text-ink-3">{d.rows.length} trade{d.rows.length === 1 ? '' : 's'}</span>
+                    {open === d.date ? <ChevronDown className="h-3.5 w-3.5 text-ink-3" /> : <ChevronRight className="h-3.5 w-3.5 text-ink-3" />}
+                  </button>
+                  {open === d.date && (
+                    <div className="space-y-2 pb-3">
+                      {!d.ran && <p className="text-[11px] text-ink-3">Algo Live did not run that day (no day list).</p>}
+                      {d.rows.map((r, i) => (
+                        <div key={i} className="rounded-lg border border-line px-3 py-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <b>{r.symbol}</b>
+                            <span className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest ${KIND[r.kind].cls}`}>{KIND[r.kind].label}</span>
+                            <span className="ml-auto font-mono text-[11px] text-ink-3">
+                              {r.btTime && <>BT {r.btTime} <span className={tone(r.btR)}>{rr(r.btR)}</span></>}
+                              {r.btTime && r.liveTime && ' · '}
+                              {r.liveTime && <>Live {r.liveTime} <span className={tone(r.liveR)}>{r.liveR == null ? 'open' : rr(r.liveR)}</span>{r.exit && r.exit !== 'OPEN' ? ` (${r.exit.toLowerCase()})` : ''}</>}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-ink-2">{r.why}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </li>
               );
             })}
-          </tbody>
-        </table>
-      </div>
-      {sigs.length > n && <button onClick={() => setN(n + 24)} className="mt-1 text-[11px] font-bold text-brand-accent">Show more</button>}
-    </div>
-  );
-}
-
-function Rules({ summary, previous }: { summary: Summary; previous: Summary | null }) {
-  return (
-    <Card title="Your rules, checked" sub="Every momentum and reversal trade above, split by your own rules. Same hit-rate definition as the table.">
-      <div className="grid gap-4 lg:grid-cols-3">
-        {summary.rules.map((r) => {
-          const before = previous?.rules.find((x) => x.id === r.id);
-          return <MiniTable key={r.id} title={r.title} first="" rows={r.rows.map((x) => ({ label: x.label, s: x.stats, before: before?.rows.find((y) => y.label === x.label)?.stats }))} />;
-        })}
-      </div>
-    </Card>
-  );
-}
-
-/* ---- his own trades, same yardstick ------------------------------------------------------------------- */
-
-interface MyS { n: number; hit: number; netR: number; grossR: number; costR: number; totalNet: number; totalCharges: number }
-interface MyRep { tabs: string[]; all: MyS; riskLogged: MyS; riskAssumed: MyS; byMonth: { key: string; stats: MyS }[]; bySetup: { key: string; stats: MyS }[]; byTime: { key: string; stats: MyS }[]; byExit: { key: string; stats: MyS }[]; byDir: { key: string; stats: MyS }[] }
-const inrAbs = (x: number) => `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`;
-
-function MyTrades() {
-  const [rep, setRep] = useState<MyRep | null>(null);
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    fetch('/api/setups/journal').then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`); setRep(j); }).catch((e) => setErr((e as Error).message));
-  }, []);
-  const a = rep?.all;
-  return (
-    <Card title="Your own trades, same yardstick" sub="Every trade in your journal: R = net P&L ÷ the rupees you risked (your first stop × quantity). Hit = made money after charges. This is the number the backtest has to beat.">
-      {err && <p className="text-xs text-data-red-text">{err}</p>}
-      {!rep && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-3.5 w-3.5 animate-spin" />Reading your journal…</p>}
-      {a && (
-        <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            {[
-              ['Trades', String(a.n)], ['Hit (after costs)', pct(a.hit)], ['R before costs', rr(a.grossR)], ['Charges', `${a.costR.toFixed(2)}R`],
-              ['R after costs', rr(a.netR)], ['Net P&L', inrAbs(a.totalNet)], ['Charges paid', `₹${a.totalCharges.toLocaleString('en-IN')}`],
-            ].map(([k, v]) => (
-              <div key={k} className="rounded-xl border border-line bg-brand-bg px-3 py-2">
-                <p className="text-[10px] font-black uppercase tracking-widest text-ink-3">{k}</p>
-                <p className={`font-mono text-sm font-bold ${k === 'R after costs' || k === 'Net P&L' ? (a.netR > 0 ? 'text-data-green' : 'text-data-red-text') : ''}`}>{v}</p>
-              </div>
-            ))}
-          </div>
-          {rep.riskAssumed.n > 0 && (
-            <p className="text-[11px] text-ink-3">{rep.riskLogged.n} trades have your logged stop ({rr(rep.riskLogged.netR)} after costs); {rep.riskAssumed.n} have none logged and are counted at ₹300 risk ({rr(rep.riskAssumed.netR)}).</p>
-          )}
-          <div className="grid gap-4 lg:grid-cols-2">
-            {([['By month', rep.byMonth], ['By setup (your Setup column)', rep.bySetup], ['By entry time (30 min)', rep.byTime], ['By exit', rep.byExit], ['By side', rep.byDir]] as const).map(([title, rows]) => (
-              <div key={title}>
-                <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-ink-3">{title}</p>
-                <div className="-mx-2 overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
-                      <th className="px-2 py-1.5 text-left"></th><th className="px-2 py-1.5 text-right">Trades</th><th className="px-2 py-1.5 text-right">Hit</th>
-                      <th className="hidden px-2 py-1.5 text-right sm:table-cell">R before</th><th className="px-2 py-1.5 text-right">R after</th><th className="px-2 py-1.5 text-right">Net ₹</th>
-                    </tr></thead>
-                    <tbody>
-                      {rows.map((r) => (
-                        <tr key={r.key} className="border-b border-line/60 font-mono tabular-nums">
-                          <td className="px-2 py-1.5 font-sans">{r.key}</td>
-                          <td className="px-2 py-1.5 text-right">{r.stats.n}</td>
-                          <td className="px-2 py-1.5 text-right font-bold">{pct(r.stats.hit)}</td>
-                          <td className="hidden px-2 py-1.5 text-right sm:table-cell">{rr(r.stats.grossR)}</td>
-                          <td className={`px-2 py-1.5 text-right ${r.stats.netR > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{rr(r.stats.netR)}</td>
-                          <td className={`px-2 py-1.5 text-right ${r.stats.totalNet > 0 ? 'text-data-green' : 'text-data-red-text'}`}>{inrAbs(r.stats.totalNet)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))}
-          </div>
+          </ul>
         </>
       )}
     </Card>
