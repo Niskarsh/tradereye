@@ -5,7 +5,9 @@
 
 export interface Tree { value: number[]; feature: number[]; threshold: number[]; missingLeft: number[]; left: number[]; right: number[]; leaf: number[] }
 export interface LiveModel {
-  v: 1; strategy: string; month: string; createdAt: number; code?: string | null; runId?: string; dataTo?: string;
+  v: 1; strategy: string; month: string;
+  /** the Algo Lab iteration that picked `strategy` (from Nov 2026; see activeOf) */
+  iteration?: number; strategyName?: string; createdAt: number; code?: string | null; runId?: string; dataTo?: string;
   train: [string, string]; val: [string, string];
   /** the facts each model reads, in order (stock facts and their cross-sectional ranks, `<fact>_rk`) */
   features: string[];

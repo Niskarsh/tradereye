@@ -5,7 +5,8 @@ import { useAuth } from '@/context/AuthContext';
 import { Card, rr } from '@/components/setups/parts';
 
 /**
- * Algo Live: the strategy iteration 10 picked, traded live (lib/algoLive/engine.ts).
+ * Algo Live: the strategy an Algo Lab iteration picked (iteration 10 so far; the model says which: lib/algoLive/active.ts),
+ * traded live (lib/algoLive/engine.ts).
  *   1. Day list (before the open): the stocks the backtest would look at today, comma separated for the Order Book.
  *   2. 09:25: the shortlist (the model's view after the first 10 minutes) to veto from.
  *   3. 09:35-10:55: at each 10-minute close the first 2 that clear the bar are shorted through trading-scaler
@@ -19,7 +20,8 @@ interface Tick { slot: number; at: number; scored: Scored[]; picked: string[]; n
 interface Order { symbol: string; slot: number; pred: number; price: number; adr: number; qty: number; stop: number; target: number; correlationId: string; sentAt: number; orderId?: string; status: string; error?: string; avgPrice?: number }
 interface Item { symbol: string; securityId: string; prevClose: number; avgVol: number }
 interface State { date: string; list: Item[]; listAt?: number; candidates?: number; vetoes: string[]; armed: boolean; ticks: Record<string, Tick>; orders: Order[]; log: { at: number; msg: string }[] }
-interface ModelInfo { month: string; train: [string, string]; val: [string, string]; threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number; createdAt: number; trees: number; parityWorst: number | null; rules: { firstSlot: number; lastSlot: number; cap: number; riskInr: number } }
+interface ModelInfo { month: string; train: [string, string]; val: [string, string]; threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number; createdAt: number; trees: number; parityWorst: number | null; rules: { firstSlot: number; lastSlot: number; cap: number; riskInr: number };
+  active?: { iteration: number | null; name: string; runId: string | null; runAt: string | null; dataTo: string | null } }
 interface Snap { now: number; date: string; state: State; record: string[]; model: ModelInfo | null; scaler: boolean; settings?: { riskInr: number } }
 interface Pos { symbol: string; netQty: number; realized: number; unrealized: number }
 
@@ -141,6 +143,15 @@ export default function AlgoLivePage() {
         {snap && (
           <>
             <Card title="The model" sub={model ? `Trades ${mon(model.month)} · learned from ${mon(model.train[0])}–${mon(model.train[1])} · bar set on ${mon(model.val[0])}–${mon(model.val[1])} · ${model.trees} trees · made ${new Date(model.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'No live model yet: run the "Algo Live model" workflow on GitHub (Actions tab).'}>
+              {model?.active && (
+                <div className="mb-2 rounded-lg border border-data-green/40 bg-data-green/10 px-3 py-2">
+                  <p className="text-sm"><b>Active iteration: {model.active.iteration ?? '?'}</b> · {model.active.name}</p>
+                  <p className="mt-0.5 text-[11px] text-ink-2">
+                    Trained on the data of the backtest run of {model.active.runAt ?? 'an unknown date'}{model.active.dataTo ? ` (data to ${new Date(`${model.active.dataTo}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })})` : ''}.{' '}
+                    {model.active.runId && <a className="underline" href={`/algo?run=${encodeURIComponent(model.active.runId)}`}>See it in Algo Lab</a>}
+                  </p>
+                </div>
+              )}
               {model && (
                 <p className="text-sm">
                   {model.standAside ? <b className="text-brand-accent">Standing aside this month: no bar made money on the 3 months before.</b>
