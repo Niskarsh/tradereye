@@ -306,6 +306,14 @@ def top_facts(gain, feats, k=10):
     return [[feats[i], round(float(gain[i] / tot), 4)] for i in order if gain[i] > 0]
 
 
+def all_shares(gain, feats, floor=0.0005):
+    """(model history) every fact's share of one month's split gain, {fact: share}, tiny ones left out"""
+    tot = float(gain.sum())
+    if tot <= 0:
+        return None
+    return {feats[i]: round(float(gain[i] / tot), 4) for i in range(len(feats)) if gain[i] / tot >= floor}
+
+
 def period_stats(tr, months):
     s = stats(tr['net'], tr['gross'])
     s['monthsGreen'] = sum(1 for m in months if m['n'] > 0 and m['sumR'] > 0)
@@ -389,6 +397,7 @@ def main(d):
                 mg = np.zeros(len(feats))
                 add_gain(mg, (ml.models if ml else []) + (ms.models if ms else []), cols)
                 mfacts = top_facts(mg, feats)
+                mval['shares'] = all_shares(mg, feats)
                 ics = [spearman(tl_all, tpart[st['L']].values) if ml else None, spearman(ts_all, tpart[st['S']].values) if ms else None]
                 ics = [x for x in ics if x is not None]
                 ic = float(np.mean(ics)) if ics else None

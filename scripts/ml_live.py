@@ -132,7 +132,7 @@ def main(d, month=None):
         'threshold': None if not ok else float(thr), 'standAside': not ok,  # (float, finite)
         'valTrades': 0 if vtr is None else int(len(vtr)), 'valR': None if vtr is None or not len(vtr) else round(float(vtr['net'].mean()), 4),
         'valDays': int(vpart['day'].nunique()),
-        'facts': facts,
+        'facts': facts, 'shares': ml.all_shares(gain, feats), 'factLabels': labels,
         'rules': {'firstSlot': st['firstSlot'], 'lastSlot': st['lastSlot'], 'cap': st['cap'], 'stopAdr': 0.5, 'targetAdr': st['targetAdr'], 'exitSlot': 360, 'riskInr': ml.RISK},
         'models': models,
         'parity': {'rows': [[None if not np.isfinite(v) else float(v) for v in X[r, cols]] for r in pick[:60]],
