@@ -34,6 +34,8 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-IN', { hour: '
 const mon = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: 'UTC' });
 /** a close is run this many seconds after it (Dhan needs a few seconds to serve the last minute) */
 const AFTER = 6, LATEST = 4 * 60;
+/** the bar and the predictions to 4 decimals: at 2, a stock just under the bar shows the same number as the bar */
+const r4 = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '–' : `${x > 0 ? '+' : ''}${x.toFixed(4)}R`);
 const btn = 'rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-40';
 
 export default function AlgoLivePage() {
@@ -185,7 +187,7 @@ export default function AlgoLivePage() {
               {model && (
                 <p className="text-sm">
                   {model.standAside ? <b className="text-brand-accent">Standing aside this month: no bar made money on the 3 months before.</b>
-                    : <>Bar <b className="font-mono">{rr(model.threshold)}</b> predicted · on the 3 months before: {model.valTrades} trades in {model.valDays} days, <b className="font-mono">{rr(model.valR)}</b> a trade.</>}
+                    : <>Bar <b className="font-mono">{r4(model.threshold)}</b> predicted (a stock must be above it) · on the 3 months before: {model.valTrades} trades in {model.valDays} days, <b className="font-mono">{rr(model.valR)}</b> a trade.</>}
                   {model.month !== today.date.slice(0, 7) && <b className="block text-data-red-text">This model is for {mon(model.month)}: re-run the backtest on My Setups, then press Make this month&apos;s model below.</b>}
                 </p>
               )}
@@ -266,7 +268,7 @@ export default function AlgoLivePage() {
                     {tick.scored.filter((x, i) => x.above || i < 15 || tick.picked.includes(x.symbol)).map((x) => (
                       <tr key={x.symbol} className={`border-b border-line/60 font-mono ${tick.picked.includes(x.symbol) ? 'bg-data-green/10' : ''}`}>
                         <td className="px-2 py-1 font-sans font-bold">{x.symbol}</td>
-                        <td className="px-2 py-1 text-right">{x.pred === null ? x.note : rr(x.pred)}</td>
+                        <td className={`px-2 py-1 text-right ${x.above ? 'font-bold text-data-green' : ''}`}>{x.pred === null ? x.note : r4(x.pred)}</td>
                         <td className="px-2 py-1 text-right">{x.price?.toFixed(2) ?? '–'}</td>
                         <td className="px-2 py-1 text-right">{x.adr?.toFixed(2) ?? '–'}</td>
                         <td className="px-2 py-1">{x.above ? <b className="text-data-green">clears</b> : ''}{tick.picked.includes(x.symbol) ? ' · PICKED' : ''}</td>
