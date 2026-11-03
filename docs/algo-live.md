@@ -59,6 +59,11 @@ The strategy iteration 10 picked, traded with real money.
 5. **15:15**: trading-scaler closes whatever is still open. The page does it again at 15:16 if it is open. **Square
    off now** closes everything at once.
 
+## Protecting a trade by hand
+
+Algo Live's orders table and the top of the Order Book page show two prices per trade: **90% at** and **Move stop to**,
+the stop that still pays charges and usual slippage (`lib/algoLive/levels.ts`). Nothing moves on its own.
+
 ## If something goes wrong
 
 - **The page shows an error at a close**: it tries again every 20 seconds until 4 minutes after the close.

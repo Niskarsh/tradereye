@@ -22,7 +22,7 @@ interface Item { symbol: string; securityId: string; prevClose: number; avgVol: 
 interface State { date: string; list: Item[]; listAt?: number; candidates?: number; vetoes: string[]; armed: boolean; ticks: Record<string, Tick>; orders: Order[]; log: { at: number; msg: string }[] }
 interface ModelInfo { month: string; train: [string, string]; val: [string, string]; threshold: number | null; standAside: boolean; valTrades: number; valR: number | null; valDays: number; createdAt: number; trees: number; parityWorst: number | null; rules: { firstSlot: number; lastSlot: number; cap: number; riskInr: number };
   active?: { iteration: number | null; name: string; runId: string | null; runAt: string | null; dataTo: string | null } }
-interface Snap { now: number; date: string; state: State; record: string[]; model: ModelInfo | null; scaler: boolean; settings?: { riskInr: number } }
+interface Snap { now: number; date: string; state: State; levels?: Record<string, { at90: number; moveStop: number }>; record: string[]; model: ModelInfo | null; scaler: boolean; settings?: { riskInr: number } }
 interface ModelRun { id: number; status: string; conclusion: string | null; createdAt: number; updatedAt: number; url: string }
 interface Pos { symbol: string; netQty: number; realized: number; unrealized: number }
 
@@ -288,14 +288,15 @@ export default function AlgoLivePage() {
                 <button className={`${btn} border-data-red/60 text-data-red-text`} disabled={!token || !!busy} onClick={() => { if (confirm('Close every position the bot opened today, now, at market?')) scalerCall('squareoff'); }}>Square off now</button>
               </div>}>
               {!st?.orders.length ? <p className="text-[11px] text-ink-3">No orders today.</p> : (
-                <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-xs"><thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
-                  <th className="px-2 py-1 text-left">Stock</th><th className="px-2 py-1 text-left">At</th><th className="px-2 py-1 text-right">Qty</th><th className="px-2 py-1 text-right">Close</th><th className="px-2 py-1 text-right">Filled</th><th className="px-2 py-1 text-right">Stop</th><th className="px-2 py-1 text-right">Target</th><th className="px-2 py-1 text-left">Status</th>
+                <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-xs"><thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
+                  <th className="px-2 py-1 text-left">Stock</th><th className="px-2 py-1 text-left">At</th><th className="px-2 py-1 text-right">Qty</th><th className="px-2 py-1 text-right">Close</th><th className="px-2 py-1 text-right">Filled</th><th className="px-2 py-1 text-right">Stop</th><th className="px-2 py-1 text-right">Target</th><th className="px-2 py-1 text-right">90% at</th><th className="px-2 py-1 text-right">Move stop to</th><th className="px-2 py-1 text-left">Status</th>
                 </tr></thead><tbody>
                   {st.orders.map((o) => (
                     <tr key={o.correlationId} className="border-b border-line/60 font-mono">
                       <td className="px-2 py-1 font-sans font-bold">{o.symbol}</td><td className="px-2 py-1">{hhmm(o.slot)}</td><td className="px-2 py-1 text-right">{o.qty}</td>
                       <td className="px-2 py-1 text-right">{o.price.toFixed(2)}</td><td className="px-2 py-1 text-right">{o.avgPrice ? o.avgPrice.toFixed(2) : '–'}</td>
                       <td className="px-2 py-1 text-right">{o.stop.toFixed(2)}</td><td className="px-2 py-1 text-right">{o.target.toFixed(2)}</td>
+                      <td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.at90.toFixed(2) ?? '–'}</td><td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.moveStop.toFixed(2) ?? '–'}</td>
                       <td className="px-2 py-1">{o.status}{o.error ? ` · ${o.error}` : ''}</td>
                     </tr>
                   ))}
