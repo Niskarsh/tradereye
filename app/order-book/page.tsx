@@ -316,6 +316,8 @@ export default function OrderBookPage() {
         {!token && <TokenBar />}
         {info.error && <p className="rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">{info.error}</p>}
 
+        <AlgoLevels api={api} />
+
         {/* the list */}
         <section className="rounded-2xl bg-brand-card p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -381,6 +383,32 @@ export default function OrderBookPage() {
 
 type AskState = { busy: boolean; text?: string; err?: string; cost?: number };
 /** One line under the list: what the setup alerts are doing. */
+/** today's Algo Live trades: the prices for protecting them by hand, next to the order book */
+function AlgoLevels({ api }: { api: (path: string, init?: RequestInit) => Promise<Response> }) {
+  const [rows, setRows] = useState<{ id: string; symbol: string; entry: number; stop: number; target: number; at90?: number; moveStop?: number }[]>([]);
+  useEffect(() => {
+    const load = () => api('/api/algo-live/state').then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (!j) return;
+      const orders = (j.state?.orders ?? []) as { correlationId: string; symbol: string; price: number; avgPrice?: number; stop: number; target: number; status: string }[];
+      setRows(orders.filter((o) => !/REJECT|CANCEL/i.test(o.status)).map((o) => ({ id: o.correlationId, symbol: o.symbol, entry: o.avgPrice || o.price, stop: o.stop, target: o.target, at90: j.levels?.[o.correlationId]?.at90, moveStop: j.levels?.[o.correlationId]?.moveStop })));
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 30_000);
+    return () => clearInterval(t);
+  }, [api]);
+  if (!rows.length) return null;
+  return (
+    <section className="rounded-2xl bg-brand-card p-3 space-y-1 text-xs">
+      <p className="text-[10px] font-black uppercase tracking-widest text-ink-3">Algo Live today</p>
+      {rows.map((r) => (
+        <p key={r.id} className="font-mono tabular-nums">
+          <b className="font-sans">{r.symbol}</b> short {r.entry.toFixed(2)} · stop {r.stop.toFixed(2)} · target {r.target.toFixed(2)} · <b className="text-brand-accent">90% at {r.at90?.toFixed(2) ?? '–'} · move stop to {r.moveStop?.toFixed(2) ?? '–'}</b>
+        </p>
+      ))}
+    </section>
+  );
+}
+
 function ScanLine({ info, hasToken }: { info: ScanInfo; hasToken: boolean }) {
   if (!info.watching) return null;
   const t = info.at ? new Date(info.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }) : '';
