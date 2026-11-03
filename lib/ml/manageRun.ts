@@ -99,7 +99,7 @@ type Trade = (string | number | null)[];
 interface Part { n: number; base: number; rule: number; diff: number; t: number; monthsGreenBase: number; monthsGreenRule: number; months: number; addRate: number }
 export interface Confirmed { strategy: string; rule: string; label: string; decide: Part; exam: { pass: boolean | null; n: number }; untouched: Part | null; shadow: Part | null; baseMismatch: number; skippedNoData: number }
 
-async function loadDays(store: Store, items: { sym: string; date: string }[]) {
+export async function loadDays(store: Store, items: { sym: string; date: string }[]) {
   const need = new Map<string, Set<string>>();
   for (const { sym, date } of items) {
     const key = `${sym}|${date.slice(0, 7)}`;
