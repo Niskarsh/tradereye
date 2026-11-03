@@ -69,6 +69,6 @@ The strategy iteration 10 picked, traded with real money.
 
 ## Me vs Algo
 
-The **Me vs Algo** card on the Algo Live page lists every filled order: what the algo proposed, what you did (journal),
+The **Me vs Algo** card on My Setups (under Backtest vs live) lists every filled order: what the algo proposed, what you did (journal),
 how far it got toward the target while you were in, and what the untouched stop and target would have done. It is read
 only and uses data already kept (`lib/algoLive/meVsAlgo.ts`). Vetoed picks are not in it yet.

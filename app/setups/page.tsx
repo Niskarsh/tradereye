@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
 import { ProgressBar } from '@/components/ui/progress';
 import { Card, rr } from '@/components/setups/parts';
+import { MeVsAlgoCard } from '@/components/algo/MeVsAlgoCard';
 import type { Summary } from '@/lib/setups/stats';
 import type { RunIndexItem, RunStatus } from '@/lib/setups/store';
 
@@ -103,6 +104,7 @@ export default function SetupsPage() {
 
         {!!data?.runs.length && <DataCheckCard runId={run || data.runs[0].runId} />}
         {!!data?.runs.length && <LiveCheckCard key={data.runs[0].runId} />}
+        <MeVsAlgoCard token={token} />
 
         <HowItWorks open={help} onToggle={() => setHelp((h) => !h)} />
       </div>
