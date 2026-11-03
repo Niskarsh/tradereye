@@ -66,3 +66,9 @@ The strategy iteration 10 picked, traded with real money.
 - **trading-scaler unreachable**: check pm2 on EC2 (`pm2 logs dhan-trading-bot`). Orders already placed keep their
   stop and target at Dhan.
 - **To stop trading at once**: disarm the page. To close everything: Square off now, or close the positions in Dhan.
+
+## Me vs Algo
+
+The **Me vs Algo** card on the Algo Live page lists every filled order: what the algo proposed, what you did (journal),
+how far it got toward the target while you were in, and what the untouched stop and target would have done. It is read
+only and uses data already kept (`lib/algoLive/meVsAlgo.ts`). Vetoed picks are not in it yet.

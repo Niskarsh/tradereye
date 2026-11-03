@@ -44,7 +44,9 @@ const round = (x: number, d = 2) => Math.round(x * 10 ** d) / 10 ** d;
 const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
 const num = (v: unknown) => { const x = Number(String(v ?? '').replace(/,/g, '')); return Number.isFinite(x) && x > 0 ? x : undefined; };
 
-export interface JournalTrade { date: string; symbol: string; entryTime: string; avgEntry?: number; avgExit?: number; exitType: string; lastStop?: number; short: boolean }
+const signed = (v: unknown) => { const t = String(v ?? '').replace(/,/g, '').trim(); const x = Number(t); return t && Number.isFinite(x) ? x : undefined; };
+
+export interface JournalTrade { date: string; symbol: string; entryTime: string; avgEntry?: number; avgExit?: number; exitType: string; lastStop?: number; short: boolean; exitTime?: string; netPnl?: number }
 
 /** one line per trade group of a monthly tab (group values repeat on every fill row: the first row is enough) */
 export function journalTrades(headers: string[], rows: { cells: string[] }[]): JournalTrade[] {
@@ -59,6 +61,7 @@ export function journalTrades(headers: string[], rows: { cells: string[] }[]): J
       date: normDate(o['Date (IST)']), symbol: o.Symbol.trim().toUpperCase(), entryTime: normTime(o.EntryTime) || normTime(o['Time (IST)']),
       avgEntry: num(o.AvgEntry), avgExit: num(o.AvgExit), exitType: (o.ExitType ?? '').trim().toUpperCase() || 'UNKNOWN',
       lastStop: num(o.LastStop), short: /SHORT|SELL/.test(dir),
+      exitTime: normTime(o.ExitTime) || undefined, netPnl: signed(o.NetPnL),
     });
   }
   return out;
@@ -68,11 +71,16 @@ const minutes = (hhmmss: string) => { const [h, m] = hhmmss.split(':').map(Numbe
 const istMinutes = (ms: number) => { const d = new Date(ms + 19800_000); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
 const istHhmm = (ms: number) => { const d = new Date(ms + 19800_000); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
 
-/** an Algo Live order next to its journal trade */
-export function compare(date: string, o: OrderRec, journal: JournalTrade[]): FillRow | undefined {
+/** the journal trade of an Algo Live order: same day, same stock, short, nearest in time */
+export function journalOf(date: string, o: OrderRec, journal: JournalTrade[]): JournalTrade | undefined {
   const sym = o.symbol.trim().toUpperCase();
   const cands = journal.filter((j) => j.date === date && j.short && j.symbol === sym);
-  const j = cands.sort((a, b) => Math.abs(minutes(a.entryTime || '00:00') - istMinutes(o.sentAt)) - Math.abs(minutes(b.entryTime || '00:00') - istMinutes(o.sentAt)))[0];
+  return cands.sort((a, b) => Math.abs(minutes(a.entryTime || '00:00') - istMinutes(o.sentAt)) - Math.abs(minutes(b.entryTime || '00:00') - istMinutes(o.sentAt)))[0];
+}
+
+/** an Algo Live order next to its journal trade */
+export function compare(date: string, o: OrderRec, journal: JournalTrade[]): FillRow | undefined {
+  const j = journalOf(date, o, journal);
   const entry = o.avgPrice || j?.avgEntry;
   if (!entry) return undefined; // never filled
   const entryTicks = round((o.price - entry) / TICK, 1);
@@ -116,6 +124,13 @@ export function tradingDays(from: string, to: string): string[] {
 
 /** every Algo Live order since LIVE_FROM that filled, next to its journal trade (oldest first) */
 export async function liveFills(store: Store, sheets: SheetsClient, today: string): Promise<{ rows: FillRow[]; summary: FillSummary }> {
+  const { orders, journal } = await liveOrders(store, sheets, today);
+  const rows = orders.map(({ d, o, avgVol }) => { const r = compare(d, o, journal); if (r && avgVol) r.avgVol = avgVol; return r; }).filter((r): r is FillRow => !!r);
+  return { rows, summary: summarize(rows) };
+}
+
+/** every Algo Live order since LIVE_FROM that was not rejected, and the journal trades of those months */
+export async function liveOrders(store: Store, sheets: SheetsClient, today: string) {
   const days = tradingDays(LIVE_FROM, today);
   const states = await Promise.all(days.map((d) => loadState(store, d).catch(() => undefined)));
   const orders = days.flatMap((d, i) => (states[i]?.orders ?? []).filter((o) => !/REJECT|CANCEL/i.test(o.status)).map((o) => ({ d, o, avgVol: states[i]!.list.find((x) => x.symbol === o.symbol)?.avgVol })));
@@ -127,6 +142,5 @@ export async function liveFills(store: Store, sheets: SheetsClient, today: strin
     const { headers, rows } = await sheets.readAll(tab);
     journal.push(...journalTrades(headers, rows));
   }
-  const rows = orders.map(({ d, o, avgVol }) => { const r = compare(d, o, journal); if (r && avgVol) r.avgVol = avgVol; return r; }).filter((r): r is FillRow => !!r);
-  return { rows, summary: summarize(rows) };
+  return { orders, journal };
 }
