@@ -19,7 +19,7 @@ async function main() {
   if (!ml) throw new Error('iteration file missing');
   const r = await profitLock(ml, id, store, console.log);
   await putJson(store, `setups/ml/profit-lock/${iteration}-${entry.runId}-${process.env.GITHUB_RUN_ID ?? 'local'}.json.gz`, { iteration, runId: entry.runId, ...r });
-  console.log(`::notice title=Check::simulator vs backtest ride: ${r.checked - r.mismatch}/${r.checked} matched; chosen on decide months at 3 ticks: ${r.chosen}`);
+  console.log(`::notice title=Check::simulator vs backtest ride: ${r.checked - r.mismatch}/${r.checked} matched; chosen on decide months at 3 ticks: ${r.chosen}; share of the way to target that pays charges: median ${r.cover.charges.p50}pct, 90th pct ${r.cover.charges.p90}pct; charges and slippage: median ${r.cover.withSlip.p50}pct, 90th pct ${r.cover.withSlip.p90}pct`);
   notice('Decide 1 tick past', r.through1); notice('Decide 3 ticks past', r.through3);
   notice('Exam 1 tick past', r.exam1); notice('Exam 3 ticks past', r.exam3);
   notice('Untouched 1 tick past', r.untouched1); notice('Untouched 3 ticks past', r.untouched3);
