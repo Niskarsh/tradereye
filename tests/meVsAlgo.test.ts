@@ -49,3 +49,21 @@ test('trades left alone are not counted as stepping in; the journal reads a nega
   assert.equal(j[0].netPnl, -25.5);
   assert.equal(typeof liveOrders, 'function');
 });
+
+test('a bare wick through the target is marked uncertain, with what happens if it did not fill', () => {
+  const c = candles([['09:40', 300, 299], ['10:30', 298, 295.9], ['11:00', 304.1, 298]]);
+  const r = judge(D, order, mine({ exitTime: '10:00:00', avgExit: 299, netPnl: 50 }), c, true)!;
+  assert.equal(r.planOutcome, 'TARGET');
+  assert.equal(r.throughTicks, 2);
+  assert.equal(r.fillDoubt, true);
+  assert.equal(r.ifNoFill!.outcome, 'STOP');
+  assert.ok(r.ifNoFill!.inr! < -300);
+  const t = totalsOf([r]);
+  assert.deepEqual([t.helped, t.hurt, t.unclear], [0, 0, 1]);
+});
+
+test('a target traded well through is not in doubt', () => {
+  const r = judge(D, order, mine({ exitTime: '10:00:00', avgExit: 299, netPnl: 50 }), candles([['09:40', 300, 299], ['10:30', 298, 295]]), true)!;
+  assert.equal(r.throughTicks, 20);
+  assert.equal(r.fillDoubt, false);
+});

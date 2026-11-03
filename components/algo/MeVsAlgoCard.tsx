@@ -33,7 +33,7 @@ export function MeVsAlgoCard({ token }: { token: string | null | undefined }) {
           <div><p className="text-[10px] uppercase tracking-widest text-ink-3">You</p><p className={`font-mono font-bold ${tone(t.myInr)}`}>{inr(t.myInr)}</p></div>
           <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Untouched</p><p className={`font-mono font-bold ${tone(t.planInr)}`}>{inr(t.planInr)}</p></div>
           <div><p className="text-[10px] uppercase tracking-widest text-ink-3">Your difference</p><p className={`font-mono font-bold ${tone(t.diffInr)}`}>{inr(t.diffInr)}</p></div>
-          <div><p className="text-[10px] uppercase tracking-widest text-ink-3">You stepped in</p><p className="font-mono font-bold">{t.steppedIn} of {t.closed} <span className="text-[11px] font-normal text-ink-3">({t.helped} helped, {t.hurt} hurt)</span></p></div>
+          <div><p className="text-[10px] uppercase tracking-widest text-ink-3">You stepped in</p><p className="font-mono font-bold">{t.steppedIn} of {t.closed} <span className="text-[11px] font-normal text-ink-3">({t.helped} helped, {t.hurt} hurt{t.unclear ? `, ${t.unclear} unclear` : ''})</span></p></div>
         </div>
       )}
       {t && t.steppedIn < NEEDED && <p className="text-xs text-ink-2">Too few yet to judge your exits: {t.steppedIn} of {NEEDED} trades where you stepped in.</p>}
@@ -48,9 +48,11 @@ export function MeVsAlgoCard({ token }: { token: string | null | undefined }) {
               <td className={TH}>{r.entry.toFixed(2)}</td><td className={TH}>{r.stop.toFixed(2)}</td><td className={TH}>{r.target.toFixed(2)}</td>
               <td className={TH}>{r.myExit !== null ? `${r.myExit.toFixed(2)}${r.myTime ? ` · ${r.myTime}` : ''} · ${r.myHow}` : r.myHow}{r.lastStop !== null && Math.abs(r.lastStop - r.stop) > 0.01 ? ` · stop moved to ${r.lastStop.toFixed(2)}` : ''}</td>
               <td className={TH}>{r.peakPct !== null ? `${r.peakPct}% to target${r.peakTime ? ` · ${r.peakTime}` : ''}` : '–'}</td>
-              <td className={TH}>{r.note ?? (r.planOutcome ? `${r.planOutcome === 'OPEN' ? 'still open' : r.planOutcome} · ${r.planTime}` : '–')}</td>
+              <td className={TH}>{r.note ?? (r.planOutcome ? `${r.planOutcome === 'OPEN' ? 'still open' : r.planOutcome} · ${r.planTime}` : '–')}
+                {r.throughTicks !== null && <span className="block text-[10px] text-ink-3">{r.throughTicks} tick{r.throughTicks === 1 ? '' : 's'} past target</span>}
+                {r.fillDoubt && <span className="block text-[10px] text-brand-accent">fill uncertain{r.ifNoFill ? `; if not filled: ${r.ifNoFill.outcome === 'OPEN' ? 'still open' : r.ifNoFill.outcome} · ${r.ifNoFill.time}${r.ifNoFill.inr !== null ? ` · ${inr(r.ifNoFill.inr)}` : ''}` : ''}</span>}</td>
               <td className={`${TH} ${tone(r.myInr)}`}>{inr(r.myInr)}</td><td className={`${TH} ${tone(r.planInr)}`}>{inr(r.planInr)}</td>
-              <td className={`${TH} font-bold ${tone(r.diffInr)}`}>{inr(r.diffInr)}</td>
+              <td className={`${TH} font-bold ${r.fillDoubt ? 'text-ink-3' : tone(r.diffInr)}`}>{inr(r.diffInr)}{r.fillDoubt ? ' ?' : ''}</td>
             </tr>
           ))}
         </tbody></table></div>
