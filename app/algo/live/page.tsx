@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Card, rr } from '@/components/setups/parts';
+import { MeVsAlgoCard } from '@/components/algo/MeVsAlgoCard';
 
 /**
  * Algo Live: the strategy an Algo Lab iteration picked (iteration 10 so far; the model says which: lib/algoLive/active.ts),
@@ -303,6 +304,8 @@ export default function AlgoLivePage() {
               )}
               {positions && <p className="text-[11px] text-ink-2">Positions: {positions.length ? positions.map((p) => `${p.symbol} ${p.netQty} (₹${Math.round(p.realized + p.unrealized)})`).join(' · ') : 'none open'}</p>}
             </Card>
+
+            <MeVsAlgoCard token={token} />
 
             <Card title="Log" sub="Today, newest first.">
               <ul className="max-h-64 space-y-0.5 overflow-y-auto font-mono text-[11px] text-ink-2">

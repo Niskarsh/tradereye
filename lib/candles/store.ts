@@ -164,6 +164,18 @@ export interface TradeCandles {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** One stock's 1-minute candles for one day (S3 first, Dhan once if not saved). Throws NeedsDhanError without a token. */
+export async function loadDayMinutes(deps: LoadDeps, req: { symbol: string; date: string; securityId?: string }): Promise<Candles> {
+  const symbol = req.symbol.trim().toUpperCase();
+  const n: Counts = { fromS3: 0, fromDhan: 0, saved: 0, dhanCalls: 0, s3Errors: 0, notSaved: 0 };
+  const resolveId = async () => {
+    const id = req.securityId ?? await deps.lookupSecurityId(symbol);
+    if (!id) throw new Error(`${symbol} is not in Dhan's NSE equity list.`);
+    return id;
+  };
+  return (await minuteDays(deps, { symbol, securityId: req.securityId, segment: 'NSE_EQ', instrument: 'EQUITY' }, [req.date], req.date, n, resolveId)).c;
+}
+
 /**
  * Everything the journal charts need for one trade. `parts` limits the work (a day picked on the daily chart only
  * needs its minutes).
