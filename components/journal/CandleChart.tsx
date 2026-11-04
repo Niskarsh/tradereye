@@ -30,7 +30,7 @@ const fmtV = (v: number) => (v >= 1e7 ? `${(v / 1e7).toFixed(2)}Cr` : v >= 1e5 ?
 
 interface View { end: number; count: number; pLo?: number; pHi?: number }
 
-export function CandleChart({ bars, barMs, lines = [], hlines = [], marks = [], flags = [], lower, profile, highlight, focus, height = 420, onPick, pickedDate }: {
+export function CandleChart({ bars, barMs, lines = [], hlines = [], marks = [], flags = [], lower, profile, highlight, focus, height = 420, onPick, pickedDate, pixelRatio, onDrawn }: {
   bars: CBar[];
   /** length of one bar: 10 min, or a day */
   barMs: number;
@@ -47,6 +47,10 @@ export function CandleChart({ bars, barMs, lines = [], hlines = [], marks = [], 
   onPick?: (bar: CBar) => void;
   /** a day drawn with a gold outline (the day open on the other chart) */
   pickedDate?: string;
+  /** fixed sharpness instead of the screen's (the post images need the same pixels on every device) */
+  pixelRatio?: number;
+  /** called after every draw, with the canvas (the post images copy it) */
+  onDrawn?: (c: HTMLCanvasElement) => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
@@ -72,10 +76,11 @@ export function CandleChart({ bars, barMs, lines = [], hlines = [], marks = [], 
     return lo + Math.max(0, Math.min(0.999, (ms - bars[lo].t) / barMs));
   }, [bars, barMs]);
 
+  const drawnRef = useRef(onDrawn); drawnRef.current = onDrawn;
   const draw = useCallback(() => {
     const c = cv.current, box = wrap.current;
     if (!c || !box) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = pixelRatio ?? (window.devicePixelRatio || 1);
     const W = box.clientWidth, H = height;
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); c.style.width = `${W}px`; c.style.height = `${H}px`; }
     const g = c.getContext('2d'); if (!g) return;
@@ -324,7 +329,8 @@ export function CandleChart({ bars, barMs, lines = [], hlines = [], marks = [], 
         }
       }
     }
-  }, [bars, barMs, lines, hlines, marks, flags, lower, profile, highlight, height, idxOf, pickedDate]);
+    drawnRef.current?.(c);
+  }, [bars, barMs, lines, hlines, marks, flags, lower, profile, highlight, height, idxOf, pickedDate, pixelRatio]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
