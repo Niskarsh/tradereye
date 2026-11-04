@@ -202,3 +202,12 @@ test('YouTube tags: channel name first, no duplicates or quotes, within the 450-
   assert.ok(t.length > 10);
   assert.equal(tagChars(['a b', 'c']), 7);   // "a b" counts its quotes, plus one comma
 });
+
+import { storiesToSend } from '../lib/posts/stories';
+
+test('Post Story sends only what is missing, never the ones already up', () => {
+  const up = { stories: [{ slides: ['story-curve'] }] };
+  assert.deepEqual(storiesToSend(['curve', 'positions', 'chart-abc'], up), ['positions', 'chart-abc']);
+  assert.deepEqual(storiesToSend(['curve'], up), []);
+  assert.deepEqual(storiesToSend(['curve', 'positions'], { stories: [] }), ['curve', 'positions']);
+});
