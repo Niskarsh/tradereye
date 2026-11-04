@@ -1,4 +1,4 @@
-import { extremes, type Curve, type CurveMode } from './curve';
+import { extremes, tradedRange, type Curve, type CurveMode } from './curve';
 
 /**
  * Draws the P&L curve on any canvas: the journal's live chart and the post / Story images use this same code, so what
@@ -28,9 +28,14 @@ export interface DrawOptions {
   scale?: number;
   /** minute under the pointer: crosshair and the values at that minute */
   hover?: number;
+  /** minutes shown (fractional indexes into curve.times) and, once moved by hand, the rupee scale. Default: the traded part. */
+  view?: { from: number; to: number; lo?: number; hi?: number };
 }
 
-export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, curve: Curve, mode: CurveMode, o: DrawOptions = {}): void {
+/** Where things landed, so the page can turn a pointer position into a minute or a rupee value. */
+export interface CurveGeom { left: number; top: number; plotW: number; plotH: number; from: number; to: number; lo: number; hi: number }
+
+export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, curve: Curve, mode: CurveMode, o: DrawOptions = {}): CurveGeom | undefined {
   const s = o.scale ?? 1;
   const font = (px: number, weight = '') => `${weight} ${px * s}px Inter, system-ui, -apple-system, 'Segoe UI', sans-serif`.trim();
   g.fillStyle = CURVE_COLORS.bg; g.fillRect(0, 0, W, H);
@@ -39,13 +44,20 @@ export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, cur
   const showPositions = curve.positions.length > 1;
   const left = 62 * s, right = (showPositions ? 118 : 16) * s, top = 26 * s, bottom = 26 * s;
   const plotW = W - left - right, plotH = H - top - bottom;
-  if (n === 0 || plotW <= 0 || plotH <= 0) return;
+  if (n === 0 || plotW <= 0 || plotH <= 0) return undefined;
+  const range = o.view ?? tradedRange(curve);
+  const from = range.from, to = Math.max(range.to, from + 1);
+  const i0 = Math.max(0, Math.floor(from)), i1 = Math.min(n - 1, Math.ceil(to));
 
-  const all = [0, ...overall, ...(showPositions ? curve.positions.flatMap((p) => p[mode]) : [])];
-  let lo = Math.min(...all), hi = Math.max(...all);
-  const pad = Math.max((hi - lo) * 0.12, 10);
-  lo -= pad; hi += pad;
-  const X = (i: number) => left + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const seen = (v: number[]) => v.slice(i0, i1 + 1);
+  const all = [...seen(overall), ...(showPositions ? curve.positions.flatMap((p) => seen(p[mode])) : [])];
+  let lo = o.view?.lo ?? Math.min(...all, Infinity), hi = o.view?.hi ?? Math.max(...all, -Infinity);
+  if (o.view?.lo === undefined || o.view?.hi === undefined) {
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 0; }
+    const pad = Math.max((hi - lo) * 0.12, 10);
+    lo -= pad; hi += pad;
+  }
+  const X = (i: number) => left + ((i - from) / (to - from)) * plotW;
   const Y = (v: number) => top + ((hi - v) / (hi - lo)) * plotH;
 
   // grid and scale
@@ -56,18 +68,25 @@ export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, cur
     g.fillStyle = CURVE_COLORS.text; g.fillText(inr(v, false), left - 7 * s, Y(v));
   }
   g.textAlign = 'center'; g.textBaseline = 'alphabetic';
-  const every = plotW / (s * 62) >= 5 ? 60 : 120;
-  curve.times.forEach((t, i) => {
-    const m = Math.round((t + IST) / 60_000) % 1440;
-    if ((m - 555) % every !== 0) return; // 555 = 09:15
+  // a round step for the minutes in view, on clock times
+  const room = Math.max(1, plotW / (s * 62));
+  const every = [5, 10, 15, 30, 60, 120, 240].find((m) => (to - from) / m <= room) ?? 240;
+  for (let i = i0; i <= i1; i++) {
+    const m = Math.round((curve.times[i] + IST) / 60_000) % 1440;
+    if (m % every !== 0) continue;
     g.fillStyle = CURVE_COLORS.grid; g.fillRect(Math.round(X(i)), top, Math.max(1, s * 0.6), plotH);
-    g.fillStyle = CURVE_COLORS.text; g.fillText(hhmm(t), Math.max(left + 16 * s, Math.min(X(i), left + plotW - 16 * s)), H - 8 * s);
-  });
+    g.fillStyle = CURVE_COLORS.text; g.fillText(hhmm(curve.times[i]), Math.max(left + 16 * s, Math.min(X(i), left + plotW - 16 * s)), H - 8 * s);
+  }
   // zero line
-  g.strokeStyle = CURVE_COLORS.text; g.lineWidth = Math.max(1, s); g.setLineDash([4 * s, 4 * s]);
-  g.beginPath(); g.moveTo(left, Y(0)); g.lineTo(left + plotW, Y(0)); g.stroke(); g.setLineDash([]);
+  if (lo <= 0 && hi >= 0) {
+    g.strokeStyle = CURVE_COLORS.text; g.lineWidth = Math.max(1, s); g.setLineDash([4 * s, 4 * s]);
+    g.beginPath(); g.moveTo(left, Y(0)); g.lineTo(left + plotW, Y(0)); g.stroke(); g.setLineDash([]);
+  }
 
-  const path = (vals: number[]) => { g.beginPath(); vals.forEach((v, i) => (i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)))); };
+  const path = (vals: number[]) => { g.beginPath(); for (let i = i0; i <= i1; i++) { if (i === i0) g.moveTo(X(i), Y(vals[i])); else g.lineTo(X(i), Y(vals[i])); } };
+
+  // everything on the lines stays inside the plot when zoomed or dragged
+  g.save(); g.beginPath(); g.rect(left, top, plotW, plotH); g.clip();
 
   // position lines, under the overall line
   g.lineJoin = 'round';
@@ -77,20 +96,23 @@ export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, cur
   });
 
   // overall: soft fill to zero and the line itself, each coloured by its side of zero
-  const zero = Y(0);
-  for (const [color, y0, h] of [[CURVE_COLORS.up, 0, zero], [CURVE_COLORS.down, zero, H - zero]] as [string, number, number][]) {
+  const zero = Math.max(top, Math.min(top + plotH, Y(0)));
+  for (const [color, y0, h] of [[CURVE_COLORS.up, top, zero - top], [CURVE_COLORS.down, zero, top + plotH - zero]] as [string, number, number][]) {
+    if (h <= 0) continue;
     g.save(); g.beginPath(); g.rect(left, y0, plotW, h); g.clip();
-    path(overall); g.lineTo(X(n - 1), zero); g.lineTo(X(0), zero); g.closePath();
+    path(overall); g.lineTo(X(i1), Y(0)); g.lineTo(X(i0), Y(0)); g.closePath();
     g.fillStyle = color; g.globalAlpha = 0.12; g.fill(); g.globalAlpha = 1;
     path(overall); g.strokeStyle = color; g.lineWidth = 2.6 * s; g.stroke();
     g.restore();
   }
+  g.restore();
 
   // the day's high and low, with their times
   const ex = extremes(overall, curve.times);
   if (ex && ex.high.value !== ex.low.value) {
     for (const [e, color, above] of [[ex.high, CURVE_COLORS.up, true], [ex.low, CURVE_COLORS.down, false]] as const) {
       const i = curve.times.indexOf(e.t), x = X(i), y = Y(e.value);
+      if (i < from || i > to || y < top || y > top + plotH) continue;
       g.fillStyle = color; g.beginPath(); g.arc(x, y, 3.6 * s, 0, Math.PI * 2); g.fill();
       const label = `${above ? 'High' : 'Low'} ${inr(e.value)} · ${hhmm(e.t)}`;
       g.font = font(11, '700');
@@ -103,7 +125,7 @@ export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, cur
 
   // labels at the end of each position line, moved apart so they never sit on each other
   if (showPositions) {
-    const rows = curve.positions.map((p, k) => ({ y: Y(p[mode][n - 1]), sym: p.symbol, val: p[mode][n - 1], color: POSITION_COLORS[k % POSITION_COLORS.length] })).sort((a, b) => a.y - b.y);
+    const rows = curve.positions.map((p, k) => ({ y: Math.max(top + 10 * s, Math.min(top + plotH - 14 * s, Y(p[mode][i1]))), sym: p.symbol, val: p[mode][i1], color: POSITION_COLORS[k % POSITION_COLORS.length] })).sort((a, b) => a.y - b.y);
     const gap = 27 * s;
     for (let i = 1; i < rows.length; i++) rows[i].y = Math.max(rows[i].y, rows[i - 1].y + gap);
     const over = rows.length ? rows[rows.length - 1].y + gap / 2 - (top + plotH) : 0;
@@ -128,4 +150,5 @@ export function drawCurve(g: CanvasRenderingContext2D, W: number, H: number, cur
     g.fillStyle = 'rgba(10,17,24,0.9)'; g.fillRect(left, 0, Math.min(w, plotW + right), 20 * s);
     g.fillStyle = CURVE_COLORS.white; g.fillText(parts.join('   '), left + 6, 10 * s);
   }
+  return { left, top, plotW, plotH, from, to, lo, hi };
 }
