@@ -148,11 +148,11 @@ A short leaves the Make shorts grid once it has a posting plan (a line there lin
 are checked with YouTube itself (`videos.list`): public = live, rejected / failed / deleted = needs attention, still
 private well after its time = flagged. `GET /api/shorts/posts`.
 
-## Posts (Socials page, third tab): today's P&L post
-Today only: there is no date picker. Everything is drawn in the browser from real data (`components/posts/PostsTab.tsx`, `lib/pnlCurve/slides.ts`), 1080 x 1350: the P&L curve, the positions card (size, average prices, orders, slippage, P&L), and the journal's own 10-minute chart for each stock (TradeCharts' `image` mode). Gross / Net pills switch every image.
+## Posts (Socials -> Posts, `/socials/posts`): today's P&L post
+Its own page, using the connections made on Shorts & Reels. Today only: there is no date picker. Everything is drawn in the browser from real data (`components/posts/PostsTab.tsx`, `lib/pnlCurve/slides.ts`), 1080 x 1350: the P&L curve, the positions card (size, average prices, orders, slippage, P&L), and the journal's own 10-minute chart for each stock (TradeCharts' `image` mode). Gross / Net pills switch every image.
 - **Instagram:** the images go out as one carousel (`lib/posts/publish.ts`, `POST /api/posts/publish`), at once: the API has no schedule or private mode. What went out is kept in `posts/<date>/state.json`, so a double tap cannot post twice; posting again asks first. Images are JPEGs in S3 under `posts/<date>/`, fetched by Meta through a signed link. Needs no new permission: `instagram_business_content_publish` covers carousels and Stories.
 - **Stories:** tick images and press Post Story. The curve is redrawn at 1080 x 1920; others are centred on a Story-shaped background. The API has no stickers, polls or links for Stories. Meta's documentation conflicts on Creator accounts, so a refusal from Meta on the first Story is shown as is.
-- **YouTube:** the Data API has no way to create channel posts. The tab gives the images, the text and a link to the channel's posts.
+- **YouTube:** the Data API has no way to create channel posts. The page gives the images, the text and a link to the channel's posts.
 - **Words:** a plain draft costs nothing; **Write with Claude** (one call, on demand, `lib/posts/caption.ts`) replaces it using only the facts on the page. The Instagram disclaimer and 5-hashtag cap are applied in code on every post.
 
 ## P&L curve (journal, and the first slide of the post)
