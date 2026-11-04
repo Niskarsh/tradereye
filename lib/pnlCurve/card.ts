@@ -49,4 +49,39 @@ export function positionCards(date: string, positions: PnlPosition[], curve: Cur
   });
 }
 
+/** What Algo Live's order would have done untouched, against what happened (from Me vs Algo). */
+export interface AlgoCompare { symbol: string; planInr: number; myInr: number; steppedIn: boolean }
+
+/** How one position felt while it was open: the best and worst it showed, and for how long. All from the curve. */
+export interface PositionStats { best: number; worst: number; heldMin: number; line: number[] }
+export function positionStats(card: PositionCard, curve: Curve, mode: CurveMode): PositionStats {
+  const all = curve.positions.find((l) => l.symbol === card.symbol)?.[mode] ?? [];
+  const ts = card.orders.map((o) => o.t), first = Math.min(...ts), last = card.openQty ? curve.times.at(-1) ?? first : Math.max(...ts);
+  const minute = (t: number) => Math.floor(t / 60_000) * 60_000;
+  const from = curve.times.indexOf(minute(first)), to = curve.times.indexOf(minute(last));
+  const line = ts.length && from >= 0 && to >= from ? all.slice(from, to + 1) : all;
+  return { best: line.length ? Math.max(...line) : 0, worst: line.length ? Math.min(...line) : 0, heldMin: ts.length ? Math.round((last - first) / 60_000) : 0, line };
+}
+
+const rs = (n: number) => `₹${Math.round(Math.abs(n)).toLocaleString('en-IN')}`;
+const money = (n: number) => `${n < 0 ? '-' : '+'}${rs(n)}`;
+
+/** The slide's headline: the most striking true thing about the day. Every number comes from the curve or Me vs Algo. */
+export function dayHook(curve: Curve, mode: CurveMode, algo: AlgoCompare[] = []): string {
+  const line = curve.overall[mode], end = line.at(-1) ?? 0;
+  const peak = Math.max(0, ...line), low = Math.min(0, ...line);
+  const stepped = algo.filter((a) => a.steppedIn);
+  if (stepped.length) {
+    const mine = stepped.reduce((s, a) => s + a.myInr, 0), plan = stepped.reduce((s, a) => s + a.planInr, 0);
+    if (Math.abs(mine - plan) >= 50) return `The algo's plan: ${money(plan)}. What I did: ${money(mine)}.`;
+  }
+  if (low <= -100 && end > 0) return `Down ${rs(low)} at the worst. Finished ${money(end)}.`;
+  if (peak >= 100 && peak - end >= peak * 0.3) return `Was up ${rs(peak)}. Ended ${money(end)}.`;
+  const gross = curve.overall.gross.at(-1) ?? 0;
+  if (gross > 0 && curve.charges >= gross * 0.25) return `Made ${rs(gross)}. Charges took ${rs(curve.charges)}.`;
+  if (end > 0 && low > -30) return `${money(end)}. Never went red.`;
+  if (end < 0) return `Lost ${rs(end)}. Logged anyway.`;
+  return `${money(end)} on the day.`;
+}
+
 export const finalOf = (curve: Curve, mode: CurveMode) => curve.overall[mode].at(-1) ?? 0;

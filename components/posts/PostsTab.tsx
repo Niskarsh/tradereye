@@ -4,7 +4,7 @@ import { CheckCircle2, Copy, Download, ExternalLink, Loader2, RefreshCcw, Sparkl
 import { useAuth } from '@/context/AuthContext';
 import { TradeCharts } from '@/components/journal/TradeCharts';
 import { ModePills, useDayCurve } from '@/components/journal/PnlCurve';
-import { positionCards, finalOf } from '@/lib/pnlCurve/card';
+import { dayHook, positionCards, finalOf, type AlgoCompare } from '@/lib/pnlCurve/card';
 import { positionsFromRows, type CurveMode, type JournalRow } from '@/lib/pnlCurve/curve';
 import { hhmm, inr } from '@/lib/pnlCurve/draw';
 import { CHART_CSS_H, CHART_CSS_W, STORY_H, cardSlide, chartSlide, curveSlide, niceDate, storyFrame, toJpeg } from '@/lib/pnlCurve/slides';
@@ -40,6 +40,8 @@ export default function PostsTab() {
   const [sending, setSending] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Me vs Algo for today's trades; the slide does without it, and the buttons wait for the answer so the image is final
+  const [algo, setAlgo] = useState<AlgoCompare[] | null>(null);
 
   const loadRows = useCallback(async () => {
     setRowsErr('');
@@ -56,24 +58,37 @@ export default function PostsTab() {
     fetch('/api/posts/publish', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (j) setState(j); }).catch(() => {});
   }, [loadRows]);
 
+  useEffect(() => {
+    let live = true;
+    type Row = { date: string; symbol: string; planInr: number | null; myInr: number | null; steppedIn: boolean | null; fillDoubt: boolean };
+    fetch('/api/algo/me-vs-algo', { cache: 'no-store', headers: token ? { 'x-dhan-token': token } : {} })
+      .then((r) => (r.ok ? r.json() : { rows: [] }))
+      .then((j: { rows?: Row[] }) => {
+        if (live) setAlgo((j.rows ?? []).filter((r) => r.date === today && r.planInr !== null && r.myInr !== null && r.steppedIn !== null && !r.fillDoubt)
+          .map((r) => ({ symbol: r.symbol, planInr: r.planInr!, myInr: r.myInr!, steppedIn: r.steppedIn! })));
+      })
+      .catch(() => { if (live) setAlgo([]); });
+    return () => { live = false; };
+  }, [today, token]);
+
   const rowsKey = JSON.stringify(rows ?? []);
   const { positions: journal, undrawable } = useMemo(() => positionsFromRows(today, JSON.parse(rowsKey)), [today, rowsKey]);
   const { answer, err, code, busy, reload } = useDayCurve(today, journal, token, rows !== null);
   const curve = answer?.curve;
   const positions = useMemo(() => (answer?.positions ?? []).slice(0, MAX_CHARTS), [answer]);
   const cards = useMemo(() => (curve && answer ? positionCards(today, answer.positions, curve) : []), [curve, answer, today]);
-  const chartsReady = positions.every((p) => charts[p.symbol]);
+  const chartsReady = positions.every((p) => charts[p.symbol]) && algo !== null;
 
   const slides: Slide[] = useMemo(() => {
     if (!curve || typeof document === 'undefined') return [];
     const make = (name: string, label: string, canvas: HTMLCanvasElement): Slide => ({ name, label, canvas, url: toJpeg(canvas) });
-    const out = [make('curve', 'P&L curve', curveSlide(curve, mode)), make('positions', 'Positions', cardSlide(cards, curve, mode))];
+    const out = [make('curve', 'P&L curve', curveSlide(curve, mode)), make('positions', 'Positions', cardSlide(cards, curve, mode, algo ?? []))];
     for (const c of cards.slice(0, MAX_CHARTS)) {
       const chart = charts[c.symbol];
       if (chart instanceof HTMLCanvasElement) out.push(make(`chart-${slug(c.symbol)}`, `${c.symbol} chart`, chartSlide(chart, c, today, mode)));
     }
     return out;
-  }, [curve, cards, charts, mode, today]);
+  }, [curve, cards, charts, mode, today, algo]);
 
   // a plain first draft, so nothing needs Claude; replaced by Claude's only when the button is pressed
   const draft = useMemo(() => {
@@ -85,7 +100,7 @@ export default function PostsTab() {
   useEffect(() => { if (!edited) { setCaption(draft); setYtText(draft); } }, [draft, edited]);
 
   const facts = () => curve && {
-    date: today, basis: mode, resultInr: Math.round(finalOf(curve, mode)), grossInr: Math.round(finalOf(curve, 'gross')), netInr: Math.round(finalOf(curve, 'net')), chargesInr: Math.round(curve.charges),
+    date: today, basis: mode, hook: dayHook(curve, mode, algo ?? []), algoVsMe: algo ?? [], resultInr: Math.round(finalOf(curve, mode)), grossInr: Math.round(finalOf(curve, 'gross')), netInr: Math.round(finalOf(curve, 'net')), chargesInr: Math.round(curve.charges),
     positions: cards.map((c) => ({ symbol: c.symbol, side: c.direction, qty: c.qty, stillOpen: c.openQty, avgBuy: c.avgBuy, avgSell: c.avgSell, netInr: Math.round(c.net), grossInr: Math.round(c.gross), orders: c.orders.map((o) => `${hhmm(o.t)} ${o.side} ${o.qty} @ ${o.price}`), slippage: c.slippage })),
     peakInr: Math.round(Math.max(...curve.overall[mode])), lowestInr: Math.round(Math.min(...curve.overall[mode])),
     comments: [...new Set((rows ?? []).map((r) => String((r as { Comment?: string }).Comment ?? '').trim()).filter(Boolean))],
@@ -133,7 +148,7 @@ export default function PostsTab() {
     setSending('story'); setMsg(null);
     try {
       for (const s of chosen) {
-        const frame = s.name === 'curve' && curve ? curveSlide(curve, mode, STORY_H) : storyFrame(s.canvas);
+        const frame = s.name === 'curve' && curve ? curveSlide(curve, mode, STORY_H) : s.name === 'positions' && curve ? cardSlide(cards, curve, mode, algo ?? [], STORY_H) : storyFrame(s.canvas);
         await upload(`story-${s.name}`, toJpeg(frame));
         await publish({ kind: 'story', slide: `story-${s.name}`, again: repeat });
       }
