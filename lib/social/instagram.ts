@@ -134,7 +134,7 @@ export async function publishContainer(p: { accessToken: string; userId: string;
   const j = await readJson(await fetchImpl(`${GRAPH}/${p.userId}/media_publish`, {
     method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ creation_id: p.containerId, access_token: p.accessToken }),
-  }), 'Publishing the Reel');
+  }), 'Publishing on Instagram');
   return String(j.id);
 }
 
