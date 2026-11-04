@@ -174,3 +174,32 @@ test('traded range: a very short trade still gets a readable window; a running p
   const o = buildCurve(D, [open], { A: c }, at('09:50:30'));
   assert.equal(tradedRange(o).to, o.times.length - 1);
 });
+
+import { dayHook, positionStats } from '../lib/pnlCurve/card';
+
+const hookCurve = (net: number[]) => ({ date: D, times: net.map((_, i) => at('09:30:00') + i * 60_000), overall: { gross: net, net }, positions: [], charges: 20 });
+
+test('the headline says the most striking true thing about the day', () => {
+  assert.equal(dayHook(hookCurve([0, -150, 40, 200]), 'net'), 'Down ₹150 at the worst. Finished +₹200.');
+  assert.equal(dayHook(hookCurve([0, 400, 100]), 'net'), 'Was up ₹400. Ended +₹100.');
+  assert.equal(dayHook(hookCurve([0, 50, 120]), 'net'), '+₹120. Never went red.');
+  assert.equal(dayHook(hookCurve([0, -50, -80]), 'net'), 'Lost ₹80. Logged anyway.');
+  assert.equal(dayHook({ ...hookCurve([0, 50, 60]), charges: 40 }, 'net'), 'Made ₹60. Charges took ₹40.');
+  const algo = [{ symbol: 'A', planInr: -300, myInr: 20, steppedIn: true }];
+  assert.equal(dayHook(hookCurve([0, 20]), 'net', algo), 'The algo\'s plan: -₹300. What I did: +₹20.');
+  // a small difference, or a trade left alone, is not the story
+  assert.equal(dayHook(hookCurve([0, 50, 120]), 'net', [{ symbol: 'A', planInr: 100, myInr: 120, steppedIn: true }]), '+₹120. Never went red.');
+  assert.equal(dayHook(hookCurve([0, 50, 120]), 'net', [{ symbol: 'A', planInr: -300, myInr: 120, steppedIn: false }]), '+₹120. Never went red.');
+});
+
+test('position stats: best, worst and time held only count while it was open', () => {
+  const p = { ...long('A'), direction: 'LONG' };
+  p.fills = [{ t: at('09:30:10'), side: 'BUY', qty: 100, price: 100 }, { t: at('09:32:30'), side: 'SELL', qty: 100, price: 103 }];
+  const v = buildCurve(D, [p], { A: c1 });
+  const [c] = positionCards(D, [p], v);
+  const s = positionStats(c, v, 'gross');
+  assert.equal(s.heldMin, 2);
+  assert.equal(s.line.length, 3);
+  assert.ok(s.best >= s.worst);
+  assert.equal(s.best, Math.max(...s.line));
+});
