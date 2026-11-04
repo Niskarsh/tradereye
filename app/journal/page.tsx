@@ -8,6 +8,7 @@ import {
     CheckCircle2, XCircle, X, Download
 } from "lucide-react";
 import LivePnl from './livePnl';
+import type { JournalRow } from '@/lib/pnlCurve/curve';
 import { TradeReview } from '@/components/journal/TradeReview';
 import { TradeBook } from '@/components/journal/TradeBook';
 import { TradeCharts } from '@/components/journal/TradeCharts';
@@ -424,6 +425,8 @@ export default function Journal() {
                         <LivePnl
                             todayPnl={dailyPnlMap.get(selectedDateState) || 0}
                             selectedDate={selectedDateState}
+                            rows={currentMonthRows.filter(t => t.date === selectedDateState) as unknown as JournalRow[]}
+                            token={token}
                             handleScreenshotUpload={handleScreenshotUpload}
                             dailyScreenshotUrl={currentDayLivePnlUrl}
                             uploadStatus={uploadStatus[`daily-${selectedDateState}`]}

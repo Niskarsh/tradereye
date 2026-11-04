@@ -96,6 +96,12 @@ export class DhanClient {
     return parseCandles(raw);
   }
 
+  /** Today's trade book: every fill so far, running positions included. */
+  async tradeBook(): Promise<unknown[]> {
+    const raw = await this.req<unknown>('GET', '/trades');
+    return Array.isArray(raw) ? raw : [];
+  }
+
   /**
    * Last traded price for one instrument (Market Quote API, part of the Data API plan). Dhan wants the client id
    * in a header for this one. Returns undefined when the price is not in the answer.

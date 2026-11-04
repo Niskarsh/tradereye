@@ -93,6 +93,23 @@ export async function createReelContainer(p: { accessToken: string; userId: stri
   return String(j.id);
 }
 
+/** An image container from a public JPEG URL: a Story, one slide of a carousel, or (default) a single feed image. */
+export async function createImageContainer(p: { accessToken: string; userId: string; imageUrl: string; caption?: string; story?: boolean; carouselItem?: boolean }, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const body = new URLSearchParams({ image_url: p.imageUrl, access_token: p.accessToken });
+  if (p.story) body.set('media_type', 'STORIES');
+  if (p.carouselItem) body.set('is_carousel_item', 'true');
+  if (p.caption && !p.story && !p.carouselItem) body.set('caption', p.caption);
+  const j = await readJson(await fetchImpl(`${GRAPH}/${p.userId}/media`, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body }), 'Sending the image to Instagram');
+  return String(j.id);
+}
+
+/** The carousel's container, from its slides' finished containers (2 to 10). Counts as one post. */
+export async function createCarouselContainer(p: { accessToken: string; userId: string; children: string[]; caption: string }, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const body = new URLSearchParams({ media_type: 'CAROUSEL', children: p.children.join(','), caption: p.caption, access_token: p.accessToken });
+  const j = await readJson(await fetchImpl(`${GRAPH}/${p.userId}/media`, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body }), 'Making the Instagram post');
+  return String(j.id);
+}
+
 export type ContainerStatus = 'IN_PROGRESS' | 'FINISHED' | 'ERROR' | 'EXPIRED' | 'PUBLISHED' | string;
 
 /** Step 2: FINISHED means ready to publish. Containers expire if not published within 24 hours. */

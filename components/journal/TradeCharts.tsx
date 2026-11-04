@@ -40,8 +40,10 @@ function useWide() {
   return wide;
 }
 
-export function TradeCharts({ symbol, date, direction, fills, token, securityId, initialStop, stopDist, lastStop, target, uploadedChart, uploading, onViewUploaded, onUpload, eager = false }: {
+export function TradeCharts({ symbol, date, direction, fills, token, securityId, initialStop, stopDist, lastStop, target, uploadedChart, uploading, onViewUploaded, onUpload, eager = false, image }: {
   symbol: string; date: string; direction: string; fills: Fill[]; token: string;
+  /** post image: only the 10-minute chart, at a fixed size and sharpness, handed over after each draw */
+  image?: { width: number; height: number; pixelRatio: number; onDrawn: (c: HTMLCanvasElement) => void; onError: (message: string) => void };
   /** start loading as soon as the page opens instead of when the card scrolls near the screen */
   eager?: boolean;
   /** a chart screenshot uploaded by hand (older trades): shown on demand, not as a big box */
@@ -188,6 +190,17 @@ export function TradeCharts({ symbol, date, direction, fills, token, securityId,
     ['1R', facts.oneR ? `${facts.oneR.toFixed(2)}/share (${facts.rBasis === '2ATR' ? '2 × ATR, no stop' : 'stop'})` : ''],
     ['Nifty in trade', facts.niftyDuringPct !== undefined ? `${facts.niftyDuringPct >= 0 ? '+' : ''}${facts.niftyDuringPct}%` : ''],
   ] as [string, string][]).filter(([, v]) => v) : [];
+
+  const imageError = image?.onError;
+  useEffect(() => { if (err) imageError?.(err); }, [err, imageError]);
+  if (image) {
+    return (
+      <div ref={box} style={{ width: image.width }}>
+        {intra && <CandleChart bars={intra.bars} barMs={600_000} lines={intraLines} hlines={hlines} marks={chartMarks} flags={flags} lower={lower}
+          profile={profile} highlight={highlight} focus={intraFocus} height={image.height} pixelRatio={image.pixelRatio} onDrawn={image.onDrawn} />}
+      </div>
+    );
+  }
 
   return (
     <div ref={box} className="px-6 pb-6">

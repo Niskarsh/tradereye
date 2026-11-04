@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, XCircle } from 'lucide-react';
 import MakeShorts from '@/components/shorts/MakeShorts';
 import PostingBoard from '@/components/shorts/PostingBoard';
+import PostsTab from '@/components/posts/PostsTab';
 
 /**
  * Socials tab: connect YouTube and Instagram once (and test each pipe), then make shorts from real trades.
@@ -34,7 +35,7 @@ export default function SocialsPage() {
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState<Platform | null>(null);
   const [tests, setTests] = useState<Partial<Record<Platform, TestResult>>>({});
-  const [view, setView] = useState<'make' | 'posting'>('make');
+  const [view, setView] = useState<'make' | 'posting' | 'posts'>('make');
   const [counts, setCounts] = useState({ upcoming: 0, attention: 0 });
 
   const load = useCallback(async () => {
@@ -109,15 +110,16 @@ export default function SocialsPage() {
       </div>
 
       <div className="mt-8 inline-flex gap-1 rounded-full border border-line-strong p-1">
-        {(['make', 'posting'] as const).map((v) => (
+        {(['make', 'posting', 'posts'] as const).map((v) => (
           <button key={v} onClick={() => setView(v)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${view === v ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>
-            {v === 'make' ? 'Make shorts' : 'Posting'}
+            {v === 'make' ? 'Make shorts' : v === 'posting' ? 'Posting' : 'Posts'}
             {v === 'posting' && counts.upcoming > 0 && <span className="ml-1.5 opacity-80">{counts.upcoming}</span>}
             {v === 'posting' && counts.attention > 0 && <span className="ml-1.5 rounded-full bg-data-red px-1.5 text-[11px] text-white">{counts.attention}</span>}
           </button>
         ))}
       </div>
       {/* both stay mounted so the Posting count is right while making shorts */}
+      {view === 'posts' && <PostsTab />}
       <div className={view === 'make' ? '' : 'hidden'}><MakeShorts onOpenPosting={() => setView('posting')} /></div>
       <div className={view === 'posting' ? '' : 'hidden'}><PostingBoard onCounts={setCounts} active={view === 'posting'} /></div>
     </main>
