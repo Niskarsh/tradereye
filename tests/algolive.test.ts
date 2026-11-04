@@ -129,3 +129,12 @@ test('algo live: a sealed message opens only with the same secret and unchanged'
   const tampered = { ...s, data: Buffer.from(Buffer.from(s.data, 'base64').map((b, i) => (i === 3 ? b ^ 1 : b))).toString('base64') };
   assert.throws(() => open('s3cret', tampered));
 });
+
+import { killIsOn } from '../lib/algoLive/scaler';
+
+test('the kill switch counts as on only when Dhan reports it on', () => {
+  assert.equal(killIsOn('ACTIVATE'), true);
+  assert.equal(killIsOn('DEACTIVATE'), false);
+  assert.equal(killIsOn(''), false);
+  assert.equal(killIsOn(undefined), false);
+});

@@ -71,6 +71,10 @@ the stop that still pays charges and usual slippage (`lib/algoLive/levels.ts`). 
 - **trading-scaler unreachable**: check pm2 on EC2 (`pm2 logs dhan-trading-bot`). Orders already placed keep their
   stop and target at Dhan.
 - **To stop trading at once**: disarm the page. To close everything: Square off now, or close the positions in Dhan.
+- **To be certain nothing can trade today**: **Disarm + kill switch**, next to the arm button. It disarms first, then turns
+  on Dhan's kill switch through trading-scaler, and shows ON only when Dhan itself reports it. It blocks the whole account
+  for the day, hand orders too. Dhan refuses it while a position or pending order is open; the page then says it is
+  disarmed but the switch is not on, and the button stays so you can try again after closing.
 
 ## Me vs Algo
 
