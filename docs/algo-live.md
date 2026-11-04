@@ -77,3 +77,14 @@ the stop that still pays charges and usual slippage (`lib/algoLive/levels.ts`). 
 The **Me vs Algo** card on My Setups (under Backtest vs live) lists every filled order: what the algo proposed, what you did (journal),
 how far it got toward the target while you were in, and what the untouched stop and target would have done. It is read
 only and uses data already kept (`lib/algoLive/meVsAlgo.ts`). Vetoed picks are not in it yet.
+
+## Reviewing an Algo Live trade
+
+"Review this trade" in the journal knows when Algo Live placed the trade (same stock, a short, sent within 10 minutes of
+the first fill). It does not grade the entry, stop or target. It explains why the model took the stock and judges only
+what you changed, by Me vs Algo's comparison.
+
+The reasons are measured (`lib/algoLive/why.ts`): the engine's own `scoreAt` works out the whole list's facts at that
+close again, each fact is swapped for other stocks' values, and the stock is re-scored. That is one Dhan request per
+stock, so it is skipped until 11:05 on the trade's own day and saved under `setups/live/<date>/why/` afterwards. It reads
+Algo Live's data and writes only that file; it places, changes and cancels nothing.

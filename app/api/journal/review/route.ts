@@ -5,12 +5,14 @@ import { errorResponse, tokenFrom } from '@/lib/live/guard';
 import { MONTHLY_ALL } from '@/lib/live/schema';
 import { istDateTime } from '@/lib/live/time';
 import { ClaudeError, structuredClaude } from '@/lib/copilot/claude';
-import { gatherReview, REVIEW_RULES, REVIEW_SCHEMA, reviewCells, toStoredReview } from '@/lib/copilot/review';
+import { ALGO_REVIEW_RULES, ALGO_REVIEW_SCHEMA, gatherReview, REVIEW_RULES, REVIEW_SCHEMA, reviewCells, toStoredAlgoReview, toStoredReview } from '@/lib/copilot/review';
+import { liveStore } from '@/lib/algoLive/store';
+import { listKeys } from '@/lib/book/s3';
 import { settings } from '@/lib/copilot/settings';
 import { ownerRequired } from '@/lib/auth/owner';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120; // a trade Algo Live placed may rebuild the whole list's facts first
 
 const MONTH_TAB = /^(january|february|march|april|may|june|july|august|september|october|november|december)-\d{4}$/;
 const q = (t: string) => `'${t.replace(/'/g, "''")}'`;
@@ -39,12 +41,13 @@ export async function POST(req: Request) {
     }
     const sheets = getSheetsClient();
     await sheets.ensureTab(title, MONTHLY_ALL); // adds the review columns on older month tabs
-    const input = await gatherReview({ sheets, dhan, lookupSecurityId: (s) => lookupSecurityId(s) }, title, groupId);
+    const input = await gatherReview({ sheets, dhan, lookupSecurityId: (s) => lookupSecurityId(s), store: liveStore, listKeys }, title, groupId);
 
     const s = settings();
     try {
-      const r = await structuredClaude(REVIEW_RULES, input.message, REVIEW_SCHEMA, { apiKey, model: s.model, usdInr: s.usdInr, thinking: s.thinking }, 1500);
-      const review = toStoredReview(r.json, r.text, input.exitCall, { at: istDateTime(Date.now()), costInr: r.costInr, model: r.model });
+      const r = await structuredClaude(input.algo ? ALGO_REVIEW_RULES : REVIEW_RULES, input.message, input.algo ? ALGO_REVIEW_SCHEMA : REVIEW_SCHEMA, { apiKey, model: s.model, usdInr: s.usdInr, thinking: s.thinking }, 1500);
+      const meta = { at: istDateTime(Date.now()), costInr: r.costInr, model: r.model };
+      const review = input.algo ? toStoredAlgoReview(r.json, r.text, input.algo, input.exitCall, meta) : toStoredReview(r.json, r.text, input.exitCall, meta);
       const cells = reviewCells(review);
       const { headers } = await sheets.ensureTab(title, MONTHLY_ALL);
       await sheets.updateRanges(Object.entries(cells).map(([k, v]) => ({ range: `${q(title)}!${colLetter(headers.indexOf(k))}${input.firstRowNumber}`, values: [[v]] })), true);
