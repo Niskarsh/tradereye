@@ -79,7 +79,7 @@ export default function LivePnl({ todayPnl, selectedDate, rows, token, handleScr
                     </button>
                 </div>
 
-                {curve ? <PnlCurveChart curve={curve} mode={mode} />
+                {curve ? <PnlCurveChart curve={curve} mode={mode} toolbar={<ModePills mode={mode} onChange={setMode} />} />
                     : busy ? <div className="flex h-40 items-center justify-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Working out the curve…</div>
                     : dailyScreenshotUrl ? <img src={dailyScreenshotUrl} alt="P&L chart" className="w-full rounded-[24px] object-contain bg-black/40 cursor-pointer" onClick={() => onFullScreen(dailyScreenshotUrl)} />
                     : canDraw && err ? (

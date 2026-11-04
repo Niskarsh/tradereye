@@ -11,7 +11,7 @@ import { CHART_CSS_H, CHART_CSS_W, STORY_H, cardSlide, chartSlide, curveSlide, n
 import type { PostsState } from '@/lib/posts/publish';
 
 /**
- * Socials > Posts: today's P&L post, today only. Everything is drawn from real data: slide 1 the curve, slide 2 the
+ * Socials -> Posts: today's P&L post, today only. Everything is drawn from real data: slide 1 the curve, slide 2 the
  * positions, then one journal 10-minute chart per stock. Instagram goes out from here; YouTube's API cannot create
  * channel posts, so that side hands over the images and the text.
  */

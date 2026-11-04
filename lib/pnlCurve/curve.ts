@@ -81,6 +81,25 @@ export function buildCurve(date: string, positions: PnlPosition[], candles: Reco
   };
 }
 
+/**
+ * The minutes worth showing: from just before the first trade to just after the overall P&L last moved, with any quiet
+ * stretch in between kept. Only a view: the whole day stays in the data. An open position keeps moving, so it runs to now.
+ */
+export function tradedRange(curve: Curve, padMin = 5, minSpan = 10): { from: number; to: number } {
+  const n = curve.times.length;
+  let first = -1, last = -1;
+  for (const p of curve.positions) for (const line of [p.gross, p.net]) {
+    for (let i = 0; i < n; i++) {
+      if (line[i] !== (i ? line[i - 1] : 0)) { if (first < 0 || i < first) first = i; if (i > last) last = i; }
+    }
+  }
+  if (first < 0) return { from: 0, to: Math.max(0, n - 1) };
+  let from = Math.max(0, first - padMin), to = Math.min(n - 1, last + padMin);
+  if (to - from < minSpan) to = Math.min(n - 1, from + minSpan);
+  if (to - from < minSpan) from = Math.max(0, to - minSpan);
+  return { from, to };
+}
+
 export interface Extreme { value: number; t: number }
 /** Highest and lowest point of a line (earliest time when it repeats). */
 export function extremes(values: number[], times: number[]): { high: Extreme; low: Extreme } | undefined {

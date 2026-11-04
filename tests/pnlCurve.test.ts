@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCurve, extremes, istMs, positionsFromRows, positionsKey, type PnlPosition } from '../lib/pnlCurve/curve';
+import { buildCurve, extremes, istMs, tradedRange, positionsFromRows, positionsKey, type PnlPosition } from '../lib/pnlCurve/curve';
 import { exitSlippage, positionCards } from '../lib/pnlCurve/card';
 import { curveKey, loadCurve } from '../lib/pnlCurve/store';
 import { createImageContainer, createCarouselContainer } from '../lib/social/instagram';
@@ -154,4 +154,23 @@ test('Instagram: Story and carousel containers send what the API wants', async (
   assert.equal(calls[1].get('is_carousel_item'), 'true'); assert.equal(calls[1].get('media_type'), null);
   await createCarouselContainer({ accessToken: 'a', userId: 'u', children: ['1', '2'], caption: 'c' }, f);
   assert.equal(calls[2].get('media_type'), 'CAROUSEL'); assert.equal(calls[2].get('children'), '1,2'); assert.equal(calls[2].get('caption'), 'c');
+});
+
+test('traded range: ends just after the last move, keeps a quiet gap between trades, starts just before the first', () => {
+  const second: PnlPosition = { symbol: 'B', charges: 10, fills: [{ t: at('11:30:00'), side: 'BUY', qty: 10, price: 100 }, { t: at('12:15:00'), side: 'SELL', qty: 10, price: 101 }] };
+  const first: PnlPosition = { symbol: 'A', charges: 10, fills: [{ t: at('09:30:10'), side: 'BUY', qty: 10, price: 100 }, { t: at('10:15:00'), side: 'SELL', qty: 10, price: 102 }] };
+  const v = buildCurve(D, [first, second], {});
+  const r = tradedRange(v);
+  assert.equal(v.times[r.from], at('09:25:00'));
+  assert.equal(v.times[r.to], at('12:20:00'));
+});
+
+test('traded range: a very short trade still gets a readable window; a running position runs to now', () => {
+  const quick: PnlPosition = { symbol: 'A', charges: 0, fills: [{ t: at('10:00:10'), side: 'BUY', qty: 10, price: 100 }, { t: at('10:00:40'), side: 'SELL', qty: 10, price: 101 }] };
+  const r = tradedRange(buildCurve(D, [quick], {}));
+  assert.ok(r.to - r.from >= 10);
+  const open: PnlPosition = { symbol: 'A', charges: 10, fills: [{ t: at('09:30:10'), side: 'BUY', qty: 10, price: 100 }] };
+  const c = candles([['09:30', 101], ['09:31', 99], ['09:32', 103], ['09:33', 110], ['09:40', 120], ['09:50', 130]]);
+  const o = buildCurve(D, [open], { A: c }, at('09:50:30'));
+  assert.equal(tradedRange(o).to, o.times.length - 1);
 });
