@@ -54,6 +54,8 @@ export default function AlgoLivePage() {
   const [now, setNow] = useState(Date.now());
   const [positions, setPositions] = useState<Pos[] | null>(null);
   const [scalerMsg, setScalerMsg] = useState('');
+  const [killOn, setKillOn] = useState(false);
+  const [killMsg, setKillMsg] = useState('');
   const [copied, setCopied] = useState(false);
   const [view, setView] = useState<number | null>(null);
   const running = useRef(new Set<number>());
@@ -147,6 +149,19 @@ export default function AlgoLivePage() {
     } catch (e) { setErr((e as Error).message); } finally { setBusy(''); }
   }, [api, refresh]);
 
+  // Dhan's kill switch, as Dhan reports it (an older trading-scaler does not know the call: then it just stays unknown)
+  useEffect(() => { if (token) api('/api/algo-live/scaler', { action: 'killstatus' }).then((r) => setKillOn(!!r.on)).catch(() => undefined); }, [api, token]);
+  const killSwitch = async () => {
+    if (!confirm('Disarm and turn on Dhan\'s kill switch?\n\nNo order can go through on your Dhan account for the rest of today, including ones you place by hand.\n\nDhan only allows this with no open position and no pending order.')) return;
+    setBusy('kill'); setErr(''); setKillMsg('');
+    try {
+      const r = await api('/api/algo-live/scaler', { action: 'killswitch' });
+      setKillOn(!!r.on);
+      setKillMsg(r.on ? '' : `Disarmed, but the kill switch is NOT on${r.why ? `: ${r.why}` : ''}. If a trade is open, close it and try again.`);
+      await refresh();
+    } catch (e) { setErr((e as Error).message); setKillMsg('Could not confirm the kill switch: check it in Dhan.'); await refresh(); } finally { setBusy(''); }
+  };
+
   // the orders' fate from Dhan every 2 minutes while anything is open; a backup square-off at 15:16 (trading-scaler does it at 15:15)
   const open = (st?.orders ?? []).some((o) => !['REJECTED', 'ERROR', 'CANCELLED', 'CLOSED', 'NOT_SENT'].includes(o.status));
   useEffect(() => {
@@ -233,9 +248,18 @@ export default function AlgoLivePage() {
             </Card>
 
             <Card title="2 · Armed?" sub={`Armed: at each close from 09:35 to 10:55 the picks are sent to Dhan by themselves (short, market order, stop and target with it). Not armed: they are only shown. At most ${model?.rules.cap ?? 2} trades a day; a vetoed stock is never traded.`}>
-              <button onClick={() => control({ armed: !st?.armed })} className={`rounded-xl border-2 px-4 py-2 text-sm font-black ${st?.armed ? 'border-data-green bg-data-green/15 text-data-green' : 'border-line-strong text-ink-2'}`}>
-                {st?.armed ? 'ARMED · click to disarm' : 'NOT ARMED · click to arm'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button disabled={killOn} onClick={() => control({ armed: !st?.armed })} className={`rounded-xl border-2 px-4 py-2 text-sm font-black disabled:opacity-50 ${st?.armed ? 'border-data-green bg-data-green/15 text-data-green' : 'border-line-strong text-ink-2'}`}>
+                  {st?.armed ? 'ARMED · click to disarm' : 'NOT ARMED · click to arm'}
+                </button>
+                {(st?.armed || killMsg) && !killOn && (
+                  <button disabled={!token || !!busy} onClick={killSwitch} className="rounded-xl border-2 border-data-red/60 px-4 py-2 text-sm font-black text-data-red-text disabled:opacity-50">
+                    {busy === 'kill' ? 'Working…' : st?.armed ? 'DISARM + KILL SWITCH · no trades today' : 'KILL SWITCH · no trades today'}
+                  </button>
+                )}
+              </div>
+              {killOn && <p className="text-xs font-bold text-data-red-text">Kill switch ON at Dhan: no order can go through on your account today.</p>}
+              {killMsg && <p className="text-xs font-bold text-data-red-text">{killMsg}</p>}
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span>Risk a trade: <b className="font-mono">₹{risk}</b></span>
                 <input type="number" min={50} max={5000} step={50} value={riskDraft} placeholder={String(risk)} onChange={(e) => setRiskDraft(e.target.value)}

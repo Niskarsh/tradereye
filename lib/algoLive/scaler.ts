@@ -40,6 +40,10 @@ export interface ScalerStatus { orders: ScalerSuper[]; positions: { symbol: stri
 
 export class ScalerError extends Error {}
 
+/** Dhan reports the switch as ACTIVATE or DEACTIVATE: only its own "on" counts as on */
+export const killIsOn = (status?: string) => /^activ/i.test(String(status ?? '').trim());
+
+
 function config() {
   const url = process.env.TRADING_SCALER_URL?.replace(/\/+$/, '');
   const secret = process.env.TE_SHARED_SECRET;
@@ -67,4 +71,6 @@ export const scaler = {
   place: (token: string, orders: ScalerOrder[]) => call<{ placed: ScalerPlaced[] }>('place', token, { orders }, 30_000),
   status: (token: string) => call<ScalerStatus>('status', token),
   squareOff: (token: string) => call<{ done: string[]; errors: string[] }>('squareoff', token, {}, 60_000),
+  killStatus: (token: string) => call<{ status: string }>('killstatus', token),
+  killSwitch: (token: string) => call<{ status: string; error?: string }>('killswitch', token),
 };
