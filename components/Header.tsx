@@ -32,10 +32,11 @@ const ANALYSIS: Item[] = [
     { name: 'Algo Lab', href: '/algo' },
     { name: 'Model history', href: '/model-history' },
 ];
-// signed in only: Shorts & Reels (connect YouTube / Instagram, make and schedule shorts), Posts (today's P&L post) and Medium (articles)
+// signed in only: Shorts & Reels (connect YouTube / Instagram, make and schedule shorts), Posts (today's P&L post), Analysis (how the shorts did, what to change) and Medium (articles)
 const SOCIALS: Item[] = [
     { name: 'Shorts & Reels', href: '/socials', exact: true },
     { name: 'Posts', href: '/socials/posts' },
+    { name: 'Analysis', href: '/socials/analysis' },
     { name: 'Medium', href: '/socials/medium' },
 ];
 

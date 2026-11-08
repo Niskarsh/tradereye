@@ -4,7 +4,7 @@ The **Socials** page (`/socials`, signed in only; `/youtube` redirects there) co
 account once, makes Shorts and Reels from real trades, and (next) schedules them on both platforms.
 
 ## Connecting
-- **YouTube** uses the same Google OAuth client as sign-in, plus the `youtube.upload` and `youtube.readonly` scopes.
+- **YouTube** uses the same Google OAuth client as sign-in, plus the `youtube.upload`, `youtube.readonly`, `youtube.force-ssl` and `yt-analytics.readonly` scopes.
   The consent screen must be **In production** (Audience page), otherwise Google expires the refresh token after 7 days.
   Google shows an "unverified app" warning once while connecting: Advanced → Go to TraderEye. The channel is a Brand
   Account: pick **Candles Before Cubicles** in the account picker. Any other channel is refused
@@ -159,3 +159,16 @@ Its own page, using the connections made on Shorts & Reels. Today only: there is
 One point a minute, realised plus unrealised, like Dhan's Live P&L: a thick overall line (the sum of the positions at every minute) and, with more than one stock, a thin labelled line per stock. **Gross** / **Net** pills (`lib/pnlCurve/curve.ts`, `draw.ts`): gross matches Dhan's basis; net takes each stock's charges off in proportion to the fill value done so far and ends exactly on gross minus charges. It is minute closes, not ticks, so it can differ slightly from Dhan's line between fills.
 It opens on the traded part of the day (`tradedRange`): from 5 minutes before the first trade to 5 minutes after the P&L last moved, quiet stretches in between kept. The post images use the same range. On the page it handles like the journal's candle charts: drag, wheel, pinch, rupee-scale zoom, full screen, Trade to come back.
 Works like the trade charts: `POST /api/journal/pnl-curve` reads `pnl-curve/<year>/<month>/<date>.json.gz`, else works it out from saved candles (Dhan once if not saved), and saves it after the close. A saved curve remembers its fills: editing that day's trades draws it again. While today's market is open and a Dhan token is sent, Dhan's trade book replaces the journal's fills, because the journal logs a trade only once it closes. A day without usable fill times cannot be drawn, so the uploaded picture is shown or an upload offered; uploaded pictures are kept.
+
+## Analysis (Socials -> Analysis, `/socials/analysis`)
+How every Short and Reel tradereye published did, and what to change next. P&L posts and anything uploaded by hand are not in it.
+
+**Pull** (`lib/socialAnalysis/collect.ts`, S3 `social/analysis/metrics.json`, no Claude): daily at 07:00 IST (EventBridge schedule `tradereye-social-metrics`, `infra/terraform/social-timer.tf`, which runs the existing Lambda with `{ "job": "metrics" }`; `/api/social/tick` then pulls instead of posting) and on **Refresh numbers**. Posts are followed for 90 days. One point per IST day per post; a second pull that day replaces it.
+- **YouTube Data API** (`youtube.readonly`): views, likes, comments, length. Nearly live.
+- **YouTube Analytics API** (`yt-analytics.readonly`, and the "YouTube Analytics API" must be enabled in Google Cloud): watch time, average % watched, shares, subscribers gained / lost, the retention curve. 2-3 days behind. A channel connected before this scope gets a Reconnect notice on the page and keeps its Data API numbers. Subscribers per video count only subscribes from that video's own page, so they undercount: use them to compare posts, not as a total.
+- **Instagram** (`instagram_business_manage_insights`, already granted): views, reach, likes, comments, shares, saves, reposts, average watch time, skip rate. Lifetime totals only, up to 48 hours behind, so the daily copy is the only history. Several of these are "in development" at Meta: if the full request is refused it is repeated with the plain metrics.
+- A number a platform does not give stays empty, never 0.
+
+**Comparing** (`lib/socialAnalysis/analyze.ts`): a post counts once it is 7 days old. Views are read at day 7 (the latest figure for a post older than the first pull). Group figures are medians. A difference is reported only with 5+ posts on each side and a gap of 25%+.
+
+**What to change next** (`lib/socialAnalysis/read.ts`, `prompt.ts`): one Claude call, only on the button. It gets the groups, the supported differences, each post's numbers, its title / tell / caption hook, and the previous read; it answers with one decision, a confidence, and exactly one change to test (what to keep the same, for how many posts, judged by what). Every read is kept in `social/analysis/reads.json`. It never receives the journal label, which can name the stock.
