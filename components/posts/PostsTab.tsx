@@ -8,6 +8,7 @@ import { dayHook, positionCards, finalOf, type AlgoCompare } from '@/lib/pnlCurv
 import { positionsFromRows, type CurveMode, type JournalRow } from '@/lib/pnlCurve/curve';
 import { hhmm, inr } from '@/lib/pnlCurve/draw';
 import { CHART_CSS_H, CHART_CSS_W, STORY_H, cardSlide, chartSlide, curveSlide, niceDate, storyFrame, toJpeg } from '@/lib/pnlCurve/slides';
+import { storiesToSend } from '@/lib/posts/stories';
 import type { PostsState } from '@/lib/posts/publish';
 
 /**
@@ -20,6 +21,8 @@ const IST = 19800_000;
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 const CHANNEL_POSTS = 'https://www.youtube.com/@CandlesBeforeCubicles/posts';
 const MAX_CHARTS = 8; // Instagram allows 10 images in a post
+const STORY_GAP_MS = 4000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Slide { name: string; label: string; canvas: HTMLCanvasElement; url: string }
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -39,6 +42,7 @@ export default function PostsTab() {
   const [state, setState] = useState<PostsState>({ stories: [] });
   const [sending, setSending] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [storyMsg, setStoryMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
   // Me vs Algo for today's trades; the slide does without it, and the buttons wait for the answer so the image is final
   const [algo, setAlgo] = useState<AlgoCompare[] | null>(null);
@@ -141,20 +145,27 @@ export default function PostsTab() {
   };
   const sendStories = async () => {
     const chosen = slides.filter((s) => stories[s.name]);
-    if (!chosen.length) { setMsg({ ok: false, text: 'Tick at least one image for the Story.' }); return; }
-    const names = chosen.map((s) => `story-${s.name}`);
-    const repeat = names.some((n) => state.stories.some((x) => x.slides[0] === n));
-    if (repeat && !window.confirm('Some of these Stories are already up today. Post them again?')) return;
-    setSending('story'); setMsg(null);
-    try {
-      for (const s of chosen) {
-        const frame = s.name === 'curve' && curve ? curveSlide(curve, mode, STORY_H) : s.name === 'positions' && curve ? cardSlide(cards, curve, mode, algo ?? [], STORY_H) : storyFrame(s.canvas);
-        await upload(`story-${s.name}`, toJpeg(frame));
-        await publish({ kind: 'story', slide: `story-${s.name}`, again: repeat });
-      }
-      setMsg({ ok: true, text: chosen.length > 1 ? `${chosen.length} Stories posted.` : 'Story posted.' });
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-    finally { setSending(''); }
+    if (!chosen.length) { setStoryMsg({ ok: false, text: 'Tick at least one image for the Story.' }); return; }
+    const pending = storiesToSend(chosen.map((s) => s.name), state);
+    // everything ticked is already up: only then does this mean "again"
+    const again = !pending.length;
+    if (again && !window.confirm('These Stories are already up today. Post them again?')) return;
+    const toSend = chosen.filter((s) => again || pending.includes(s.name));
+    setSending('story'); setStoryMsg(null);
+    const posted: string[] = [], failed: string[] = [];
+    for (const [i, s] of toSend.entries()) {
+      if (i) await sleep(STORY_GAP_MS); // Instagram can refuse a publish right after the last one
+      const frame = s.name === 'curve' && curve ? curveSlide(curve, mode, STORY_H) : s.name === 'positions' && curve ? cardSlide(cards, curve, mode, algo ?? [], STORY_H) : storyFrame(s.canvas);
+      const send = async () => { await upload(`story-${s.name}`, toJpeg(frame)); await publish({ kind: 'story', slide: `story-${s.name}`, again }); };
+      try {
+        await send().catch(async () => { await sleep(STORY_GAP_MS); await send(); }); // one more try
+        posted.push(s.label);
+      } catch (e) { failed.push(`${s.label}: ${(e as Error).message}`); }
+    }
+    setStoryMsg(failed.length
+      ? { ok: false, text: `${posted.length ? `Posted: ${posted.join(', ')}. ` : ''}Not posted: ${failed.join(' · ')} Press Post Story to send only the missing ones.` }
+      : { ok: true, text: `Posted: ${posted.join(', ')}.` });
+    setSending('');
   };
   const copy = async () => {
     await navigator.clipboard.writeText(ytText);
@@ -243,6 +254,7 @@ export default function PostsTab() {
             <button onClick={sendPost} disabled={!!sending || !chartsReady} className={primary}>{sending === 'post' && <Loader2 className="size-4 animate-spin" />}{state.post ? 'Post again' : `Post ${slides.length} images`}</button>
             <button onClick={sendStories} disabled={!!sending || !chartsReady} className={quiet}>{sending === 'story' && <Loader2 className="size-4 animate-spin" />}Post Story</button>
           </div>
+          {storyMsg && <p className={`text-sm ${storyMsg.ok ? 'text-data-green' : 'text-data-red-text'}`}>{storyMsg.text}</p>}
           {state.post && <p className="flex items-center gap-1.5 text-xs text-data-green"><CheckCircle2 className="size-3.5" />Posted at {hhmm(state.post.at)}{state.post.url && <a href={state.post.url} target="_blank" rel="noopener noreferrer" className="underline">View</a>}</p>}
           {state.stories.length > 0 && <p className="flex items-center gap-1.5 text-xs text-data-green"><CheckCircle2 className="size-3.5" />{state.stories.length} Stor{state.stories.length > 1 ? 'ies' : 'y'} today, last at {hhmm(state.stories[state.stories.length - 1].at)}</p>}
         </section>
