@@ -10,8 +10,12 @@ const API = 'https://www.googleapis.com/youtube/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/youtube/v3/videos';
 
 // force-ssl: change or remove a scheduled video (new time, edited title, unschedule). upload alone cannot.
-export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/youtube.force-ssl'];
+// yt-analytics.readonly: watch time, retention and subscribers per Short (the Analysis page). Views and likes need only readonly.
+export const ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/youtube.force-ssl', ANALYTICS_SCOPE];
 export const MANAGE_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
+/** Connected before Analysis existed: views and likes still come through, watch time and retention need a reconnect. */
+export const canAnalyse = (scope: string | undefined) => !!scope && scope.split(/\s+/).includes(ANALYTICS_SCOPE);
 /** Connected before force-ssl was asked for: uploads work, changing or removing a scheduled video needs a reconnect. */
 export const canManage = (scope: string | undefined) => !!scope && scope.split(/\s+/).includes(MANAGE_SCOPE);
 

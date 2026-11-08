@@ -94,3 +94,27 @@ resource "aws_iam_role_policy" "role_social_timer_scheduler_invoke_social_timer"
     }]
   })
 }
+
+# The daily pull for Socials -> Analysis (docs/social.md): 07:00 IST, before the market opens. Same Lambda and same
+# Scheduler role as the posting timer; the input tells /api/social/tick to pull numbers instead of posting.
+resource "aws_scheduler_schedule" "social_metrics" {
+  name                         = "tradereye-social-metrics"
+  group_name                   = "default"
+  schedule_expression          = "cron(0 7 * * ? *)"
+  schedule_expression_timezone = "Asia/Kolkata"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.social_timer.arn
+    role_arn = aws_iam_role.social_timer_scheduler.arn
+    input    = jsonencode({ job = "metrics" })
+
+    retry_policy {
+      maximum_event_age_in_seconds = 3600
+      maximum_retry_attempts       = 2
+    }
+  }
+}

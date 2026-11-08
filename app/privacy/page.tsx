@@ -23,8 +23,8 @@ export default function PrivacyPage() {
       <Section title="What data it accesses">
         <ul className="list-disc space-y-1 pl-5">
           <li><b>Google sign-in:</b> the owner&apos;s email address and Google account ID, only to confirm the owner is the one signing in.</li>
-          <li><b>YouTube:</b> permission to upload videos to the owner&apos;s own channel, set their title, description, tags and publish time, and read the channel&apos;s basic details and view counts.</li>
-          <li><b>Instagram:</b> permission to publish Reels to the owner&apos;s own professional account and read their view counts.</li>
+          <li><b>YouTube:</b> permission to upload videos to the owner&apos;s own channel, set their title, description, tags and publish time, and read the channel&apos;s basic details and each video&apos;s performance (views, watch time, retention, likes, comments, shares and subscribers gained).</li>
+          <li><b>Instagram:</b> permission to publish Reels to the owner&apos;s own professional account and read each post&apos;s performance (views, reach, watch time, likes, comments, shares and saves) and the follower count.</li>
         </ul>
       </Section>
 
