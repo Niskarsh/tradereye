@@ -11,7 +11,7 @@ import { BookModel, type Level, type Side } from './model';
  *   line 2  ["K", t, tick, lastVolume, bid, ask, ltp, [[paise, side, qty, seenAt, firstAt, maxQty, traded, refills], ...]]
  *           the book at the start of the chunk (keyframe), so any chunk can be drawn on its own
  *   then    ["D", t, "B"|"A", [[price, qty], ...]]   a depth update (the 20 levels of one side)
- *           ["Q", t, ltp, volume]                     a quote (trade print)
+ *           ["Q", t, ltp, volume, totalBuy, totalSell, atp]   a quote (trade print; the last three are missing in chunks before Nov 2026)
  *           ["S", t, "B"|"A"]                         same side as last time, still there (keeps levels "seen")
  * Replaying the events through BookModel gives exactly the picture that was drawn live.
  */
@@ -54,13 +54,13 @@ export const KEY_RE = /^order-book\/\d{4}\/[a-z]+\/[A-Z0-9&-]{1,30}_\d{4}-\d{2}-
 
 /* ---- events ---------------------------------------------------------------------------------------------- */
 
-export type Event = ['D', number, 'B' | 'A', [number, number][]] | ['Q', number, number, number] | ['S', number, 'B' | 'A'];
+export type Event = ['D', number, 'B' | 'A', [number, number][]] | ['Q', number, number, number, number?, number?, number?] | ['S', number, 'B' | 'A'];
 type Key = ['K', number, number, number, number | null, number | null, number | null, [number, Side, number, number, number, number, number, number][]];
 
 export function depthEvent(m: DepthMsg, t: number): Event {
   return ['D', t, m.side === 'BID' ? 'B' : 'A', m.levels.map((l) => [l.price, l.qty] as [number, number])];
 }
-export function quoteEvent(q: QuoteMsg, t: number): Event { return ['Q', t, q.ltp, q.volume]; }
+export function quoteEvent(q: QuoteMsg, t: number): Event { return ['Q', t, q.ltp, q.volume, q.totalBuy, q.totalSell, Math.round((q.atp ?? 0) * 100) / 100]; }
 
 const lastSide = new WeakMap<BookModel, Record<string, [number, number][]>>();
 export function applyEvent(model: BookModel, e: Event, securityId = '') {
@@ -69,7 +69,7 @@ export function applyEvent(model: BookModel, e: Event, securityId = '') {
     const levels = e[0] === 'D' ? e[3] : memo[e[2]];
     if (e[0] === 'D') { memo[e[2]] = e[3]; lastSide.set(model, memo); }
     if (levels) model.onDepth({ securityId, side: e[2] === 'B' ? 'BID' : 'ASK', levels: levels.map(([price, qty]) => ({ price, qty, orders: 0 })) }, e[1]);
-  } else model.onQuote({ securityId, ltp: e[2], ltq: 0, ltt: 0, volume: e[3], totalBuy: 0, totalSell: 0, dayHigh: 0, dayLow: 0 }, e[1]);
+  } else model.onQuote({ securityId, ltp: e[2], ltq: 0, ltt: 0, volume: e[3], totalBuy: e[4] ?? 0, totalSell: e[5] ?? 0, atp: e[6], dayHigh: 0, dayLow: 0 }, e[1]);
 }
 
 /** The book right now, for the start of a new chunk. */
@@ -95,6 +95,8 @@ export function applyKeyframe(model: BookModel, k: Key) {
     model.levels.set(p, level);
   }
   model.lastEventAt = t;
+  model.firstEventAt ||= t;
+  model.lastQuoteAt = t;
 }
 
 /* ---- chunk files ------------------------------------------------------------------------------------------- */

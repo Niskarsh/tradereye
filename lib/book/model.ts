@@ -23,7 +23,9 @@ export interface Segment { p: number; side: Side; qty: number; t0: number; t1?: 
 export interface TradeBucket { t: number; buy: number; sell: number; price: number } // per second
 export interface Quote { t: number; bid?: number; ask?: number; ltp?: number }
 export interface Wall { price: number; side: Side; qty: number; maxQty: number; times: number; ageMin: number; traded: number; refills: number; status: WallStatus; endedAgoSec?: number; endedAt?: number; seenAgoSec: number }
-export interface Flow { sec: number; buy: number; sell: number; moveTicks: number; absorption?: 'BUYING_ABSORBED' | 'SELLING_ABSORBED' }
+export interface Flow { sec: number; buy: number; sell: number; moveTicks: number; move: number; recordedSec: number; absorption?: 'BUYING_ABSORBED' | 'SELLING_ABSORBED' }
+/** How the best bid and ask moved over a window (rupees), and the spread at its end. */
+export interface PriceRead { bid: number; ask: number; mid: number; spread: number; spanSec: number; totalBuy?: number; totalSell?: number; atp?: number }
 /** Who looks in control right now, from the book and the tape (a hint for the eye, never a certainty). */
 export interface Bias {
   side: 'UP' | 'DOWN' | 'NEUTRAL';
@@ -36,6 +38,14 @@ export interface Gap { from: number; to: number }
 
 const key = (price: number) => Math.round(price * 100); // paise
 const WALL_X = 4;
+/** "Book near price" compares the same number of quoted levels on each side, each counted from its own best price. */
+const NEAR_LEVELS = 5;
+/** No quote for this long = the feed was away: the volume that piled up is not one burst of trades. */
+const QUOTE_SILENCE_MS = 60_000;
+/** Depth and quotes arrive on separate sockets: a wall's disappearance and its trades can land this far apart. */
+const PRINT_MATCH_MS = 3_000;
+/** "Price did not move" is judged in money (0.03% of price), never in ticks: a tick is 1 paisa on some stocks, 5 on others. */
+const FLAT_SHARE = 0.0003;
 
 export class BookModel {
   levels = new Map<number, Level>();
@@ -55,7 +65,14 @@ export class BookModel {
   bookChangedAt = 0;
   private tradesSinceChange = 0;
   private outsideSince?: number;
-  private tradeLog: { t: number; buy: number; sell: number; ltp: number }[] = [];
+  private tradeLog: { t: number; buy: number; sell: number; ltp: number; mid: number }[] = [];
+  private prints: { t: number; lo: number; hi: number; at: number; dv: number; aggressed?: Side }[] = [];
+  private lastDir?: 'BUY' | 'SELL';
+  /** when the first event of this model arrived, and the last quote (keyframes set it too) */
+  firstEventAt = 0;
+  lastQuoteAt = 0;
+  /** straight from Dhan's quote packet: all pending quantity on each side (not just 20 levels), and the day's VWAP */
+  totalBuy?: number; totalSell?: number; atp?: number;
   private ended: { w: Wall; at: number }[] = [];
 
   /** History before this moment was dropped to save memory (stocks recorded but not on screen). */
@@ -81,26 +98,35 @@ export class BookModel {
     for (let i = 1; i < sorted.length; i++) { const g = sorted[i] - sorted[i - 1]; if (g > 0 && g < this.tick) this.tick = g; }
     for (const l of m.levels) this.set(key(l.price), m.side, l.qty, now);
     // prices inside the window that are no longer quoted on this side: those orders are gone
-    for (const [p, lv] of this.levels) if (lv.side === m.side && p >= lo && p <= hi && !present.has(p) && lv.qty > 0) this.set(p, m.side, 0, now);
+    // anything BETTER than the far end of this side's 20 levels must be in the message if it still exists (that
+    // includes prices beyond the best bid / ask: when the best bid drops, the old best bid is gone, not "resting")
+    for (const [p, lv] of this.levels) if (lv.side === m.side && lv.qty > 0 && !present.has(p) && (m.side === 'BID' ? p > lo : p < hi)) this.set(p, m.side, 0, now);
     if (m.side === 'BID') this.bestBid = hi / 100; else this.bestAsk = lo / 100;
     this.pushQuote(now);
   }
 
   onQuote(q: QuoteMsg, now: number) {
     this.touch(now);
+    const prevLtp = this.ltp;
     this.ltp = q.ltp;
-    if (this.lastVolume > 0 && q.volume > this.lastVolume) {
+    if (q.totalBuy > 0 || q.totalSell > 0) { this.totalBuy = q.totalBuy; this.totalSell = q.totalSell; }
+    if (q.atp && q.atp > 0) this.atp = q.atp;
+    // after a silence (tab asleep, socket dropped, app started late) the volume jump is everything that was missed:
+    // it must not be booked as one giant buy or sell at this moment
+    const afterSilence = this.lastQuoteAt > 0 && now - this.lastQuoteAt > QUOTE_SILENCE_MS;
+    this.lastQuoteAt = now;
+    if (this.lastVolume > 0 && q.volume > this.lastVolume && !afterSilence) {
       const dv = q.volume - this.lastVolume;
-      // who was aggressive: a trade at the ask was a buyer lifting it, at the bid a seller hitting it
-      const atAsk = this.bestAsk !== undefined && q.ltp >= this.bestAsk - 1e-9;
-      const atBid = this.bestBid !== undefined && q.ltp <= this.bestBid + 1e-9;
-      const buy = atAsk ? dv : atBid ? 0 : dv / 2, sell = dv - buy;
+      const dir = this.aggressor(q.ltp, prevLtp);
+      const buy = dir === 'BUY' ? dv : dir === 'SELL' ? 0 : dv / 2, sell = dv - buy;
       const lv = this.levels.get(key(q.ltp));
       if (lv) lv.traded += dv;
+      this.notePrint(q.ltp, prevLtp, dv, dir, now);
       const sec = Math.floor(now / 1000);
       const last = this.trades[this.trades.length - 1];
       if (last && last.t === sec) { last.buy += buy; last.sell += sell; last.price = q.ltp; } else this.trades.push({ t: sec, buy, sell, price: q.ltp });
-      this.tradeLog.push({ t: now, buy, sell, ltp: q.ltp });
+      const mid = this.bestBid !== undefined && this.bestAsk !== undefined && this.bestAsk > this.bestBid ? (this.bestBid + this.bestAsk) / 2 : q.ltp;
+      this.tradeLog.push({ t: now, buy, sell, ltp: q.ltp, mid });
       if (this.tradeLog.length > 20000) this.tradeLog.splice(0, 5000);
     }
     if (this.lastVolume > 0 && q.volume > this.lastVolume) {
@@ -113,7 +139,42 @@ export class BookModel {
     this.pushQuote(now);
   }
 
+  /**
+   * Who started a trade: above the middle of the spread a buyer lifted the offer, below it a seller hit the bid. Exactly
+   * on the middle (or the book is crossed / missing): the direction of the price change, else the last known direction.
+   */
+  private aggressor(ltp: number, prev: number | undefined): 'BUY' | 'SELL' | undefined {
+    const b = this.bestBid, a = this.bestAsk, eps = 1e-3; // float32 prices
+    let dir: 'BUY' | 'SELL' | undefined;
+    if (b !== undefined && a !== undefined && a > b) { const mid = (a + b) / 2; if (ltp > mid + eps) dir = 'BUY'; else if (ltp < mid - eps) dir = 'SELL'; }
+    if (!dir && prev !== undefined) dir = ltp > prev + eps ? 'BUY' : ltp < prev - eps ? 'SELL' : this.lastDir;
+    if (dir) this.lastDir = dir;
+    return dir;
+  }
+
+  /**
+   * A trade print can sweep several prices between two quotes, and the depth feed can report a level gone BEFORE the
+   * quote feed reports the trades that took it (separate sockets). So prints are remembered for a few seconds, and
+   * the two are matched in whichever order they arrive; otherwise a level that was traded away reads as "pulled".
+   */
+  private notePrint(ltp: number, prev: number | undefined, dv: number, dir: 'BUY' | 'SELL' | undefined, now: number) {
+    const at = key(ltp), from = prev === undefined ? at : key(prev);
+    const lo = Math.min(at, from), hi = Math.max(at, from);
+    const aggressed: Side | undefined = dir === 'BUY' ? 'ASK' : dir === 'SELL' ? 'BID' : undefined;
+    this.prints = this.prints.filter((x) => now - x.t <= PRINT_MATCH_MS);
+    this.prints.push({ t: now, lo, hi, at, dv, aggressed });
+    for (let i = this.ended.length - 1; i >= 0; i--) {
+      const e = this.ended[i];
+      if (now - e.at > PRINT_MATCH_MS) break;
+      const p = key(e.w.price);
+      if (p < lo || p > hi || (aggressed && e.w.side !== aggressed)) continue;
+      e.w.traded = Math.min(e.w.maxQty, e.w.traded + Math.round(dv));
+      e.w.status = e.w.traded >= e.w.maxQty * 0.5 ? 'EATEN' : 'PULLED';
+    }
+  }
+
   private touch(now: number) {
+    if (!this.firstEventAt) this.firstEventAt = now;
     if (this.lastEventAt && now - this.lastEventAt > 60_000) this.markGap(this.lastEventAt, now);
     this.lastEventAt = now;
   }
@@ -131,7 +192,7 @@ export class BookModel {
       if (qty > 0 || lv) this.bookChanged(now);
       if (lv && lv.qty > 0) {
         // the price changed sides: price traded through it. Real only if shares actually traded there.
-        this.endWall(p, lv, now, lv.traded >= lv.maxQty * 0.5 ? 'EATEN' : 'PULLED');
+        this.endWall(p, lv, now);
         lv.seg.t1 = now;
       } else if (lv) lv.seg.t1 = lv.seg.t1 ?? now;
       const seg: Segment = { p, side, qty, t0: now, seenTill: now };
@@ -143,7 +204,7 @@ export class BookModel {
     this.bookChanged(now);
     if (qty < lv.qty) lv.lastDrop = now;
     else if (lv.lastDrop && now - lv.lastDrop < 120_000 && lv.traded > 0) lv.refills++;
-    if (qty === 0 && lv.qty > 0) this.endWall(p, lv, now, lv.traded >= lv.maxQty * 0.5 ? 'EATEN' : 'PULLED');
+    if (qty === 0 && lv.qty > 0) this.endWall(p, lv, now);
     // close the old segment, open a new one
     lv.seg.t1 = now;
     const seg: Segment = { p, side, qty, t0: now, seenTill: now };
@@ -172,10 +233,16 @@ export class BookModel {
     return undefined;
   }
 
-  private endWall(p: number, lv: Level, now: number, status: WallStatus) {
+  /** A wall has gone. EATEN = at least half of it really traded (counting prints that swept its price just before); else PULLED. */
+  private endWall(p: number, lv: Level, now: number) {
     const med = this.median(lv.side, now);
     if (!med || lv.maxQty < WALL_X * med) return;
-    this.ended.push({ at: now, w: { price: p / 100, side: lv.side, qty: 0, maxQty: lv.maxQty, times: Math.round((lv.maxQty / med) * 10) / 10, ageMin: Math.round((now - lv.firstAt) / 60000), traded: Math.round(lv.traded), refills: lv.refills, status, seenAgoSec: 0, endedAt: now } });
+    let traded = lv.traded;
+    // prints that ended exactly here were already added to the level; the others swept past it
+    for (const x of this.prints) if (now - x.t <= PRINT_MATCH_MS && p >= x.lo && p <= x.hi && p !== x.at && (!x.aggressed || x.aggressed === lv.side)) traded += x.dv;
+    traded = Math.min(lv.maxQty, Math.round(traded));
+    const status: WallStatus = traded >= lv.maxQty * 0.5 ? 'EATEN' : 'PULLED';
+    this.ended.push({ at: now, w: { price: p / 100, side: lv.side, qty: 0, maxQty: lv.maxQty, times: Math.round((lv.maxQty / med) * 10) / 10, ageMin: Math.round((now - lv.firstAt) / 60000), traded, refills: lv.refills, status, seenAgoSec: 0, endedAt: now } });
     if (this.ended.length > 400) this.ended.splice(0, 100);
   }
 
@@ -217,50 +284,111 @@ export class BookModel {
     const from = now - sec * 1000;
     const recent = this.tradeLog.filter((x) => x.t >= from && x.t <= now);
     const buy = Math.round(recent.reduce((s, x) => s + x.buy, 0)), sell = Math.round(recent.reduce((s, x) => s + x.sell, 0));
-    const moveTicks = recent.length ? Math.round(((recent[recent.length - 1].ltp - recent[0].ltp) * 100) / this.tick) : 0;
-    const f: Flow = { sec, buy, sell, moveTicks };
+    const first = recent[0], last = recent[recent.length - 1];
+    const move = recent.length ? Math.round((last.ltp - first.ltp) * 100) / 100 : 0;
+    const f: Flow = { sec, buy, sell, moveTicks: Math.round((move * 100) / this.tick), move, recordedSec: this.recordedSec(now, sec) };
     // heavy one-sided aggression and price not moving that way = someone is absorbing it (the fakeout tell)
     // over longer windows a smaller imbalance already means something (it had to persist for minutes)
+    // price here is the middle of the spread: the last trade just bounces between bid and ask when the spread is wide
     const ratio = sec >= 300 ? 1.6 : 2;
     if (buy + sell > 0 && recent.length >= 5) {
-      if (buy >= ratio * sell && moveTicks <= 1) f.absorption = 'BUYING_ABSORBED';
-      else if (sell >= ratio * buy && moveTicks >= -1) f.absorption = 'SELLING_ABSORBED';
+      const midMove = last.mid - first.mid, flat = this.flatMove();
+      if (buy >= ratio * sell && midMove <= flat) f.absorption = 'BUYING_ABSORBED';
+      else if (sell >= ratio * buy && midMove >= -flat) f.absorption = 'SELLING_ABSORBED';
     }
     return f;
   }
 
+  /** The biggest move that still counts as "price did not go anywhere", in rupees. */
+  private flatMove(): number { return Math.max(this.tick / 100, (this.ltp ?? this.bestBid ?? 0) * FLAT_SHARE); }
+
+  /** How much of the last `sec` seconds this model actually has data for. */
+  recordedSec(now: number, sec: number): number {
+    const from = Math.max(now - sec * 1000, this.firstEventAt || now);
+    let ms = Math.max(0, now - from);
+    for (const g of this.gaps) ms -= Math.max(0, Math.min(g.to, now) - Math.max(g.from, from));
+    return Math.max(0, Math.round(ms / 1000));
+  }
+
+  /** How far the best bid and ask moved over the last `sec` seconds, and the spread at the end. */
+  priceRead(now: number, sec: number): PriceRead | undefined {
+    const from = now - sec * 1000;
+    let first: Quote | undefined, last: Quote | undefined;
+    for (let i = this.quotes.length - 1; i >= 0; i--) {
+      const q = this.quotes[i];
+      if (q.t > now) continue;
+      if (q.t < from) break;
+      if (q.bid === undefined || q.ask === undefined) continue;
+      last ??= q; first = q;
+    }
+    if (!first || !last) return undefined;
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const live = now >= this.lastEventAt - 1000; // the totals are only known as of the latest quote
+    return {
+      bid: r2(last.bid! - first.bid!), ask: r2(last.ask! - first.ask!), mid: r2((last.bid! + last.ask! - first.bid! - first.ask!) / 2),
+      spread: r2(last.ask! - last.bid!), spanSec: Math.round((last.t - first.t) / 1000),
+      ...(live ? { totalBuy: this.totalBuy, totalSell: this.totalSell, atp: this.atp } : {}),
+    };
+  }
+
+  /** The resting book at a moment: shares on the nearest quoted levels of each side, from each side's own best price. */
+  nearBook(now: number): { bidQ: number; askQ: number } {
+    const bids: [number, number][] = [], asks: [number, number][] = [];
+    const add = (p: number, side: Side, qty: number) => (side === 'BID' ? bids : asks).push([p, qty]);
+    if (now >= this.lastEventAt - 1000) {
+      for (const [p, l] of this.levels) if (l.qty > 0 && now - l.seenAt <= 15_000) add(p, l.side, l.qty);
+    } else {
+      // looking back in time: the book as it stood then, not as it stands now
+      for (const s of this.segments) if (s.t0 <= now && (s.t1 === undefined ? now - s.seenTill <= 15_000 : s.t1 > now)) add(s.p, s.side, s.qty);
+    }
+    bids.sort((a, b) => b[0] - a[0]); asks.sort((a, b) => a[0] - b[0]);
+    const sum = (xs: [number, number][]) => xs.slice(0, NEAR_LEVELS).reduce((s, x) => s + x[1], 0);
+    return { bidQ: sum(bids), askQ: sum(asks) };
+  }
+
   /**
-   * The bias line on top of the chart. Absorption wins (the fakeout tell): heavy buying with price not rising means
-   * sellers are defending, and the reverse. Otherwise a score from the last 10 minutes of aggressive buying vs
-   * selling (60%) and the resting book near price, 10 ticks each side (40%), nudged by a wall that is holding right
-   * next to price (support below / resistance above). 10 minutes, not 1: steadier, less noise (his choice).
+   * The bias line on top of the chart: who has been in control over the last 10 minutes (his choice: steadier than 1).
+   * Absorption wins (the fakeout tell): heavy buying with price not rising means sellers are defending, and the reverse.
+   * Otherwise a score from aggressive buying vs selling (60%) and the resting book near price, 5 quoted levels a side
+   * (40%), nudged by a wall holding right next to price. The score is then checked against what price actually did:
+   *  - it moved the other way over the 10 minutes: Mixed, whatever the volume says;
+   *  - the side's quote has stopped advancing for 3 minutes (bid flat for buyers, ask flat for sellers): only "leaning".
+   * A frozen book counts for nothing.
    */
   bias(now: number): Bias {
-    const f1 = this.flow(now, 600), f5 = f1;
+    const f = this.flow(now, 600);
     const fmtQ = (q: number) => (q >= 1000 ? `${(q / 1000).toFixed(1)}k` : String(Math.round(q)));
-    if (f1.absorption === 'BUYING_ABSORBED') return { side: 'DOWN', label: 'Buying absorbed', why: `buyers ${fmtQ(f1.buy)} vs sellers ${fmtQ(f1.sell)} in 10 min, price ${f1.moveTicks >= 0 ? '+' : ''}${f1.moveTicks} ticks: sellers are soaking it up`, score: -0.6 };
-    if (f1.absorption === 'SELLING_ABSORBED') return { side: 'UP', label: 'Selling absorbed', why: `sellers ${fmtQ(f1.sell)} vs buyers ${fmtQ(f1.buy)} in 10 min, price ${f1.moveTicks >= 0 ? '+' : ''}${f1.moveTicks} ticks: buyers are soaking it up`, score: 0.6 };
-    const tape = f5.buy + f5.sell > 0 ? (f5.buy - f5.sell) / (f5.buy + f5.sell) : 0;
+    const rs = (x: number) => `${x >= 0 ? '+' : '-'}${Math.abs(x).toFixed(2)}`;
+    const span = f.recordedSec < 570 ? `${Math.round(f.recordedSec / 60)} of the last 10 min recorded` : '10 min';
+    if (f.absorption === 'BUYING_ABSORBED') return { side: 'DOWN', label: 'Buying absorbed', why: `${span}: buyers ${fmtQ(f.buy)} vs sellers ${fmtQ(f.sell)}, price ${rs(f.move)}: sellers are soaking it up`, score: -0.6 };
+    if (f.absorption === 'SELLING_ABSORBED') return { side: 'UP', label: 'Selling absorbed', why: `${span}: sellers ${fmtQ(f.sell)} vs buyers ${fmtQ(f.buy)}, price ${rs(f.move)}: buyers are soaking it up`, score: 0.6 };
+    const tape = f.buy + f.sell > 0 ? (f.buy - f.sell) / (f.buy + f.sell) : 0;
+    const frozen = this.staleSince(now) !== undefined;
+    const { bidQ, askQ } = this.nearBook(now);
+    const book = !frozen && bidQ + askQ > 0 ? (bidQ - askQ) / (bidQ + askQ) : 0;
+    let score = 0.6 * tape + 0.4 * book;
     const ref = this.ltp ?? this.bestBid ?? this.bestAsk;
-    let bidQ = 0, askQ = 0;
-    if (ref !== undefined) {
-      const span = 10 * this.tick;
-      for (const [p, l] of this.levels) {
-        if (l.qty <= 0 || now - l.seenAt > 15_000 || Math.abs(p - ref * 100) > span) continue;
-        if (l.side === 'BID') bidQ += l.qty; else askQ += l.qty;
+    const flat = this.flatMove();
+    let wallNote = '';
+    if (!frozen && ref !== undefined && now >= this.lastEventAt - 1000) {
+      const reach = Math.max(3 * this.tick / 100, flat);
+      for (const w of this.walls(now, 1)) {
+        if (w.status !== 'HOLDING' || w.seenAgoSec > 15 || Math.abs(w.price - ref) > reach) continue;
+        score += w.side === 'BID' ? 0.2 : -0.2;
+        wallNote = `, ${w.side === 'BID' ? 'buy' : 'sell'} wall holding at ${w.price.toFixed(2)}`;
       }
     }
-    const book = bidQ + askQ > 0 ? (bidQ - askQ) / (bidQ + askQ) : 0;
-    let score = 0.6 * tape + 0.4 * book;
-    const near = this.walls(now, 1).filter((w) => w.status === 'HOLDING' && ref !== undefined && Math.abs(w.price - ref) <= 3 * this.tick / 100);
-    let wallNote = '';
-    for (const w of near) { score += w.side === 'BID' ? 0.2 : -0.2; wallNote = `, ${w.side === 'BID' ? 'buy' : 'sell'} wall holding at ${w.price.toFixed(2)}`; }
     score = Math.max(-1, Math.min(1, score));
-    const why = `10 min: buyers ${fmtQ(f5.buy)} vs sellers ${fmtQ(f5.sell)}; book near price: ${fmtQ(bidQ)} to buy vs ${fmtQ(askQ)} to sell${wallNote}`;
-    if (!f5.buy && !f5.sell && !bidQ && !askQ) return { side: 'NEUTRAL', label: 'No data yet', why: 'waiting for trades and the book', score: 0 };
-    if (score >= 0.25) return { side: 'UP', label: score >= 0.5 ? 'Buyers in control' : 'Buyers leaning', why, score };
-    if (score <= -0.25) return { side: 'DOWN', label: score <= -0.5 ? 'Sellers in control' : 'Sellers leaning', why, score };
-    return { side: 'NEUTRAL', label: 'Balanced', why, score };
+    if (!f.buy && !f.sell && !bidQ && !askQ) return { side: 'NEUTRAL', label: 'No data yet', why: 'waiting for trades and the book', score: 0 };
+    const bookText = frozen ? 'book frozen, ignored' : `book near price (${NEAR_LEVELS} levels a side): ${fmtQ(bidQ)} to buy vs ${fmtQ(askQ)} to sell`;
+    const why = `${span}: buyers ${fmtQ(f.buy)} vs sellers ${fmtQ(f.sell)}; ${bookText}${wallNote}`;
+    if (Math.abs(score) < 0.25) return { side: 'NEUTRAL', label: 'Balanced', why, score };
+    const up = score > 0, who = up ? 'Buyers' : 'Sellers';
+    const ten = this.priceRead(now, 600), three = this.priceRead(now, 180);
+    if (ten && (up ? ten.mid < -flat : ten.mid > flat)) return { side: 'NEUTRAL', label: 'Mixed', why: `${why}; but price went the other way (${rs(ten.mid)})`, score };
+    const stalled = !!three && three.spanSec >= 120 && (up ? three.bid <= flat : three.ask >= -flat);
+    const strong = Math.abs(score) >= 0.5 && !stalled;
+    return { side: up ? 'UP' : 'DOWN', label: `${who} ${strong ? 'in control' : 'leaning'}`, why: stalled ? `${why}; ${up ? 'bid' : 'ask'} has not advanced in 3 min` : why, score };
   }
 
   /** 10-minute candles from the traded price, on the same clock as his chart (09:15, 09:25, ...). */
@@ -310,11 +438,15 @@ export class BookModel {
     const fl = (f: Flow) => `last ${f.sec / 60} min: aggressive buying ${fmtQ(f.buy)} vs selling ${fmtQ(f.sell)}, price ${f.moveTicks >= 0 ? '+' : ''}${f.moveTicks} ticks${f.absorption ? `, ${f.absorption === 'BUYING_ABSORBED' ? 'BUYING ABSORBED (heavy buying, price not rising)' : 'SELLING ABSORBED (heavy selling, price not falling)'}` : ''}`;
     const r = this.reach(now);
     const w = this.walls(now);
+    const control = this.bias(now);
     return [
       `ORDER_BOOK live (20 levels a side${r.below !== undefined ? `, reaching ${r.below} below and ${r.above ?? '?'} above` : ''}), last ${this.ltp?.toFixed(2)}, bid ${this.bestBid?.toFixed(2)} / ask ${this.bestAsk?.toFixed(2)}`,
       ...(w.length ? w.map(line) : ['no walls (no level 4x the normal size)']),
       ...this.endedWalls(now).slice(-4).map((x) => `${x.side === 'ASK' ? 'sell' : 'buy'} wall ${x.price.toFixed(2)} (max ${fmtQ(x.maxQty)}) was ${x.status} ${Math.round((x.endedAgoSec ?? 0) / 60)} min ago`),
       fl(this.flow(now, 60)), fl(this.flow(now, 600)),
+      `control over 10 min: ${control.label} (${control.why})`,
+      ...(this.totalBuy || this.totalSell ? [`whole book pending: ${fmtQ(this.totalBuy ?? 0)} to buy vs ${fmtQ(this.totalSell ?? 0)} to sell`] : []),
+      ...(this.atp && this.ltp ? [`price is ${this.ltp >= this.atp ? 'above' : 'below'} the day's VWAP ${this.atp.toFixed(2)}`] : []),
     ].join('\n');
   }
 }
