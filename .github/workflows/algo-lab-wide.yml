@@ -1,0 +1,114 @@
+# Algo Lab iteration 12: the same strategy on a wider set of stocks. Started only by the Run button on Algo Lab. Research
+# only: its dataset is a separate artifact ("grid-wide") and its results go only to the iteration ledger, so the normal
+# backtest and the Algo Live model workflow never see them.
+#
+# The repo is public, so this log is public: the jobs print progress only. The Dhan token is not an input; tradereye leaves
+# it in S3 under the run id and the job overwrites it the moment it has read it.
+name: Algo Lab wide universe
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id (set by tradereye's Run button)
+        required: true
+        type: string
+
+concurrency:
+  group: algo-lab-wide
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # only to tag the code of this iteration
+
+jobs:
+  dataset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build the dataset
+        run: npx --yes tsx@4 scripts/ml-wide-grid.ts
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
+          NODE_OPTIONS: --max-old-space-size=9216
+          ML_DIR: ml-data
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grid-wide
+          path: ml-data/grid.*
+          retention-days: 2
+          compression-level: 1
+
+  models:
+    needs: dataset
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        universe: [narrow, wide]
+        shard: [main, seed2, seed3, seed4, seed5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: grid-wide
+          path: ml-data
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet numpy pandas scikit-learn
+      - name: Walk-forward models (${{ matrix.universe }}, ${{ matrix.shard }})
+        run: python scripts/ml_wide.py ml-data ${{ matrix.universe }} ${{ matrix.shard }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wide-${{ matrix.universe }}-${{ matrix.shard }}
+          path: ml-data/wide-*.json
+          retention-days: 2
+
+  finish:
+    needs: [dataset, models]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: wide-*-*
+          path: ml-data
+          merge-multiple: true
+      - name: Apply the rule and file the iteration
+        run: npx --yes tsx@4 scripts/ml-wide-upload.ts
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          ML_DIR: ml-data
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_S3_BUCKET_NAME: ${{ secrets.S3_BUCKET }}
+      - name: Tag the code of this iteration
+        if: success()
+        continue-on-error: true
+        run: |
+          git tag "algo-iter-12-${RUN_ID}" "$GITHUB_SHA"
+          git push origin "algo-iter-12-${RUN_ID}"
+        env:
+          RUN_ID: ${{ inputs.run_id }}

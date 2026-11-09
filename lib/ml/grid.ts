@@ -192,7 +192,16 @@ export function stopSlip(day: NonNullable<ReturnType<typeof toSlots>>, s: number
   return Math.ceil(slip / TICK - 1e-9) * TICK;
 }
 
-export interface GridInput { date: string; history: Session[]; day: Bar[]; nifty: Bar[]; daily: Candles; riskInr?: number; pocRows?: number }
+/**
+ * (iteration 12, research only) the wider universe, off unless `wide` is set. Above ₹340 a stock's liquidity is its shares
+ * scaled to a ₹340 stock, and tick-based slippage grows with its price, so a dearer stock gets no free ride from a tick
+ * being a smaller share of its price. At ₹340 or less nothing differs from iteration 11. Only the morning closes F can trade
+ * are written: the full day on this many stocks does not fit in a GitHub machine.
+ */
+export const WIDE_REF_PRICE = 340, WIDE_LAST_SLOT = 100;
+export const wideVol = (avgVol: number, prevClose: number) => avgVol * Math.max(1, prevClose / WIDE_REF_PRICE);
+
+export interface GridInput { date: string; history: Session[]; day: Bar[]; nifty: Bar[]; daily: Candles; riskInr?: number; pocRows?: number; wide?: boolean }
 
 /** The rows of one stock-day: [slot, ...facts, ...labels] (sym / date are added by the writer). NaN = unknown. */
 export function gridDay(inp: GridInput): number[][] {
@@ -207,8 +216,10 @@ export function gridDay(inp: GridInput): number[][] {
   for (const b of nMinuteBars(hist, 5)) ema5.push(b.c);
   if (!hasSuspectGap(daily)) for (const c of daily.c) ema1d.push(c);
   const adr = daily.h.slice(-10).reduce((a, h, i) => a + h - daily.l[nd - 10 + i], 0) / 10;
-  const avgVol = daily.v.slice(-10).reduce((a, v) => a + v, 0) / 10, band = liqBand(avgVol);
   const prevClose = daily.c[nd - 1], pdh = daily.h[nd - 1], pdl = daily.l[nd - 1];
+  const sharesVol = daily.v.slice(-10).reduce((a, v) => a + v, 0) / 10;
+  const avgVol = inp.wide ? wideVol(sharesVol, prevClose) : sharesVol, band = liqBand(avgVol);
+  const bandTicks = inp.wide ? Math.ceil(band.ticks * Math.max(1, prevClose / WIDE_REF_PRICE) - 1e-9) : band.ticks;
   const prevDayRet = (daily.c[nd - 1] / daily.c[nd - 2] - 1) * 100;
   const open = day.o[0], nOpen = nifty.o[0];
   const gapPct = (open / prevClose - 1) * 100;
@@ -273,6 +284,7 @@ export function gridDay(inp: GridInput): number[][] {
     }
     if ((s + 1) % 5 === 0) ema5.push(day.c[s]);
     if (k < FIRST || k % 10 !== 0) continue;
+    if (inp.wide && k > WIDE_LAST_SLOT) break;
 
     const atr = atrC.peek();
     if (!atr || !(atr > 0) || !(vv > 0)) continue;
@@ -325,7 +337,7 @@ export function gridDay(inp: GridInput): number[][] {
     };
     // (iteration 11) F's short, filled as a stock of this liquidity really fills
     const realShort = () => ride(day, k, -1, price, onTick(price + WIDE_STOP_ADR * adr, 1), onTick(price - NEAR_TARGET_ADR * adr, -1), LATE_END, risk,
-      { slip: Math.max(slip, band.ticks), through: band.ticks, stopPct: band.stopPct, fast: FAST_STOP_FRAC, outSlip: band.ticks }).net;
+      { slip: Math.max(slip, bandTicks), through: bandTicks, stopPct: band.stopPct, fast: FAST_STOP_FRAC, outSlip: bandTicks }).net;
     const [wLl, cLl] = cheap(1, false), [wSl, cSl] = cheap(-1, false), [wLb, cLb] = cheap(1, true), [wSb, cSb] = cheap(-1, true);
     out.push([k, ...ML_KEYS.map((f) => (Number.isFinite(x[f]) ? x[f] : NaN)), lg.net, sh.net, lg.r, sh.r,
       wl.net, ws.net, wl.r, ws.r, cl.net, cs.net, cl.r, cs.r, pct(day.c[LATE_END - 1], price),
