@@ -389,14 +389,22 @@ export default function OrderBookPage() {
 type AskState = { busy: boolean; text?: string; err?: string; cost?: number };
 /** One line under the list: what the setup alerts are doing. */
 /** today's Algo Live trades: the prices for protecting them by hand, next to the order book */
-/** every position open at Dhan, with its stop and target (15 s is plenty: orders rarely change faster) */
+/** every position open at Dhan, with its stop and target (P&L does not wait for this: it runs on the live price) */
 function useOpenPositions(api: (path: string, init?: RequestInit) => Promise<Response>, on: boolean): OpenPosition[] {
   const [rows, setRows] = useState<OpenPosition[]>([]);
   useEffect(() => {
     if (!on) return;
-    const load = () => api('/api/book/positions').then((r) => (r.ok ? r.json() : null)).then((j) => { if (j) setRows(j.positions ?? []); }).catch(() => {});
+    let n = 0;
+    // the saved order log (a sheet read) about once a minute; between those, a leg Dhan does not list keeps its last price
+    const load = () => {
+      const history = n++ % 8 === 0;
+      api(`/api/book/positions${history ? '?history=1' : ''}`).then((r) => (r.ok ? r.json() : null)).then((j: { positions?: OpenPosition[]; history?: boolean } | null) => {
+        if (!j) return;
+        setRows((old) => (j.positions ?? []).map((p) => { const o = j.history ? undefined : old.find((x) => x.symbol === p.symbol); return { ...p, stop: p.stop ?? o?.stop, target: p.target ?? o?.target }; }));
+      }).catch(() => {});
+    };
     load();
-    const t = setInterval(load, 15_000);
+    const t = setInterval(load, 8_000);
     return () => clearInterval(t);
   }, [api, on]);
   return rows;
@@ -554,7 +562,19 @@ function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwit
     return () => clearTimeout(id);
   }, [cfg.symbol, api]);
   // full screen: the whole card (controls, status line, chart, answer) fills the screen; the chart takes the height
-  const { ref: card, full, height: fullH, toggle: toggleFull } = useFullscreen<HTMLElement>();
+  const { ref: card, full, height: screenH, toggle: toggleFull } = useFullscreen<HTMLElement>(0);
+  // full screen: the room left under the top row, whatever its height (it can wrap), so nothing needs scrolling
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const headRef = useRef<HTMLDivElement>(null);
+  const [headH, setHeadH] = useState(40);
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setHeadH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const fullH = Math.max(320, screenH - headH - 38);
   // in full screen, the arrow keys switch charts too (not while typing in a field)
   useEffect(() => {
     if (!full || pos.n < 2) return;
@@ -608,7 +628,7 @@ function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwit
 
   return (
     <section ref={card} id={`chart-${cfg.id}`} className={`scroll-mt-4 border border-line bg-brand-card p-3 space-y-2 ${full ? 'overflow-auto rounded-none' : 'rounded-2xl'}`}>
-      <div className="flex flex-wrap items-center gap-2">
+      <div ref={headRef} className="flex flex-wrap items-center gap-2">
         <input list="ob-symbols" value={cfg.symbol} onChange={(e) => onChange({ id: cfg.id, date: cfg.date, symbol: e.target.value.toUpperCase() })}
           className="h-8 w-36 rounded-lg border border-line bg-brand-bg px-2 text-sm font-black outline-none focus:border-brand-accent" />
         <datalist id="ob-symbols">{list.map((x) => <option key={x.securityId} value={x.symbol} />)}</datalist>
@@ -627,6 +647,7 @@ function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwit
             90% at {algo.at90.toFixed(2)} · move stop to {algo.moveStop.toFixed(2)}
           </span>
         )}
+        <span ref={setSlot} className="contents" />
         {w && !listed && (
           <button disabled={adding} onClick={() => { setAdding(true); void onAddToList(cfg.symbol).finally(() => setAdding(false)); }} title="Adds it to the recording list; it streams live while recording is on"
             className="flex h-8 items-center gap-1.5 rounded-lg border border-brand-accent/60 px-3 text-xs font-black text-brand-accent hover:bg-brand-accent/10 disabled:opacity-60">
@@ -663,7 +684,7 @@ function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwit
         </button>
         {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
       </div>
-      {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} onAsk={ask} focus={cfg.focus} focusLabel="Alert" alertMark={cfg.alert} position={isLive ? position : undefined} />}
+      {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} fit={full} topSlot={slot} onAsk={ask} focus={cfg.focus} focusLabel="Alert" alertMark={cfg.alert} position={isLive ? position : undefined} />}
       {w && !model && loading && (
         <LoadingPanel height={full ? fullH : 560} value={loading.total ? loading.done / loading.total : undefined}
           label={loading.total ? `${loading.label} · ${loading.done}/${loading.total} pieces (10 min each)` : `${loading.label}…`} />

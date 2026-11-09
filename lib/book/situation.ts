@@ -1,4 +1,5 @@
 import type { BookModel } from './model';
+import { computeCharges } from '../live/pnl';
 
 /**
  * The slow read: who has been ahead over the last hour, for someone holding a position. The "right now" label reacts
@@ -12,7 +13,24 @@ import type { BookModel } from './model';
  * = two-way). One exception: a close beyond the level the leading side had to defend ends its lead at once.
  */
 
-export interface OpenPosition { symbol: string; securityId: string; direction: 'LONG' | 'SHORT'; qty: number; avgCost: number; entryTs: number; stop?: number; target?: number }
+export interface OpenPosition {
+  symbol: string; securityId: string; direction: 'LONG' | 'SHORT'; qty: number; avgCost: number; entryTs: number; stop?: number; target?: number;
+  /** already booked on part exits, and the trade's buy and sell values so far (for the charges) */
+  realized?: number; buyVal?: number; sellVal?: number;
+}
+
+/** The trade's P&L at a price, before and after Dhan's charges (open quantity closed at that price, plus anything already booked). */
+export function pnlAt(p: OpenPosition, price: number): { gross: number; net: number } {
+  const dir = p.direction === 'LONG' ? 1 : -1;
+  const gross = (p.realized ?? 0) + (price - p.avgCost) * dir * p.qty;
+  const closeVal = p.qty * price;
+  const buy = (p.buyVal ?? (dir === 1 ? p.qty * p.avgCost : 0)) + (dir === -1 ? closeVal : 0);
+  const sell = (p.sellVal ?? (dir === -1 ? p.qty * p.avgCost : 0)) + (dir === 1 ? closeVal : 0);
+  return { gross: Math.round(gross * 100) / 100, net: Math.round((gross - computeCharges(buy, sell).totalCharges) * 100) / 100 };
+}
+
+/** The next 10-minute close after a moment. */
+export function nextClose(tMs: number): number { return slotStart(tMs) + 600_000; }
 
 export interface Situation {
   stance: 1 | 0 | -1;
