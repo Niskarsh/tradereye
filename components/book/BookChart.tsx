@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { BookModel, Wall } from '@/lib/book/model';
 import type { TradeMark } from '@/lib/book/marks';
+import { situation, type OpenPosition, type Situation } from '@/lib/book/situation';
 export type { TradeMark };
 
 /**
@@ -63,7 +64,7 @@ function focusView(f: { from: number; to: number }): View {
   return { end: f.to + pad, span: Math.min(400 * 60_000, Math.max(5 * 60_000, f.to - f.from + 2 * pad)) };
 }
 
-export function BookChart({ model, live, height = 520, onAsk, compact = false, marks, focus, focusLabel = 'Trade', alertMark }: {
+export function BookChart({ model, live, height = 520, onAsk, compact = false, marks, focus, focusLabel = 'Trade', alertMark, position }: {
   model: BookModel; live: boolean; height?: number; onAsk?: (question: string) => void; compact?: boolean;
   /** his entries / adds / exits, drawn as arrows with labels */
   marks?: TradeMark[];
@@ -72,6 +73,8 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   /** label of the button that comes back to `focus` */
   focusLabel?: string;
   alertMark?: AlertMark;
+  /** the position open in this stock now: entry, stop and target drawn across the chart */
+  position?: OpenPosition;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
@@ -86,6 +89,8 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   const [flow, setFlow] = useState<ReturnType<BookModel['flow']> | null>(null);
   const [bias, setBias] = useState<ReturnType<BookModel['bias']> | null>(null);
   const [read, setRead] = useState<ReturnType<BookModel['priceRead']>>(undefined);
+  const [sit, setSit] = useState<Situation | null>(null);
+  const sitAt = useRef(0);
   const hoverRef = useRef<string | null>(null);
   hoverRef.current = hoverWall;
   // hovering moves between the band and its label: clear only after a short pause, so the Ask button can be reached
@@ -297,6 +302,36 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
       }
     }
 
+    // the open position: entry, stop and target across the chart; one off the price range becomes a tag at the edge
+    // (they do not widen the range: a stop far away would squash the book into a few rows)
+    if (position) {
+      const dir = position.direction === 'LONG' ? 1 : -1;
+      const xFrom = position.entryTs > t1 ? plotW : X(Math.max(position.entryTs, t0));
+      const money = (p: number) => { const v = (p - position.avgCost) * dir * position.qty; return ` · ${v >= 0 ? '+' : '-'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`; };
+      const lines: [string, number, string, boolean][] = [[`${position.direction} ${position.qty} @ ${position.avgCost.toFixed(2)}`, position.avgCost, '#E8EAF0', false]];
+      if (position.stop) lines.push([`Stop ${position.stop.toFixed(2)}${money(position.stop)}`, position.stop, '#F06B7C', true]);
+      if (position.target) lines.push([`Target ${position.target.toFixed(2)}${money(position.target)}`, position.target, '#1DC995', true]);
+      let above = 0, below = 0;
+      g.font = 'bold 11px sans-serif';
+      for (const [text, p, col, dash] of lines) {
+        const off = p > pHi ? 1 : p < pLo ? -1 : 0;
+        const label = off ? `${off > 0 ? '▲' : '▼'} ${text}` : text;
+        const tw = g.measureText(label).width + 12;
+        let by: number;
+        if (off > 0) by = 4 + 22 * above++;
+        else if (off < 0) by = plotH - 22 - 22 * below++;
+        else {
+          by = Y(p) - 9;
+          g.strokeStyle = col; g.lineWidth = 1.5; g.setLineDash(dash ? [7, 4] : []);
+          g.beginPath(); g.moveTo(xFrom, Y(p)); g.lineTo(plotW, Y(p)); g.stroke(); g.setLineDash([]);
+        }
+        const bx = Math.max(4, Math.min(xFrom + 6, plotW * 0.55));
+        g.fillStyle = 'rgba(10,17,24,0.92)'; g.fillRect(bx, by, tw, 18);
+        g.strokeStyle = col; g.lineWidth = 1; g.strokeRect(bx + 0.5, by + 0.5, tw - 1, 17);
+        g.fillStyle = col; g.fillText(label, bx + 6, by + 13);
+      }
+    }
+
     // reversal alert: gold dashed time line, a ring at the wall, a label
     if (alertMark && alertMark.t >= t0 && alertMark.t <= t1) {
       const x = X(alertMark.t), y = Y(alertMark.price), long = alertMark.side === 'LONG';
@@ -423,7 +458,8 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     // the bias line: at the right edge of the view (live = now), always shown
     const at = Math.min(t1, dataEnd);
     if (model.lastEventAt) { setFlow(model.flow(at, 600)); setRead(model.priceRead(at, 600)); setBias((old) => { const b = model.bias(at); return old && old.label === b.label && old.why === b.why ? old : b; }); }
-  }, [model, live, height, compact, marks, alertMark]);
+    if (model.lastEventAt && !compact && Date.now() - sitAt.current > 2000) { sitAt.current = Date.now(); setSit((old) => { const s = situation(model, at, position); return old && JSON.stringify(old) === JSON.stringify(s) ? old : s; }); }
+  }, [model, live, height, compact, marks, alertMark, position]);
 
   useEffect(() => { const id = setInterval(draw, 250); draw(); return () => clearInterval(id); }, [draw]);
   const focusKey = focus ? `${focus.from}-${focus.to}-${focus.n ?? ''}` : '';
@@ -519,11 +555,11 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
 
   return (
     <div className="space-y-2">
+      {sit && !compact && <SituationBox s={sit} position={position} ltp={model.ltp} />}
       <div className="flex flex-wrap items-center gap-2">
         {bias && (
-          <span title={bias.why} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-black ${bias.side === 'UP' ? 'border-data-green/60 bg-data-green/10 text-data-green' : bias.side === 'DOWN' ? 'border-data-red/60 bg-data-red/10 text-data-red-text' : 'border-line-strong text-ink-2'}`}>
-            {bias.side === 'UP' ? '▲' : bias.side === 'DOWN' ? '▼' : '■'} {bias.label}
-            <span className="font-normal text-[11px] text-ink-3">· {bias.why}</span>
+          <span title={bias.why} className="text-[11px] text-ink-3">
+            Right now: <b className={bias.side === 'UP' ? 'text-data-green' : bias.side === 'DOWN' ? 'text-data-red-text' : 'text-ink-2'}>{bias.label}</b> · {bias.why}
           </span>
         )}
         {flow && flow.buy + flow.sell > 0 && (
@@ -581,6 +617,32 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
           );
         })()}
       </div>
+    </div>
+  );
+}
+
+/** The slow read above the chart: it can only change at a 10-minute close (lib/book/situation.ts). */
+function SituationBox({ s, position: p, ltp }: { s: Situation; position?: OpenPosition; ltp?: number }) {
+  const tone = s.stance === 1 ? 'border-data-green/60 bg-data-green/10' : s.stance === -1 ? 'border-data-red/60 bg-data-red/10' : 'border-line-strong';
+  const text = s.stance === 1 ? 'text-data-green' : s.stance === -1 ? 'text-data-red-text' : 'text-ink-2';
+  const pnl = p && ltp !== undefined ? (ltp - p.avgCost) * (p.direction === 'LONG' ? 1 : -1) * p.qty : undefined;
+  const change = [s.changeAbove !== undefined ? `10-min close above ${s.changeAbove.toFixed(2)}` : '', s.changeBelow !== undefined ? `10-min close below ${s.changeBelow.toFixed(2)}` : ''].filter(Boolean).join(' or ');
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${tone}`}>
+      <p className="text-sm">
+        {p && <b className="font-mono">{p.direction} {p.qty} @ {p.avgCost.toFixed(2)} · </b>}
+        <b className={text}>{s.label}</b>
+        {s.since && <span className="text-xs text-ink-3"> since {hhmm(s.since)}</span>}
+        {s.forYou && <span className="text-xs text-ink-2"> · {s.forYou === 'with' ? 'with your trade' : s.forYou === 'against' ? 'against your trade' : 'no clear side'}</span>}
+      </p>
+      {p && <p className="font-mono text-[11px] text-ink-2">Stop {p.stop ? p.stop.toFixed(2) : 'none placed'} · Target {p.target ? p.target.toFixed(2) : 'none placed'}{pnl !== undefined ? ` · ${pnl >= 0 ? '+' : '-'}₹${Math.abs(Math.round(pnl)).toLocaleString('en-IN')} before charges` : ''}</p>}
+      {s.building ? <p className="text-[11px] text-ink-3">Updates at each 10-minute close: {s.building}.</p> : (
+        <>
+          {s.sinceEntry && <p className="text-[11px] text-ink-2"><b>Since entry:</b> {s.sinceEntry}</p>}
+          <p className="text-[11px] text-ink-2"><b>Last 60 min:</b> {s.structure} · {s.flow}{s.vwap ? ` · ${s.vwap}` : ''}</p>
+          {change && <p className="text-[11px] text-ink-2"><b>Changes on:</b> {change}</p>}
+        </>
+      )}
     </div>
   );
 }
