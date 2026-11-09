@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BookModel } from '../lib/book/model';
-import { situation, type OpenPosition } from '../lib/book/situation';
+import { nextClose, pnlAt, situation, type OpenPosition } from '../lib/book/situation';
 import { openPositions } from '../lib/book/positions';
 
 const OPEN = Date.parse('2026-11-09T09:15:00+05:30');
@@ -94,3 +94,38 @@ test('open positions come with the stop and target resting at Dhan', () => {
   assert.equal(ps.length, 1);
   assert.deepEqual([ps[0].symbol, ps[0].direction, ps[0].qty, ps[0].avgCost, ps[0].stop, ps[0].target], ['PARAGMILK', 'SHORT', 40, 327.05, 334.55, 318]);
 });
+
+const baseTrade = { exchangeTradeId: 't1', orderId: 'o1', tradingSymbol: 'PARAGMILK', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'SELL', tradedQuantity: 40, tradedPrice: 327.05, createTime: '2026-11-09 09:45:10' };
+const pendingOrder = (id: string, type: string, price: number, trigger: number, status = 'PENDING') => ({ orderId: id, tradingSymbol: 'PARAGMILK', securityId: '11', exchangeSegment: 'NSE_EQ', transactionType: 'BUY', orderType: type, orderStatus: status, price, triggerPrice: trigger, quantity: 40, filledQty: 0, createTime: '2026-11-09 09:46:00', updateTime: '2026-11-09 09:46:00' });
+
+test('a target the plain pending check misses is still found, the way the Live tab finds it', () => {
+  // a status outside the usual pending list; a limit that echoes a trigger
+  const odd = openPositions([baseTrade], [pendingOrder('t', 'LIMIT', 318, 0, 'TRIGGERED')], []);
+  assert.equal(odd[0].target, 318);
+  const echo = openPositions([baseTrade], [pendingOrder('t', 'LIMIT', 318, 318)], []);
+  assert.equal(echo[0].target, 318);
+  // cancelled: no longer a target
+  assert.equal(openPositions([baseTrade], [pendingOrder('t', 'LIMIT', 318, 0, 'CANCELLED')], [])[0].target, undefined);
+  // a bracket's legs from the super-order list
+  const sup = [{ orderId: 'E1', orderStatus: 'TRADED', transactionType: 'SELL', orderType: 'MARKET', tradingSymbol: 'PARAGMILK', securityId: '11', exchangeSegment: 'NSE_EQ', quantity: 40, createTime: '2026-11-09 09:45:00', updateTime: '2026-11-09 09:45:10', legDetails: [
+    { orderId: 'E1', legName: 'STOP_LOSS_LEG', transactionType: 'BUY', price: 334.55, orderStatus: 'PENDING', remainingQuantity: 40 },
+    { orderId: 'E1', legName: 'TARGET_LEG', transactionType: 'BUY', price: 318, orderStatus: 'PENDING', remainingQuantity: 40 } ] }];
+  const b = openPositions([baseTrade], [], sup);
+  assert.deepEqual([b[0].stop, b[0].target], [334.55, 318]);
+});
+
+test('a leg Dhan no longer lists comes from the saved order log', () => {
+  const known = new Map([['L', { orderId: 'L', status: 'PENDING', side: 'BUY' as const, kind: 'LIMIT' as const, legNo: 3, symbol: 'PARAGMILK', securityId: '11', segment: 'NSE_EQ', product: 'INTRADAY', triggerPrice: 0, price: 318, qty: 40, filledQty: 0, createTime: '2026-11-09 09:46:00', updateTime: '2026-11-09 09:46:00', history: [{ ts: Date.parse('2026-11-09T09:46:00+05:30'), status: 'PENDING', trigger: 0, price: 318, qty: 40, filled: 0 }], version: 1, src: 'POLL' }]]);
+  assert.equal(openPositions([baseTrade], [], [], known)[0].target, 318);
+});
+
+test('P&L before and after charges, with part exits booked', () => {
+  const p: OpenPosition = { symbol: 'X', securityId: '1', direction: 'SHORT', qty: 40, avgCost: 327.05, entryTs: 0, sellVal: 13082, buyVal: 0, realized: 0 };
+  const at = pnlAt(p, 325);
+  assert.equal(at.gross, 82);
+  assert.ok(at.net < at.gross && at.gross - at.net > 10 && at.gross - at.net < 20, String(at.net));
+  assert.equal(pnlAt({ ...p, qty: 20, realized: 50 }, 325).gross, 91);
+  assert.equal(pnlAt({ ...p, direction: 'LONG', buyVal: 13082, sellVal: 0 }, 325).gross, -82);
+  assert.equal(nextClose(Date.parse('2026-11-09T14:17:30+05:30')), Date.parse('2026-11-09T14:25:00+05:30'));
+});
+

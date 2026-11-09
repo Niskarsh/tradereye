@@ -1,9 +1,10 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, Sparkles } from 'lucide-react';
 import type { BookModel, Wall } from '@/lib/book/model';
 import type { TradeMark } from '@/lib/book/marks';
-import { situation, type OpenPosition, type Situation } from '@/lib/book/situation';
+import { nextClose, pnlAt, situation, type OpenPosition, type Situation } from '@/lib/book/situation';
 export type { TradeMark };
 
 /**
@@ -64,8 +65,13 @@ function focusView(f: { from: number; to: number }): View {
   return { end: f.to + pad, span: Math.min(400 * 60_000, Math.max(5 * 60_000, f.to - f.from + 2 * pad)) };
 }
 
-export function BookChart({ model, live, height = 520, onAsk, compact = false, marks, focus, focusLabel = 'Trade', alertMark, position }: {
-  model: BookModel; live: boolean; height?: number; onAsk?: (question: string) => void; compact?: boolean;
+export function BookChart({ model, live, height: outer = 520, fit = false, topSlot, onAsk, compact = false, marks, focus, focusLabel = 'Trade', alertMark, position }: {
+  model: BookModel; live: boolean; height?: number;
+  /** `height` is the room for everything here (the read, the buttons and the chart): the chart takes what is left */
+  fit?: boolean;
+  /** where the one-line read and its collapse arrow go (the card's top row); without it they sit above the chart */
+  topSlot?: HTMLElement | null;
+  onAsk?: (question: string) => void; compact?: boolean;
   /** his entries / adds / exits, drawn as arrows with labels */
   marks?: TradeMark[];
   /** open zoomed on this time window (his trade); a "Trade" button comes back to it */
@@ -90,6 +96,18 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   const [bias, setBias] = useState<ReturnType<BookModel['bias']> | null>(null);
   const [read, setRead] = useState<ReturnType<BookModel['priceRead']>>(undefined);
   const [sit, setSit] = useState<Situation | null>(null);
+  const [readOpen, setReadOpen] = useState(() => { try { return localStorage.getItem('tradereye-book-read') !== 'closed'; } catch { return true; } });
+  const toggleRead = () => setReadOpen((o) => { try { localStorage.setItem('tradereye-book-read', o ? 'closed' : 'open'); } catch { /* only a convenience */ } return !o; });
+  const topRef = useRef<HTMLDivElement>(null);
+  const [topH, setTopH] = useState(0);
+  useEffect(() => {
+    const el = topRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setTopH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const height = fit ? Math.max(240, outer - topH - 8) : outer;
   const sitAt = useRef(0);
   const hoverRef = useRef<string | null>(null);
   hoverRef.current = hoverWall;
@@ -308,10 +326,13 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
       const dir = position.direction === 'LONG' ? 1 : -1;
       const xFrom = position.entryTs > t1 ? plotW : X(Math.max(position.entryTs, t0));
       const money = (p: number) => { const v = (p - position.avgCost) * dir * position.qty; return ` · ${v >= 0 ? '+' : '-'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`; };
-      const lines: [string, number, string, boolean][] = [[`${position.direction} ${position.qty} @ ${position.avgCost.toFixed(2)}`, position.avgCost, '#E8EAF0', false]];
+      const nowPnl = live && model.ltp !== undefined ? ` · now ${inr(pnlAt(position, model.ltp).gross)}` : '';
+      const lines: [string, number, string, boolean][] = [[`${position.direction} ${position.qty} @ ${position.avgCost.toFixed(2)}${nowPnl}`, position.avgCost, '#E8EAF0', false]];
       if (position.stop) lines.push([`Stop ${position.stop.toFixed(2)}${money(position.stop)}`, position.stop, '#F06B7C', true]);
       if (position.target) lines.push([`Target ${position.target.toFixed(2)}${money(position.target)}`, position.target, '#1DC995', true]);
-      let above = 0, below = 0;
+      // always in price order: tags off the top stack with the highest first, tags off the bottom with the lowest last
+      lines.sort((a, b) => b[1] - a[1]);
+      let above = 0, below = lines.filter((l) => l[1] < pLo).length;
       g.font = 'bold 11px sans-serif';
       for (const [text, p, col, dash] of lines) {
         const off = p > pHi ? 1 : p < pLo ? -1 : 0;
@@ -319,7 +340,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
         const tw = g.measureText(label).width + 12;
         let by: number;
         if (off > 0) by = 4 + 22 * above++;
-        else if (off < 0) by = plotH - 22 - 22 * below++;
+        else if (off < 0) by = plotH - 22 - 22 * --below;
         else {
           by = Y(p) - 9;
           g.strokeStyle = col; g.lineWidth = 1.5; g.setLineDash(dash ? [7, 4] : []);
@@ -555,14 +576,19 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
 
   return (
     <div className="space-y-2">
-      {sit && !compact && <SituationBox s={sit} position={position} ltp={model.ltp} />}
+      <div ref={topRef} className="space-y-2">
+      {sit && !compact && (() => {
+        const bar = <ReadBar s={sit} position={position} ltp={model.ltp} live={live} quietSec={live && model.lastEventAt ? (Date.now() - model.lastEventAt) / 1000 : 0} open={readOpen} onToggle={toggleRead} />;
+        return topSlot ? createPortal(bar, topSlot) : bar;
+      })()}
+      {sit && !compact && readOpen && <SituationBox s={sit} position={position} ltp={model.ltp} now={model.lastEventAt || Date.now()} />}
       <div className="flex flex-wrap items-center gap-2">
-        {bias && (
+        {readOpen && bias && (
           <span title={bias.why} className="text-[11px] text-ink-3">
             Right now: <b className={bias.side === 'UP' ? 'text-data-green' : bias.side === 'DOWN' ? 'text-data-red-text' : 'text-ink-2'}>{bias.label}</b> · {bias.why}
           </span>
         )}
-        {flow && flow.buy + flow.sell > 0 && (
+        {readOpen && flow && flow.buy + flow.sell > 0 && (
           <span className="text-[11px] text-ink-2">
             Last 10 min: price <b>{signed(flow.move)}</b>
             {read && <> · bid <b className="text-data-green">{signed(read.bid)}</b> · ask <b className="text-data-red-text">{signed(read.ask)}</b> · spread now <b>{read.spread.toFixed(2)}</b></>}
@@ -582,6 +608,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
           {focus && <button onClick={goTrade} title={`Back to the ${focusLabel.toLowerCase()}`} className="h-7 rounded-md border border-brand-accent/70 px-2 text-[11px] font-black text-brand-accent">{focusLabel}</button>}
           {live && !following && <button onClick={goLive} className="h-7 rounded-md bg-data-green px-2 text-[11px] font-black text-brand-bg">Live ▸</button>}
         </span>
+      </div>
       </div>
       <div ref={wrap} className="relative w-full select-none overflow-hidden rounded-xl" style={{ height, touchAction: 'none' }}>
         <canvas ref={cv} className="block cursor-crosshair"
@@ -621,26 +648,52 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   );
 }
 
+const inr = (x: number) => `${x >= 0 ? '+' : '-'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`;
+const FOR_YOU = { with: 'with your trade', against: 'against your trade', neutral: 'no clear side' };
+const readTone = (stance: number) => (stance === 1 ? 'text-data-green' : stance === -1 ? 'text-data-red-text' : 'text-ink-2');
+/** The level that matters most to the open trade: where the read turns (further) against it. */
+const watchLevel = (s: Situation, p: OpenPosition) => (p.direction === 'SHORT' ? s.changeAbove ?? s.changeBelow : s.changeBelow ?? s.changeAbove);
+
+/** The one-line read: stays visible when the box is collapsed. P&L is worked out from the live price on every redraw. */
+function ReadBar({ s, position: p, ltp, live, quietSec, open, onToggle }: { s: Situation; position?: OpenPosition; ltp?: number; live: boolean; quietSec: number; open: boolean; onToggle: () => void }) {
+  const pnl = p && ltp !== undefined ? pnlAt(p, ltp) : undefined;
+  const watch = p ? watchLevel(s, p) : undefined;
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <button onClick={onToggle} aria-expanded={open} aria-label={open ? 'Collapse the read' : 'Expand the read'} title={open ? 'Collapse' : 'Expand'}
+        className="flex h-7 w-7 items-center justify-center rounded-lg border border-line-strong text-ink-2 hover:border-brand-accent">
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {pnl && (live
+        ? <span className="font-mono"><b className={`text-sm ${pnl.gross >= 0 ? 'text-data-green' : 'text-data-red-text'}`}>{inr(pnl.gross)}</b> <span className="text-[11px] text-ink-3">{inr(pnl.net)} after charges{quietSec > 30 ? ' · feed quiet' : ''}</span></span>
+        : <span className="text-[11px] text-data-caution">P&amp;L needs this stock recording live</span>)}
+      <b className={readTone(s.stance)}>{s.label}</b>
+      {s.forYou && <span className="text-[11px] text-ink-2">{FOR_YOU[s.forYou]}</span>}
+      {watch !== undefined && <span className="font-mono text-[11px] text-ink-2">watch {watch.toFixed(2)}</span>}
+    </span>
+  );
+}
+
 /** The slow read above the chart: it can only change at a 10-minute close (lib/book/situation.ts). */
-function SituationBox({ s, position: p, ltp }: { s: Situation; position?: OpenPosition; ltp?: number }) {
+function SituationBox({ s, position: p, ltp, now }: { s: Situation; position?: OpenPosition; ltp?: number; now: number }) {
   const tone = s.stance === 1 ? 'border-data-green/60 bg-data-green/10' : s.stance === -1 ? 'border-data-red/60 bg-data-red/10' : 'border-line-strong';
   const text = s.stance === 1 ? 'text-data-green' : s.stance === -1 ? 'text-data-red-text' : 'text-ink-2';
-  const pnl = p && ltp !== undefined ? (ltp - p.avgCost) * (p.direction === 'LONG' ? 1 : -1) * p.qty : undefined;
-  const change = [s.changeAbove !== undefined ? `10-min close above ${s.changeAbove.toFixed(2)}` : '', s.changeBelow !== undefined ? `10-min close below ${s.changeBelow.toFixed(2)}` : ''].filter(Boolean).join(' or ');
+  const at = (x: number, word: string) => `10-min close ${word} ${x.toFixed(2)}${ltp !== undefined ? ` (₹${Math.abs(x - ltp).toFixed(2)} away${p ? `, you'd be ${inr(pnlAt(p, x).gross)}` : ''})` : ''}`;
+  const change = [s.changeAbove !== undefined ? at(s.changeAbove, 'above') : '', s.changeBelow !== undefined ? at(s.changeBelow, 'below') : ''].filter(Boolean).join(' or ');
   return (
     <div className={`rounded-lg border px-3 py-2 ${tone}`}>
       <p className="text-sm">
         {p && <b className="font-mono">{p.direction} {p.qty} @ {p.avgCost.toFixed(2)} · </b>}
         <b className={text}>{s.label}</b>
         {s.since && <span className="text-xs text-ink-3"> since {hhmm(s.since)}</span>}
-        {s.forYou && <span className="text-xs text-ink-2"> · {s.forYou === 'with' ? 'with your trade' : s.forYou === 'against' ? 'against your trade' : 'no clear side'}</span>}
+        {s.forYou && <span className="text-xs text-ink-2"> · {FOR_YOU[s.forYou]}</span>}
       </p>
-      {p && <p className="font-mono text-[11px] text-ink-2">Stop {p.stop ? p.stop.toFixed(2) : 'none placed'} · Target {p.target ? p.target.toFixed(2) : 'none placed'}{pnl !== undefined ? ` · ${pnl >= 0 ? '+' : '-'}₹${Math.abs(Math.round(pnl)).toLocaleString('en-IN')} before charges` : ''}</p>}
+      {p && <p className="font-mono text-[11px] text-ink-2">Stop {p.stop ? p.stop.toFixed(2) : 'none found'} · Target {p.target ? p.target.toFixed(2) : 'none found'}</p>}
       {s.building ? <p className="text-[11px] text-ink-3">Updates at each 10-minute close: {s.building}.</p> : (
         <>
           {s.sinceEntry && <p className="text-[11px] text-ink-2"><b>Since entry:</b> {s.sinceEntry}</p>}
           <p className="text-[11px] text-ink-2"><b>Last 60 min:</b> {s.structure} · {s.flow}{s.vwap ? ` · ${s.vwap}` : ''}</p>
-          {change && <p className="text-[11px] text-ink-2"><b>Changes on:</b> {change}</p>}
+          {change && <p className="text-[11px] text-ink-2"><b>Changes on:</b> {change} · next close {hhmm(nextClose(now))}</p>}
         </>
       )}
     </div>
