@@ -1,8 +1,9 @@
 import { getJson, putJson } from '../setups/store';
 import { liveInstagram } from '../social/connections';
-import { createCarouselContainer, createImageContainer, mediaPermalink, publishContainer, waitForContainer } from '../social/instagram';
+import { containerStatus, createCarouselContainer, createImageContainer, mediaPermalink, publishContainer, waitForContainer } from '../social/instagram';
 import { signedGet, store } from '../shorts/store';
 import { capHashtags } from '../shorts/posts';
+import { finishStoryWith, startStoryWith, type StorySteps } from './storySteps';
 import { withDisclaimer } from '../shorts/disclaimer';
 
 /**
@@ -18,7 +19,7 @@ export const slideKey = (date: string, name: string) => `posts/${date}/${name}.j
 const stateKey = (date: string) => `posts/${date}/state.json`;
 
 export interface PostedItem { at: number; mediaId: string; url?: string; slides: string[] }
-export interface PostsState { post?: PostedItem; stories: PostedItem[] }
+export interface PostsState { post?: PostedItem; stories: PostedItem[]; /** Stories Instagram is still processing */ pendingStories?: { slide: string; containerId: string; at: number }[] }
 
 export async function loadState(date: string): Promise<PostsState> {
   return (await getJson<PostsState>(store, stateKey(date))) ?? { stories: [] };
@@ -65,15 +66,16 @@ export async function publishPost(date: string, slides: string[], caption: strin
   return next;
 }
 
-/** Publishes one image as a Story (live for 24 hours; a Story has no caption). */
-export async function publishStory(date: string, slide: string, again = false): Promise<PostsState> {
-  const state = await loadState(date);
-  if (state.stories.some((s) => s.slides[0] === slide) && !again) throw new Error('That Story is already on Instagram.');
+async function liveSteps(date: string): Promise<StorySteps> {
   const c = await conn();
-  const containerId = await createImageContainer({ accessToken: c.accessToken, userId: c.userId, imageUrl: await imageUrl(date, slide), story: true });
-  await ready(c.accessToken, containerId);
-  const mediaId = await publishContainer({ accessToken: c.accessToken, userId: c.userId, containerId });
-  const next: PostsState = { ...state, stories: [...state.stories, { at: Date.now(), mediaId, slides: [slide] }] };
-  await putJson(store, stateKey(date), next);
-  return next;
+  return {
+    load: () => loadState(date),
+    save: (s) => putJson(store, stateKey(date), s),
+    create: async (slide) => createImageContainer({ accessToken: c.accessToken, userId: c.userId, imageUrl: await imageUrl(date, slide), story: true }),
+    status: (id) => containerStatus(c.accessToken, id),
+    publish: (id) => publishContainer({ accessToken: c.accessToken, userId: c.userId, containerId: id }),
+    now: () => Date.now(),
+  };
 }
+export const startStory = async (date: string, slide: string, again = false) => startStoryWith(await liveSteps(date), slide, again);
+export const finishStory = async (date: string, slide: string) => finishStoryWith(await liveSteps(date), slide);

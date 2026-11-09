@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
-import { istToday, loadState, publishPost, publishStory, validName } from '@/lib/posts/publish';
+import { finishStory, istToday, loadState, publishPost, startStory, validName } from '@/lib/posts/publish';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   catch (e) { return NextResponse.json({ error: 'FAILED', message: (e as Error).message }, { status: 500 }); }
 }
 
-/** POST { kind: 'post', slides, caption, again? } or { kind: 'story', slide, again? } -> goes live on Instagram now. */
+/** POST { kind: 'post', slides, caption, again? } -> goes live on Instagram now. { kind: 'story-start', slide, again? } then { kind: 'story-finish', slide } until done: true. */
 export async function POST(req: Request) {
   const denied = ownerRequired(req);
   if (denied) return denied;
@@ -21,9 +21,9 @@ export async function POST(req: Request) {
   const today = istToday();
   if (b.date !== today) return bad('Posts are for today only. Reload the page.');
   try {
-    if (b.kind === 'story') {
+    if (b.kind === 'story-start' || b.kind === 'story-finish') {
       if (!validName(String(b.slide))) return bad('Bad image name.');
-      return NextResponse.json(await publishStory(today, String(b.slide), b.again === true));
+      return NextResponse.json(b.kind === 'story-start' ? await startStory(today, String(b.slide), b.again === true) : await finishStory(today, String(b.slide)));
     }
     if (b.kind === 'post') {
       const slides = Array.isArray(b.slides) ? b.slides.map(String) : [];
