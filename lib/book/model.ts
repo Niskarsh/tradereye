@@ -1,5 +1,7 @@
 import type { DepthMsg, QuoteMsg } from './feed';
 
+import { situation } from './situation';
+
 /**
  * The order book over time for one stock, Bookmap style.
  *
@@ -21,7 +23,7 @@ export type WallStatus = 'RESTING' | 'HOLDING' | 'PULLED' | 'EATEN';
 export interface Level { side: Side; qty: number; seenAt: number; firstAt: number; maxQty: number; traded: number; refills: number; lastDrop: number; seg: Segment }
 export interface Segment { p: number; side: Side; qty: number; t0: number; t1?: number; seenTill: number }
 export interface TradeBucket { t: number; buy: number; sell: number; price: number } // per second
-export interface Quote { t: number; bid?: number; ask?: number; ltp?: number }
+export interface Quote { t: number; bid?: number; ask?: number; ltp?: number; atp?: number }
 export interface Wall { price: number; side: Side; qty: number; maxQty: number; times: number; ageMin: number; traded: number; refills: number; status: WallStatus; endedAgoSec?: number; endedAt?: number; seenAgoSec: number }
 export interface Flow { sec: number; buy: number; sell: number; moveTicks: number; move: number; recordedSec: number; absorption?: 'BUYING_ABSORBED' | 'SELLING_ABSORBED' }
 /** How the best bid and ask moved over a window (rupees), and the spread at its end. */
@@ -182,8 +184,8 @@ export class BookModel {
   private pushQuote(now: number) {
     const last = this.quotes[this.quotes.length - 1];
     if (last && last.bid === this.bestBid && last.ask === this.bestAsk && last.ltp === this.ltp) return;
-    if (last && now - last.t < 250) { last.bid = this.bestBid; last.ask = this.bestAsk; last.ltp = this.ltp; return; }
-    this.quotes.push({ t: now, bid: this.bestBid, ask: this.bestAsk, ltp: this.ltp });
+    if (last && now - last.t < 250) { last.bid = this.bestBid; last.ask = this.bestAsk; last.ltp = this.ltp; last.atp = this.atp; return; }
+    this.quotes.push({ t: now, bid: this.bestBid, ask: this.bestAsk, ltp: this.ltp, atp: this.atp });
   }
 
   private set(p: number, side: Side, qty: number, now: number) {
@@ -445,6 +447,7 @@ export class BookModel {
       ...this.endedWalls(now).slice(-4).map((x) => `${x.side === 'ASK' ? 'sell' : 'buy'} wall ${x.price.toFixed(2)} (max ${fmtQ(x.maxQty)}) was ${x.status} ${Math.round((x.endedAgoSec ?? 0) / 60)} min ago`),
       fl(this.flow(now, 60)), fl(this.flow(now, 600)),
       `control over 10 min: ${control.label} (${control.why})`,
+      ...(() => { const r = situation(this, now); return r.building ? [] : [`last hour, from closed 10-min candles: ${r.label} (${[r.structure, r.flow, r.vwap].filter(Boolean).join('; ')})`]; })(),
       ...(this.totalBuy || this.totalSell ? [`whole book pending: ${fmtQ(this.totalBuy ?? 0)} to buy vs ${fmtQ(this.totalSell ?? 0)} to sell`] : []),
       ...(this.atp && this.ltp ? [`price is ${this.ltp >= this.atp ? 'above' : 'below'} the day's VWAP ${this.atp.toFixed(2)}`] : []),
     ].join('\n');

@@ -7,6 +7,7 @@ import { BookChart, type AlertMark } from '@/components/book/BookChart';
 import { useFullscreen } from '@/components/book/useFullscreen';
 import { LoadingPanel, ProgressBar } from '@/components/ui/progress';
 import { Recorder, loadDay, type RecInfo } from '@/lib/book/recorder';
+import type { OpenPosition } from '@/lib/book/situation';
 import { BookModel } from '@/lib/book/model';
 import { istDate } from '@/lib/book/record';
 import type { WatchItem } from '@/lib/book/sheet';
@@ -71,6 +72,7 @@ export default function OrderBookPage() {
   const [ocr, setOcr] = useState<{ busy: boolean; found?: string[]; rejected?: string[]; err?: string }>({ busy: false });
   const [charts, setCharts] = useState<ChartCfg[]>([]);
   const algoRows = useAlgoLevels(api);
+  const positions = useOpenPositions(api, charts.length > 0 && !!token);
   const [listBusy, setListBusy] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [notifyPerm, setNotifyPerm] = useState<NotificationPermission | 'unsupported'>('default');
@@ -369,6 +371,7 @@ export default function OrderBookPage() {
         {charts.map((c, i) => (
           <ChartCard key={c.id} cfg={c} list={list} rec={rec.current!} recording={recording} api={api}
             algo={algoRows.find((r) => r.symbol === c.symbol && !/CLOSED|ERROR|NOT_SENT/i.test(r.status))}
+            position={positions.find((p) => p.symbol.toUpperCase() === c.symbol.toUpperCase())}
             pos={{ i, n: charts.length, prev: charts[(i - 1 + charts.length) % charts.length].symbol, next: charts[(i + 1) % charts.length].symbol }}
             onSwitch={(dir) => switchFull(charts[(i + dir + charts.length) % charts.length].id)}
             onChange={(n) => setCharts((all) => all.map((x) => (x.id === c.id ? n : x)))}
@@ -386,6 +389,19 @@ export default function OrderBookPage() {
 type AskState = { busy: boolean; text?: string; err?: string; cost?: number };
 /** One line under the list: what the setup alerts are doing. */
 /** today's Algo Live trades: the prices for protecting them by hand, next to the order book */
+/** every position open at Dhan, with its stop and target (15 s is plenty: orders rarely change faster) */
+function useOpenPositions(api: (path: string, init?: RequestInit) => Promise<Response>, on: boolean): OpenPosition[] {
+  const [rows, setRows] = useState<OpenPosition[]>([]);
+  useEffect(() => {
+    if (!on) return;
+    const load = () => api('/api/book/positions').then((r) => (r.ok ? r.json() : null)).then((j) => { if (j) setRows(j.positions ?? []); }).catch(() => {});
+    load();
+    const t = setInterval(load, 15_000);
+    return () => clearInterval(t);
+  }, [api, on]);
+  return rows;
+}
+
 interface AlgoRow { id: string; symbol: string; status: string; entry: number; stop: number; target: number; at90?: number; moveStop?: number }
 function useAlgoLevels(api: (path: string, init?: RequestInit) => Promise<Response>): AlgoRow[] {
   const [rows, setRows] = useState<AlgoRow[]>([]);
@@ -511,10 +527,12 @@ function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissA
   );
 }
 
-function ChartCard({ cfg, list, rec, recording, api, algo, pos, onSwitch, onChange, onClose, onAddToList }: {
+function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwitch, onChange, onClose, onAddToList }: {
   cfg: ChartCfg; list: WatchItem[]; rec: Recorder; recording: boolean;
   /** the Algo Live trade open in this stock today, if any: its two protection prices go in the chart's top row */
   algo?: AlgoRow;
+  /** the position open in this stock, if any: drawn on today's chart */
+  position?: OpenPosition;
   /** this chart's place among the open charts, and its neighbours' symbols (for the full-screen switcher) */
   pos: { i: number; n: number; prev: string; next: string };
   onSwitch: (dir: -1 | 1) => void;
@@ -645,7 +663,7 @@ function ChartCard({ cfg, list, rec, recording, api, algo, pos, onSwitch, onChan
         </button>
         {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
       </div>
-      {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} onAsk={ask} focus={cfg.focus} focusLabel="Alert" alertMark={cfg.alert} />}
+      {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} onAsk={ask} focus={cfg.focus} focusLabel="Alert" alertMark={cfg.alert} position={isLive ? position : undefined} />}
       {w && !model && loading && (
         <LoadingPanel height={full ? fullH : 560} value={loading.total ? loading.done / loading.total : undefined}
           label={loading.total ? `${loading.label} · ${loading.done}/${loading.total} pieces (10 min each)` : `${loading.label}…`} />
