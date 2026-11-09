@@ -10,7 +10,7 @@
 
 export interface DepthLevel { price: number; qty: number; orders: number }
 export interface DepthMsg { securityId: string; side: 'BID' | 'ASK'; levels: DepthLevel[] }
-export interface QuoteMsg { securityId: string; ltp: number; ltq: number; ltt: number; volume: number; totalBuy: number; totalSell: number; dayHigh: number; dayLow: number }
+export interface QuoteMsg { securityId: string; ltp: number; ltq: number; ltt: number; atp?: number; volume: number; totalBuy: number; totalSell: number; dayHigh: number; dayLow: number }
 
 export const DEPTH_URL = 'wss://depth-api-feed.dhan.co/twentydepth';
 export const FEED_URL = 'wss://api-feed.dhan.co';
@@ -49,7 +49,7 @@ export function parseFeed(buf: ArrayBuffer): QuoteMsg[] {
     const securityId = String(dv.getInt32(off + 4, true));
     if ((code === 4 && off + 50 <= buf.byteLength) || (code === 8 && off + 62 <= buf.byteLength)) {
       const q: QuoteMsg = {
-        securityId, ltp: dv.getFloat32(off + 8, true), ltq: dv.getInt16(off + 12, true), ltt: dv.getInt32(off + 14, true),
+        securityId, ltp: dv.getFloat32(off + 8, true), ltq: dv.getInt16(off + 12, true), ltt: dv.getInt32(off + 14, true), atp: dv.getFloat32(off + 18, true),
         volume: dv.getInt32(off + 22, true), totalSell: dv.getInt32(off + 26, true), totalBuy: dv.getInt32(off + 30, true),
         dayHigh: dv.getFloat32(off + (code === 4 ? 42 : 54), true), dayLow: dv.getFloat32(off + (code === 4 ? 46 : 58), true),
       };

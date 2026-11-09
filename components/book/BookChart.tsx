@@ -43,6 +43,9 @@ function heat(t: number): string {
   return 'rgb(244,245,248)';
 }
 const fmtQ = (q: number) => (q >= 1000 ? `${(q / 1000).toFixed(1)}k` : String(Math.round(q)));
+const signed = (x: number) => `${x >= 0 ? '+' : '-'}${Math.abs(x).toFixed(2)}`;
+/** A wall outside the live 20 levels is only the last thing we saw there: say how old that is. */
+const seenNote = (w: Wall) => (w.seenAgoSec > 60 ? ` · not seen ${Math.round(w.seenAgoSec / 60)}m` : '');
 const hhmm = (t: number, sec = false) => new Date(t + 19800_000).toISOString().slice(11, sec ? 19 : 16);
 const TIME_STEPS = [10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3];
 /** Live view: share of the width left empty on the right, where the current bid / ask / price run dashed. */
@@ -75,13 +78,14 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
   const view = useRef<View>(focus ? focusView(focus) : { end: null, span: 10 * 60_000 });
   const mouse = useRef<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; end: number; pLo: number; pHi: number; axis: boolean; time: boolean; span: number; live: boolean } | null>(null);
-  const geom = useRef({ W: 0, H: 0, plotW: 0, plotH: 0, t0: 0, t1: 0, pLo: 0, pHi: 1, panel: 0, dataEnd: 0 });
+  const geom = useRef({ W: 0, H: 0, plotW: 0, plotH: 0, t0: 0, t1: 0, pLo: 0, pHi: 1, panel: 0, dataEnd: 0, atEdge: true });
   const [rows, setRows] = useState<{ w: Wall; y: number }[]>([]);
   const [hoverWall, setHoverWall] = useState<string | null>(null);
   const [following, setFollowing] = useState(!focus);
   const [span, setSpan] = useState(view.current.span);
   const [flow, setFlow] = useState<ReturnType<BookModel['flow']> | null>(null);
   const [bias, setBias] = useState<ReturnType<BookModel['bias']> | null>(null);
+  const [read, setRead] = useState<ReturnType<BookModel['priceRead']>>(undefined);
   const hoverRef = useRef<string | null>(null);
   hoverRef.current = hoverWall;
   // hovering moves between the band and its label: clear only after a short pause, so the Ask button can be reached
@@ -121,7 +125,9 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
       const pad = Math.max((hi - lo) * 0.35, tick * 12);
       pLo = lo - pad; pHi = hi + pad;
     }
-    geom.current = { W, H, plotW, plotH, t0, t1, pLo, pHi, panel, dataEnd };
+    // walls carry their live state only: looking back in time, today's walls would be listed against old prices
+    const atEdge = !model.lastEventAt || Math.min(t1, dataEnd) >= model.lastEventAt - 5_000;
+    geom.current = { W, H, plotW, plotH, t0, t1, pLo, pHi, panel, dataEnd, atEdge };
     const X = (t: number) => ((t - t0) / (t1 - t0)) * plotW;
     const Y = (p: number) => ((pHi! - p) / (pHi! - pLo!)) * plotH;
     const pxTick = plotH / ((pHi - pLo) / tick);
@@ -250,7 +256,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     }
 
     // live walls: hovered one gets an outline
-    const walls = model.walls(Math.min(t1, dataEnd));
+    const walls = atEdge ? model.walls(Math.min(t1, dataEnd)) : [];
     const hv = hoverRef.current;
     for (const w of walls) {
       if (`${w.side}${w.price}` !== hv) continue;
@@ -416,7 +422,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     } else setRows((old) => (old.length ? [] : old));
     // the bias line: at the right edge of the view (live = now), always shown
     const at = Math.min(t1, dataEnd);
-    if (model.lastEventAt) { setFlow(model.flow(at, 600)); setBias((old) => { const b = model.bias(at); return old && old.label === b.label && old.why === b.why ? old : b; }); }
+    if (model.lastEventAt) { setFlow(model.flow(at, 600)); setRead(model.priceRead(at, 600)); setBias((old) => { const b = model.bias(at); return old && old.label === b.label && old.why === b.why ? old : b; }); }
   }, [model, live, height, compact, marks, alertMark]);
 
   useEffect(() => { const id = setInterval(draw, 250); draw(); return () => clearInterval(id); }, [draw]);
@@ -454,7 +460,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
     if (p.x < gm.plotW && p.y < gm.plotH && !d) {
       const price = gm.pHi - (p.y / gm.plotH) * (gm.pHi - gm.pLo);
       const tol = Math.max((gm.pHi - gm.pLo) / gm.plotH * 6, model.tick / 100);
-      const hit = model.walls(gm.t1).find((w) => Math.abs(w.price - price) <= tol);
+      const hit = gm.atEdge ? model.walls(gm.t1).find((w) => Math.abs(w.price - price) <= tol) : undefined;
       hover(hit ? `${hit.side}${hit.price}` : null);
     }
     draw();
@@ -521,7 +527,12 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
           </span>
         )}
         {flow && flow.buy + flow.sell > 0 && (
-          <span className="text-[11px] text-ink-2">Last 10 min: buyers <b className="text-data-green">{fmtQ(flow.buy)}</b> vs sellers <b className="text-data-red-text">{fmtQ(flow.sell)}</b> · price {flow.moveTicks >= 0 ? '+' : ''}{flow.moveTicks} ticks</span>
+          <span className="text-[11px] text-ink-2">
+            Last 10 min: price <b>{signed(flow.move)}</b>
+            {read && <> · bid <b className="text-data-green">{signed(read.bid)}</b> · ask <b className="text-data-red-text">{signed(read.ask)}</b> · spread now <b>{read.spread.toFixed(2)}</b></>}
+            {read?.totalBuy || read?.totalSell ? <> · whole book {fmtQ(read.totalBuy ?? 0)} to buy / {fmtQ(read.totalSell ?? 0)} to sell</> : null}
+            {read?.atp ? <> · VWAP {read.atp.toFixed(2)}</> : null}
+          </span>
         )}
         {flow?.absorption && (
           <span className="rounded-md border border-data-caution/70 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-data-caution">
@@ -547,7 +558,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
             <div key={id} onMouseEnter={() => hover(id)} onMouseLeave={() => hover(null)}
               className={`absolute flex items-center gap-1.5 rounded-md border bg-brand-bg/90 px-1.5 py-0.5 font-mono text-[10px] ${STATUS[w.status].cls} ${hoverWall === id ? 'ring-1 ring-brand-accent' : ''}`}
               style={{ top: Math.max(0, y - 10), left: geom.current.plotW + PRICE_W + 4, width: PANEL_W - 10 }}>
-              <span className="truncate">{w.price.toFixed(2)} · {fmtQ(w.qty)} {w.side === 'ASK' ? 'sell' : 'buy'} · {STATUS[w.status].text}{w.ageMin >= 1 ? ` · ${w.ageMin}m` : ''}</span>
+              <span className="truncate">{w.price.toFixed(2)} · {fmtQ(w.qty)} {w.side === 'ASK' ? 'sell' : 'buy'} · {STATUS[w.status].text}{w.ageMin >= 1 ? ` · ${w.ageMin}m` : ''}{seenNote(w)}</span>
               {onAsk && hoverWall === id && (
                 <button onClick={() => ask(w)} className="ml-auto flex h-5 items-center gap-0.5 rounded bg-brand-accent px-1.5 font-sans text-[10px] font-black text-brand-bg">
                   <Sparkles className="h-3 w-3" />Ask
@@ -564,7 +575,7 @@ export function BookChart({ model, live, height = 520, onAsk, compact = false, m
           return (
             <div onMouseEnter={() => hover(hoverWall)} onMouseLeave={() => hover(null)} className={`absolute flex items-center gap-1.5 rounded-md border bg-brand-bg/95 px-1.5 py-0.5 font-mono text-[10px] ${STATUS[w.status].cls}`}
               style={{ top: Math.max(0, y - 10), right: PRICE_W + 6 }}>
-              {w.price.toFixed(2)} · {fmtQ(w.qty)} {w.side === 'ASK' ? 'sell' : 'buy'} · {STATUS[w.status].text}
+              {w.price.toFixed(2)} · {fmtQ(w.qty)} {w.side === 'ASK' ? 'sell' : 'buy'} · {STATUS[w.status].text}{seenNote(w)}
               {onAsk && <button onClick={() => ask(w)} className="flex h-5 items-center gap-0.5 rounded bg-brand-accent px-1.5 font-sans text-[10px] font-black text-brand-bg"><Sparkles className="h-3 w-3" />Ask</button>}
             </div>
           );
