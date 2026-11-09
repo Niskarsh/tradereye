@@ -10,6 +10,7 @@ import type { OrderSnapIn, TradeGroup, TradeMeta, TrackedOrder } from './types';
 import type { LiveStatus } from './schema';
 import { checksForTrade } from '../copilot/store';
 import { superOrderRows } from '../copilot/pending';
+import { tradePlan, type TradePlan } from '../algoLive/levels';
 
 export interface SyncDeps {
   /** superOrders: brackets (TradingView, Algo Live) keep their stop and target inside the super order, not in /orders */
@@ -26,6 +27,10 @@ export interface LiveGroupView {
   grossPnl: number | null; netPnl: number | null; charges: number | null;
   initialStop: number | null; lastStop: number | null; stopDist: number | null; riskInr: number | null; stopMoves: number;
   tpLast: number | null; exitType: string; rMultiple: number | null; fills: number;
+  /** risk and reward before / after charges, from the stop first placed and the target recorded */
+  plan: TradePlan | null;
+  /** the 90% and no-loss stop prices for what is open now (open trades only) */
+  protect: Pick<TradePlan, 'at90' | 'moveStop'> | null;
 }
 
 export interface SyncResult {
@@ -52,6 +57,15 @@ export async function ingestSnaps(deps: Pick<SyncDeps, 'sheets' | 'now'>, snaps:
 
 const opt = (v: number | undefined) => (v === undefined ? null : v);
 
+/** The plan as it stood when the stop was first placed: the same entry and quantity his recorded risk (R) is based on. */
+function planOf(g: TradeGroup, meta: TradeMeta): TradePlan | null {
+  const dir = g.direction === 'LONG' ? 1 : -1;
+  const { initialStop: stop, initialStopDist: dist, riskInr: risk, tpLast: target } = meta;
+  if (stop !== undefined && dist && risk) return tradePlan({ dir, entry: Number((stop + dir * dist).toFixed(2)), qty: Math.round(risk / dist), stop, target });
+  const qty = g.status === 'OPEN' ? Math.abs(g.netQty) : g.peakQty;
+  return qty > 0 ? tradePlan({ dir, entry: g.avgCost || g.avgEntry, qty, stop, target }) : null;
+}
+
 function toView(
   g: TradeGroup, meta: TradeMeta, saved: LiveStatus, unrealized: number | null,
 ): LiveGroupView {
@@ -69,6 +83,8 @@ function toView(
     riskInr: opt(meta.riskInr), stopMoves: meta.stopMoves, tpLast: opt(meta.tpLast), exitType: meta.exitType,
     rMultiple: pnl && meta.riskInr ? Number((pnl.netPnL / meta.riskInr).toFixed(2)) : null,
     fills: g.parts.length,
+    plan: planOf(g, meta),
+    protect: g.status === 'OPEN' && g.netQty !== 0 ? (({ at90, moveStop }) => ({ at90, moveStop }))(tradePlan({ dir: g.direction === 'LONG' ? 1 : -1, entry: g.avgCost, qty: Math.abs(g.netQty), target: meta.tpLast })) : null,
   };
 }
 

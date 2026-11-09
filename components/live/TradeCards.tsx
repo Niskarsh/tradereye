@@ -13,7 +13,8 @@ export function DirTag({ d }: { d: 'LONG' | 'SHORT' }) {
   return <span className={`text-[10px] font-black tracking-widest px-2 py-0.5 rounded-full border ${d === 'LONG' ? 'text-data-green border-data-green/30' : 'text-data-red border-data-red/30'}`}>{d}</span>;
 }
 
-export function OpenTradeCard({ t, now }: { t: LiveGroupView; now: number }) {
+export function OpenTradeCard({ t, now, algo }: { t: LiveGroupView; now: number; algo?: { at90: number; moveStop: number } }) {
+  const p = t.plan, safe = algo ?? t.protect;
   const heldSec = Math.max(0, Math.round((now - (Date.parse(`${t.date}T${t.entryTime}+05:30`) || now)) / 1000));
   return (
     <div className="bg-brand-card rounded-3xl border border-zinc-800 p-6 space-y-5">
@@ -35,11 +36,18 @@ export function OpenTradeCard({ t, now }: { t: LiveGroupView; now: number }) {
         <Stat label="Adds" value={String(t.adds)} />
         <Stat label="Stop now" value={t.lastStop ? `₹${t.lastStop}` : 'none seen'} cls="text-data-red" />
         <Stat label="First stop" value={t.initialStop ? `₹${t.initialStop}` : '—'} />
-        <Stat label="Risk (R)" value={t.riskInr ? inr(t.riskInr) : '—'} />
         <Stat label="Target shown" value={t.tpLast ? `₹${t.tpLast}` : '—'} cls="text-data-green" />
       </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 border-t border-zinc-900 pt-4">
+        <Stat label="Risk before charges (R)" value={t.riskInr ? inr(t.riskInr) : inr(p?.risk)} />
+        <Stat label="Risk after charges" value={inr(p?.riskNet, 2)} cls="text-data-red" />
+        <Stat label="90% of target at" value={safe?.at90 ? `₹${safe.at90.toFixed(2)}` : '—'} cls="text-brand-accent" />
+        <Stat label="Reward before charges" value={p?.reward === undefined ? '—' : `${inr(p.reward)}${p.rr === undefined ? '' : ` · ${p.rr}R`}`} />
+        <Stat label="Reward after charges" value={p?.rewardNet === undefined ? '—' : `${inr(p.rewardNet, 2)}${p.rrNet === undefined ? '' : ` · ${p.rrNet}R`}`} cls="text-data-green" />
+        <Stat label="No-loss stop after charges" value={safe ? `₹${safe.moveStop.toFixed(2)}` : '—'} cls="text-brand-accent" />
+      </div>
       <p className="text-[11px] text-zinc-500">
-        Booked so far {inr(t.realizedGross, 2)} before charges. This trade is kept out of Journal and Stats until the position is flat.
+        Risk and reward assume the stop or target fills exactly at its price (slippage is extra). The no-loss stop also allows for {algo ? "the stock's usual" : 'a 0.20%'} stop slippage. Booked so far {inr(t.realizedGross, 2)} before charges. This trade is kept out of Journal and Stats until the position is flat.
       </p>
     </div>
   );
@@ -60,7 +68,7 @@ export function ClosedTable({ rows }: { rows: LiveGroupView[] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-            {['Time', 'Symbol', 'Side', 'Qty', 'In → Out', 'Held', 'Stop', 'Exit', 'Net', 'R', 'Sheet'].map((h) => <th key={h} className="px-4 py-3 whitespace-nowrap">{h}</th>)}
+            {['Time', 'Symbol', 'Side', 'Qty', 'In → Out', 'Held', 'Stop', 'Risk (+charges)', 'Reward (−charges)', 'Exit', 'Net', 'R', 'Sheet'].map((h) => <th key={h} className="px-4 py-3 whitespace-nowrap">{h}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -75,6 +83,8 @@ export function ClosedTable({ rows }: { rows: LiveGroupView[] }) {
                 <td className="px-4 py-3 font-mono text-zinc-400">{t.avgEntry.toFixed(2)} → {t.avgExit.toFixed(2)}</td>
                 <td className="px-4 py-3 font-mono text-zinc-500">{dur(t.durationSec)}</td>
                 <td className="px-4 py-3 font-mono text-zinc-500">{t.initialStop ? `${t.initialStop}${t.stopMoves ? ` (+${t.stopMoves} moves)` : ''}` : '—'}</td>
+                <td className="px-4 py-3 font-mono text-zinc-500 whitespace-nowrap">{t.plan?.risk === undefined ? '—' : `${inr(t.plan.risk)} / ${inr(t.plan.riskNet)}`}</td>
+                <td className="px-4 py-3 font-mono text-zinc-500 whitespace-nowrap">{t.plan?.reward === undefined ? '—' : `${inr(t.plan.reward)} / ${inr(t.plan.rewardNet)}`}</td>
                 <td className="px-4 py-3 text-[11px] uppercase tracking-wider text-zinc-500">{t.exitType}</td>
                 <td className={`px-4 py-3 font-black font-mono ${tone(t.netPnl)}`}>{inr(t.netPnl, 2)}</td>
                 <td className={`px-4 py-3 font-mono ${tone(t.rMultiple)}`}>{t.rMultiple === null ? '—' : `${t.rMultiple}R`}</td>
