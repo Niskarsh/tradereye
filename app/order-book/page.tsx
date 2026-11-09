@@ -70,6 +70,7 @@ export default function OrderBookPage() {
   const [draft, setDraft] = useState('');
   const [ocr, setOcr] = useState<{ busy: boolean; found?: string[]; rejected?: string[]; err?: string }>({ busy: false });
   const [charts, setCharts] = useState<ChartCfg[]>([]);
+  const algoRows = useAlgoLevels(api);
   const [listBusy, setListBusy] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [notifyPerm, setNotifyPerm] = useState<NotificationPermission | 'unsupported'>('default');
@@ -316,7 +317,7 @@ export default function OrderBookPage() {
         {!token && <TokenBar />}
         {info.error && <p className="rounded-xl border border-data-caution/50 bg-data-caution/10 px-3 py-2 text-xs text-data-caution">{info.error}</p>}
 
-        <AlgoLevels api={api} />
+        <AlgoLevels rows={algoRows} />
 
         {/* the list */}
         <section className="rounded-2xl bg-brand-card p-4 space-y-3">
@@ -367,6 +368,7 @@ export default function OrderBookPage() {
         {/* charts */}
         {charts.map((c, i) => (
           <ChartCard key={c.id} cfg={c} list={list} rec={rec.current!} recording={recording} api={api}
+            algo={algoRows.find((r) => r.symbol === c.symbol && !/CLOSED|ERROR|NOT_SENT/i.test(r.status))}
             pos={{ i, n: charts.length, prev: charts[(i - 1 + charts.length) % charts.length].symbol, next: charts[(i + 1) % charts.length].symbol }}
             onSwitch={(dir) => switchFull(charts[(i + dir + charts.length) % charts.length].id)}
             onChange={(n) => setCharts((all) => all.map((x) => (x.id === c.id ? n : x)))}
@@ -384,18 +386,23 @@ export default function OrderBookPage() {
 type AskState = { busy: boolean; text?: string; err?: string; cost?: number };
 /** One line under the list: what the setup alerts are doing. */
 /** today's Algo Live trades: the prices for protecting them by hand, next to the order book */
-function AlgoLevels({ api }: { api: (path: string, init?: RequestInit) => Promise<Response> }) {
-  const [rows, setRows] = useState<{ id: string; symbol: string; entry: number; stop: number; target: number; at90?: number; moveStop?: number }[]>([]);
+interface AlgoRow { id: string; symbol: string; status: string; entry: number; stop: number; target: number; at90?: number; moveStop?: number }
+function useAlgoLevels(api: (path: string, init?: RequestInit) => Promise<Response>): AlgoRow[] {
+  const [rows, setRows] = useState<AlgoRow[]>([]);
   useEffect(() => {
     const load = () => api('/api/algo-live/state').then((r) => (r.ok ? r.json() : null)).then((j) => {
       if (!j) return;
       const orders = (j.state?.orders ?? []) as { correlationId: string; symbol: string; price: number; avgPrice?: number; stop: number; target: number; status: string }[];
-      setRows(orders.filter((o) => !/REJECT|CANCEL/i.test(o.status)).map((o) => ({ id: o.correlationId, symbol: o.symbol, entry: o.avgPrice || o.price, stop: o.stop, target: o.target, at90: j.levels?.[o.correlationId]?.at90, moveStop: j.levels?.[o.correlationId]?.moveStop })));
+      setRows(orders.filter((o) => !/REJECT|CANCEL/i.test(o.status)).map((o) => ({ id: o.correlationId, symbol: o.symbol, status: o.status, entry: o.avgPrice || o.price, stop: o.stop, target: o.target, at90: j.levels?.[o.correlationId]?.at90, moveStop: j.levels?.[o.correlationId]?.moveStop })));
     }).catch(() => {});
     load();
     const t = setInterval(load, 30_000);
     return () => clearInterval(t);
   }, [api]);
+  return rows;
+}
+
+function AlgoLevels({ rows }: { rows: AlgoRow[] }) {
   if (!rows.length) return null;
   return (
     <section className="rounded-2xl bg-brand-card p-3 space-y-1 text-xs">
@@ -504,8 +511,10 @@ function ReversalAlerts({ alerts, recording, perm, onOpen, onDismiss, onDismissA
   );
 }
 
-function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, onClose, onAddToList }: {
+function ChartCard({ cfg, list, rec, recording, api, algo, pos, onSwitch, onChange, onClose, onAddToList }: {
   cfg: ChartCfg; list: WatchItem[]; rec: Recorder; recording: boolean;
+  /** the Algo Live trade open in this stock today, if any: its two protection prices go in the chart's top row */
+  algo?: AlgoRow;
   /** this chart's place among the open charts, and its neighbours' symbols (for the full-screen switcher) */
   pos: { i: number; n: number; prev: string; next: string };
   onSwitch: (dir: -1 | 1) => void;
@@ -594,6 +603,12 @@ function ChartCard({ cfg, list, rec, recording, api, pos, onSwitch, onChange, on
             {new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
           </button>
         ))}
+        {isLive && algo?.at90 !== undefined && algo.moveStop !== undefined && (
+          <span title="Your Algo Live trade: at the 90% price, the stop can go to the second price and the trade still pays Dhan's charges and the usual stop slippage."
+            className="font-mono text-xs font-bold text-brand-accent">
+            90% at {algo.at90.toFixed(2)} · move stop to {algo.moveStop.toFixed(2)}
+          </span>
+        )}
         {w && !listed && (
           <button disabled={adding} onClick={() => { setAdding(true); void onAddToList(cfg.symbol).finally(() => setAdding(false)); }} title="Adds it to the recording list; it streams live while recording is on"
             className="flex h-8 items-center gap-1.5 rounded-lg border border-brand-accent/60 px-3 text-xs font-black text-brand-accent hover:bg-brand-accent/10 disabled:opacity-60">

@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Loader2, Play, RefreshCcw, Square, KeyRound, Wrench, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
@@ -25,6 +25,21 @@ export default function LivePage() {
   const open = d?.groups.filter((g) => g.status === 'OPEN') ?? [];
   const closed = d?.groups.filter((g) => g.status === 'CLOSED') ?? [];
   const msLeft = s.profile?.expiresAtMs ? s.profile.expiresAtMs - s.now : null;
+
+  // Algo Live trades show the same two prices as Algo Live and the Order Book (they know the stock's liquidity)
+  const [algo, setAlgo] = useState<Record<string, { at90: number; moveStop: number }>>({});
+  const hasOpen = open.length > 0;
+  useEffect(() => {
+    if (!hasOpen) return;
+    const load = () => fetch('/api/algo-live/state', { headers: { 'x-dhan-token': token ?? '' }, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (!j) return;
+      const orders = (j.state?.orders ?? []) as { correlationId: string; symbol: string; status: string }[];
+      setAlgo(Object.fromEntries(orders.filter((o) => j.levels?.[o.correlationId] && !/REJECT|CANCEL|ERROR|NOT_SENT/i.test(o.status)).map((o) => [o.symbol, j.levels[o.correlationId]])));
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 30_000);
+    return () => clearInterval(t);
+  }, [hasOpen, token]);
 
   const renew = async () => {
     setRenewing(true); setRenewMsg('');
@@ -108,7 +123,7 @@ export default function LivePage() {
               <div className="flex items-end"><Button variant="outline" size="sm" onClick={s.syncNow}><RefreshCcw className="w-3 h-3 mr-2" />Sync now</Button></div>
             </div>
 
-            {open.length > 0 && <section className="space-y-4"><h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">In progress</h2>{open.map((t) => <OpenTradeCard key={t.id} t={t} now={s.now} />)}</section>}
+            {open.length > 0 && <section className="space-y-4"><h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">In progress</h2>{open.map((t) => <OpenTradeCard key={t.id} t={t} now={s.now} algo={algo[t.symbol]} />)}</section>}
 
             <section className="space-y-4"><h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Completed today</h2><ClosedTable rows={closed} /></section>
 
