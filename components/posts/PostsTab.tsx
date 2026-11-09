@@ -8,7 +8,7 @@ import { dayHook, positionCards, finalOf, type AlgoCompare } from '@/lib/pnlCurv
 import { positionsFromRows, type CurveMode, type JournalRow } from '@/lib/pnlCurve/curve';
 import { hhmm, inr } from '@/lib/pnlCurve/draw';
 import { CHART_CSS_H, CHART_CSS_W, STORY_H, cardSlide, chartSlide, curveSlide, niceDate, storyFrame, toJpeg } from '@/lib/pnlCurve/slides';
-import { storiesToSend } from '@/lib/posts/stories';
+import { steady, storiesToSend } from '@/lib/posts/stories';
 import type { PostsState } from '@/lib/posts/publish';
 
 /**
@@ -23,6 +23,8 @@ const CHANNEL_POSTS = 'https://www.youtube.com/@CandlesBeforeCubicles/posts';
 const MAX_CHARTS = 8; // Instagram allows 10 images in a post
 const STORY_GAP_MS = 4000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** How long Instagram gets to process one Story, across all the checks. */
+const STORY_WAIT_MS = 150_000;
 
 interface Slide { name: string; label: string; canvas: HTMLCanvasElement; url: string }
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -143,6 +145,24 @@ export default function PostsTab() {
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
     finally { setSending(''); }
   };
+  /** one Story image, in short steps: every step can be repeated without posting twice (lib/posts/publish.ts) */
+  const postStory = async (slide: string, jpeg: string, again: boolean) => {
+    const up = await steady('Uploading the image', '/api/posts/upload', { date: today, name: slide, image: jpeg }, 45_000);
+    if (!up.ok) throw new Error((await up.json().catch(() => ({}))).message ?? `HTTP ${up.status}`);
+    const step = async (name: string, body: Record<string, unknown>) => {
+      const r = await steady(name, '/api/posts/publish', { date: today, slide, ...body }, 25_000);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+      setState(j.state as PostsState);
+      return j as { done: boolean };
+    };
+    if ((await step('Sending to Instagram', { kind: 'story-start', again })).done) return;
+    const until = Date.now() + STORY_WAIT_MS;
+    while (!(await step('Publishing', { kind: 'story-finish' })).done) {
+      if (Date.now() > until) throw new Error('Instagram is still processing it. Press Post Story again in a minute: it will not post twice.');
+      await sleep(2500);
+    }
+  };
   const sendStories = async () => {
     const chosen = slides.filter((s) => stories[s.name]);
     if (!chosen.length) { setStoryMsg({ ok: false, text: 'Tick at least one image for the Story.' }); return; }
@@ -152,19 +172,21 @@ export default function PostsTab() {
     if (again && !window.confirm('These Stories are already up today. Post them again?')) return;
     const toSend = chosen.filter((s) => again || pending.includes(s.name));
     setSending('story'); setStoryMsg(null);
+    // a phone that sleeps cuts the connection: keep the screen on while posting (where the browser allows it)
+    const awake = await navigator.wakeLock?.request('screen').catch(() => null);
     const posted: string[] = [], failed: string[] = [];
     for (const [i, s] of toSend.entries()) {
       if (i) await sleep(STORY_GAP_MS); // Instagram can refuse a publish right after the last one
       const frame = s.name === 'curve' && curve ? curveSlide(curve, mode, STORY_H) : s.name === 'positions' && curve ? cardSlide(cards, curve, mode, algo ?? [], STORY_H) : storyFrame(s.canvas);
-      const send = async () => { await upload(`story-${s.name}`, toJpeg(frame)); await publish({ kind: 'story', slide: `story-${s.name}`, again }); };
       try {
-        await send().catch(async () => { await sleep(STORY_GAP_MS); await send(); }); // one more try
+        await postStory(`story-${s.name}`, toJpeg(frame), again);
         posted.push(s.label);
       } catch (e) { failed.push(`${s.label}: ${(e as Error).message}`); }
     }
     setStoryMsg(failed.length
       ? { ok: false, text: `${posted.length ? `Posted: ${posted.join(', ')}. ` : ''}Not posted: ${failed.join(' · ')} Press Post Story to send only the missing ones.` }
       : { ok: true, text: `Posted: ${posted.join(', ')}.` });
+    void awake?.release().catch(() => undefined);
     setSending('');
   };
   const copy = async () => {
