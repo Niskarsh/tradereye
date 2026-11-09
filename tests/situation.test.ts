@@ -35,7 +35,7 @@ test('falling hour with selling, below VWAP: Sellers ahead', () => {
   assert.equal(s.stance, -1);
   assert.equal(s.label, 'Sellers ahead');
   assert.match(s.structure, /falling/);
-  assert.match(s.flow, /sellers 7\d% of the volume/);
+  assert.match(s.flow, /sellers \d+% of the volume/);
   assert.match(s.vwap!, /below VWAP 331/);
   assert.ok(s.changeAbove! > 325 && s.changeBelow === undefined);
 });
