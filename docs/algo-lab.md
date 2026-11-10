@@ -115,3 +115,17 @@ written.
      keeps going at 1 Dhan request a second in that window, leaving Algo Live the other 4, and backs off on Dhan's rate-limit
      reply). NSE holidays (`NSE_HOLIDAYS`, add each year's list in December) run at full speed with no override; with the override on, a
      holiday missing from the list is caught from 09:20 by one Nifty 500 request (no candles today). It will not start during a backtest, because all of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.
+13. **Does iteration 12's edge hold at the size of the ₹1 lakh a month goal?** (same workflow and Run button; iteration 12
+   stays under its git tag) Iteration 12: ₹250–1000 all +0.12R (t 4.7, exam Pass) against the ₹250–340 control's −0.01R, but
+   every liquidity floor halved it, so part of the edge sits in thinner stocks, where size hurts most.
+   - The size: ~+0.15R a trade × ~30 trades a month → ₹1 lakh a month needs ~₹22,000 risk a trade, a ~₹10 lakh position.
+   - Each trade priced at that size (`add_stress`): real fills + big-position charges (`nbS3 − nbS`: the same old fills at
+     ~₹3 lakh and at ₹300 risk differ only in charges) − market impact `1.25 × √(order ÷ daily turnover)` R (square-root rule,
+     0.5 × daily volatility per side, volatility ≈ usual range ÷ 1.6, on a stop of half the range). Thin stocks are not cut
+     out; they cost what they would cost. Versions: ₹300 risk (`wAll`), ₹10 lakh (`wT10`, the test), ₹15 lakh (`wT15`, ₹1.5 lakh a month), ₹20 lakh (`wT20`); the goal is ₹1–1.5 lakh a month in total;
+     the ₹250–340 control the same way (`nF`, `nT10`). Same model; the bar is set again on each version's costs.
+   - ETFs left out of the dataset (`etfSymbols`: Dhan's instrument type, the fund name, the symbol; the run log lists them).
+   - 2 a day and 2 a side set globally and checked on every trade after the run (`check_cap`; the job fails otherwise).
+   - Rule fixed before the run (`wideVerdict`): `wT10` makes +0.04R, t ≥ 2, 150+ trades; its draw average beats `nT10`'s
+     best draw; more R in total than `nT10`; exam profitable; placebo clean. All five, or not a candidate for Algo Live. The
+     page also shows `wT10` in rupees a month at ₹10 lakh positions and the position ₹1 lakh a month would need.

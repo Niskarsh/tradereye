@@ -7,7 +7,7 @@ import { getJson, monthKey, putJson, type RunStatus, type Store } from '../setup
 import { NIFTY500 } from '../setups/job';
 import { gridDay } from './grid';
 import { GridWriter } from './writer';
-import { inLiveWindow, istDate, istMinute, wideDays, type WideDay } from './wide';
+import { etfSymbols, inLiveWindow, istDate, istMinute, wideDays, type WideDay } from './wide';
 
 /**
  * Algo Lab iteration 12, step 1: the dataset for the wide universe (lib/ml/wide.ts), written to disk for the model jobs.
@@ -97,9 +97,12 @@ export async function runWideGrid(runId: string, startedAt: number, deps: WideDe
   };
 
   await status('Reading the NSE equity list', undefined, undefined, true);
-  const master = parseScripMaster(await deps.fetchText(SCRIP_MASTER_URL));
-  const universe = [...master.entries()].filter(([s, id]) => id && (!deps.onlySymbols || deps.onlySymbols.includes(s))).map(([symbol, securityId]) => ({ symbol, securityId }));
-  log(`equities: ${universe.length}`);
+  const csv = await deps.fetchText(SCRIP_MASTER_URL);
+  const master = parseScripMaster(csv), etfs = etfSymbols(csv);
+  const all = [...master.entries()].filter(([s, id]) => id && (!deps.onlySymbols || deps.onlySymbols.includes(s)));
+  const universe = all.filter(([s]) => !etfs.has(s)).map(([symbol, securityId]) => ({ symbol, securityId }));
+  const dropped = all.filter(([s]) => etfs.has(s)).map(([s]) => s).sort();
+  log(`equities: ${universe.length} (left out ${dropped.length} ETFs: ${dropped.join(' ')})`);
 
   const today = new Date(now() + IST).toISOString().slice(0, 10);
   const fromAll = deps.from ?? WIDE_FROM;
