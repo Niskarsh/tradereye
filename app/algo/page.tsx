@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
 import { WideRunCard } from '@/components/algo/WideRunCard';
 import type { WideCell } from '@/lib/ml/wide';
+import { exportFileName, mlToMarkdown, type ExportMl } from '@/lib/ml/exportMd';
 
 /**
  * Algo Lab: walk-forward machine learning on every 10-min close of every stock in his price range
@@ -726,6 +727,23 @@ function WideCard({ ml }: { ml: Ml }) {
   );
 }
 
+/** saves the iteration open on the page, every version, as one Markdown file to attach in a chat with Claude */
+function DownloadResults({ ml }: { ml: Ml }) {
+  const save = () => {
+    const blob = new Blob([mlToMarkdown(ml as unknown as ExportMl)], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = exportFileName(ml);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  return (
+    <button onClick={save} className="flex h-10 items-center gap-2 rounded-xl border border-brand-accent px-4 text-xs font-black text-brand-accent">
+      Download iteration {ml.iteration} (all versions, .md)
+    </button>
+  );
+}
+
 export default function AlgoPage() {
   const [ml, setMl] = useState<Ml | null | undefined>(undefined);
   const [history, setHistory] = useState<Head[]>([]);
@@ -759,6 +777,7 @@ export default function AlgoPage() {
           <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">Machine learning on every stock, every 10 minutes · trained on the past, tested month by month on what it had not seen</p>
         </header>
         {(history.length > 0 || live) && <Picker history={history} live={live} ml={ml} run={run ?? ''} open={open} />}
+        {ml && <div className="flex justify-end"><DownloadResults ml={ml} /></div>}
         <WideRunCard onDone={() => setReload((n) => n + 1)} />
         {err && <p className="text-xs text-data-red-text">{err}</p>}
         {ml === undefined && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>}
