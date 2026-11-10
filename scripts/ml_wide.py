@@ -1,19 +1,14 @@
 """
-Algo Lab iteration 15 (the wide-universe workflow): does iteration 14's region (₹50-170 crore a day, 3-4 trades a day) hold
-as a block, at which position size does it make the most rupees, and do shorts fail when the market has run up?
+Algo Lab iteration 16 (the wide-universe workflow): iteration 15's pick (₹10 lakh, ₹100 crore+ a day, 3 a day, market gate)
+held as a block but loses half its edge to costs at ₹10 lakh. Does sizing each trade by the stock's own liquidity make more a
+month, and does standing aside after 3 losing months cost money (so Algo Live could trade months like November 2026)?
 
-    python scripts/ml_wide.py <dir> <narrow | wide | ladder> <main | seed2 | ...>     writes <dir>/wide-<universe>-<shard>.json
+    python scripts/ml_wide.py <dir> <narrow | wide> <main | seed2 | ...>     writes <dir>/wide-<universe>-<shard>.json
 
-'wide' is the block at ₹10 lakh (₹50 / 100 / 170 crore a day x 3 / 4 a day), the same block with the market gate, and the
-placebo at the pick's own settings; 'ladder' is the block at ₹5, 8, 12 and 15 lakh (main draw only); 'narrow' the ₹250-340
-control. Each process trains one model (same label, same seeds), so a version costs only its own picking. Iterations 12-14
-are kept as they ran under their git tags (algo-iter-<n>-*).
-
-It runs ml_walkforward.py's own pipeline, unchanged, with this iteration's settings put in from here. ml_walkforward.py
-itself is not edited: the normal backtest Re-run and the monthly Algo Live model (scripts/ml_live.py) read it and stay as
-they are.
-
-No strategy id here is 'fCap2': the pages that follow the live strategy look for that id and must never find this run.
+'wide' is the fixed ₹10 lakh references, the liquidity-sized versions (a set share of the stock's daily turnover, ₹1-25 lakh),
+their "never stand aside" twins and the placebo, with the training draws; 'narrow' the ₹250-340 control. Each process trains
+one model (same label, same seeds), so a version costs only its own picking. Iterations 12-15 are kept as they ran under their
+git tags (algo-iter-<n>-*).
 """
 import json
 import os
@@ -25,31 +20,33 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(__file__))
 import ml_walkforward as ml  # noqa: E402
 
-ITERATION = 15
+ITERATION = 16
 MAX_CAP = 4  # the most trades a day any version may take (2 and 2 a side for Algo Live today): checked after the run
 
 CHANGES = [
-    'Iteration 14: ₹10 lakh positions, ₹100 crore+ a day, 4 a day passed its rule (+0.08R, t 4.2, 3.9R a month, about ₹90,000 a month; untouched 2022 +0.13R). But the exam was weak: only 4 of 27 cells were profitable on it, two of the pick\'s neighbours lost there (₹100 cr at 3 a day -7.6R, ₹170 cr at 4 a day -19R), July-September 2026 lost almost everywhere, and the pick stood aside in October and November. The neighbour rule was applied to the decide months, not to the exam.',
-    'So this iteration stops searching cells and judges the region as a block: ₹50, 100 and 170 crore a day x 3 and 4 a day, the pick and its neighbours. Size-aware picking (+0.04R) and the far floors are dropped.',
-    'Size ladder: the same block at ₹5, 8, 10, 12 and 15 lakh positions. A bigger order makes more rupees a trade but pays more market impact; the rule picks the size that makes the most rupees a month, which answers how close the ₹1-1.5 lakh goal is.',
-    'Market gate: the market\'s 20-day move is the median 20-day move of every stock in the dataset at the first minute of the day (known before entries). The gated block stands aside on days when it is in the top third of its own last 250 trading days (at least 60 days of history; before that the gate is off). Fixed before the run, not tuned. Every version also reports its decide-month R by the third the day falls in, and how many exam days were in the top third.',
-    'The placebo now runs at the pick\'s own settings (₹10 lakh, ₹100 crore+ a day, 4 a day) instead of ₹300 risk on all stocks.',
-    'No daily loss stop is modelled: the dataset has no exit times, so a stop on the day\'s losses would use results not known yet. Each version reports how many decide days lost 2R or 3R or more instead.',
-    'Rule fixed before this run, decide months: a block (6 cells at one size, gated or not) holds if at least 5 of its 6 cells make +0.05R a trade, t 2+ and 150+ trades, AND at least 4 of 6 are profitable on the exam months. The ₹10 lakh block\'s average over 5 training draws must beat the ₹250-340 control\'s best draw, and the placebo must show no edge. The pick: from the blocks that hold, the cell that is solid on its own (+0.05R, t 2+, 150+ trades, 50+ stocks a day, exam profitable) making the most rupees a month at its size, and more R a month than the control. Otherwise Algo Live stays as it is.',
+    'Iteration 15: the ₹10 lakh block with the market gate held (5 of 6 cells good on the decide months, 4 of 6 profitable on the exam); the pick, ₹100 crore+ a day, 3 a day, gated, made +0.09R (t 3.5, about ₹55,000 a month; draws +0.04 to +0.09R). ₹100 crore+ was the best floor at every size, 3 a day beat 4, ₹50 crore failed the exam everywhere. But costs eat about half the edge at ₹10 lakh (+0.17R before costs), 2026 was about flat after costs, the same version moved by about ±0.03R between runs, and the pick stood aside in October and November 2026.',
+    'Liquidity sizing: each trade is a set share of the stock\'s own daily turnover (0.05%, 0.1%, 0.2% or 0.3%), at least ₹1 lakh and at most ₹25 lakh. Market impact is then the same in R for every stock (1.25 x the square root of the share), and a liquid stock simply takes a bigger order. Every version reports its rupees a trade and a month from its own positions, not a flat size.',
+    'Never stand aside: each month the bar is the one that did best on the 3 months before; if even that lost, the version stands aside. A "_ns" twin trades that best bar anyway. If the decide months it would have stood aside made money, standing aside costs us, and Algo Live could trade months like November.',
+    'The versions: ₹100 and ₹170 crore a day, 3 a day, with and without the gate, at each share; the fixed ₹10 lakh ₹100 crore 3 a day references (iteration 15\'s pick and its ungated twin); "_ns" twins of every ₹100 crore version; the placebo at the reference\'s settings. The ₹5-15 lakh ladder and 4 a day are dropped.',
+    'Rule fixed before this run, decide months: a liquidity-sized version at ₹100 crore+ wins if it is solid (+0.05R a trade, t 2+, 150+ trades, 50+ stocks a day, exam profitable), at least 2 of its 3 neighbours (the next share up and down, and ₹170 crore at the same share, same gate) are profitable on the decide months and the exam, its draw average beats the ₹250-340 control\'s best draw, it makes more rupees a month than iteration 15\'s pick in this run with its exam months also positive in rupees, and the placebo is clean. Of those, the most rupees a month wins; if none does, iteration 15\'s pick stays the pick. Standing aside is dropped for the pick only if its "_ns" twin made money on the decide months the pick stood aside, and its exam is profitable too.',
 ]
 
-TARGET_POS = {f'T{k}': k * 100_000 for k in (5, 8, 10, 12, 15)}  # ₹5, 8, 10, 12, 15 lakh positions
+TARGET_POS = {'T10': 1_000_000}  # the fixed ₹10 lakh references (iteration 15's pick)
 # Square-root impact (the rule desks use): each side costs ~0.5 x daily volatility x sqrt(order / daily turnover), daily
 # volatility ~ the usual daily range / 1.6. On a stop of half that range, entry + exit come to 1.25 x sqrt(order / turnover)
 # in R, whatever the stock's volatility: ₹10 lakh in a ₹20 crore a day stock ~0.09R, in a ₹100 crore one ~0.04R.
 IMPACT_K = 1.25
 REF_PRICE = 340  # lib/ml/grid.ts WIDE_REF_PRICE: avgVol is shares scaled to a ₹340 stock above it
-FLOORS_CR = [50, 100, 170]  # the block: iteration 14's pick (₹100 cr, 4 a day) and its neighbours
-CAPS = [3, 4]
-LADDER = [5, 8, 12, 15]  # ₹10 lakh is in 'wide', with the training draws
+FLOORS_CR = [100, 170]  # iteration 15's best floor and its neighbour (₹50 crore failed the exam at every size)
+CAP = 3                 # 3 a day beat 4 at every size in iteration 15
 MIN_POOL = 50
 GATE_DAYS, GATE_MIN, GATE_Q = 250, 60, 2 / 3  # the market gate: top third of the last 250 days, 60 days of history at least
-PLACEBO_AT = {'size': 10, 'floor': 100, 'cap': 4}
+# liquidity sizing: a position is this share of the stock's daily turnover, between POS_MIN and POS_MAX rupees
+SHARES_BP = [5, 10, 20, 30]  # basis points of daily turnover: 0.05%, 0.1%, 0.2%, 0.3%
+POS_MIN, POS_MAX = 100_000, 2_500_000
+LEVERAGE = 5  # intraday margin, for the capital a day's positions need
+REF = 'w10_f100_c3_g'  # iteration 15's pick
+PLACEBO_AT = {'size': 10, 'floor': 100, 'cap': 3, 'gate': True}
 
 
 def sid(size, floor, cap, gate=False):
@@ -57,15 +54,30 @@ def sid(size, floor, cap, gate=False):
     return f'w{size}_f{floor}_c{cap}' + ('_g' if gate else '')
 
 
-def block(size, gate=False):
-    out = []
-    for cap in CAPS:
-        for f in FLOORS_CR:
-            out.append({**ml._REAL, 'id': sid(size, f, cap, gate), 'S': f'nbSx_t{size}', 'cap': cap, 'minTurnover': f * 1e7, 'gate': gate,
-                        'name': f'₹{size} lakh · ₹{f:,} cr+ a day · {cap} a day' + (' · market gate' if gate else ''),
-                        'desc': f'F on ₹250-1000 stocks trading at least ₹{f:,} crore a day, up to {cap} trades a day, priced at ₹{size} lakh positions (big-position charges and market impact).'
-                                + (' Stands aside on days the market\'s 20-day move is in the top third of its last 250 days.' if gate else '')})
-    return out
+def lid(bp, floor, gate=False, ns=False):
+    """l10_f100_c3_g: each position 0.10% of the stock's daily turnover (₹1-25 lakh), ₹100 crore a day floor, 3 a day, the
+    market gate; _ns = never stands aside"""
+    return f'l{bp}_f{floor}_c{CAP}' + ('_g' if gate else '') + ('_ns' if ns else '')
+
+
+def gate_desc(gate):
+    return ' Stands aside on days the market\'s 20-day move is in the top third of its last 250 days.' if gate else ''
+
+
+NS_DESC = ' Never stands aside: in a month where even the best bar of the 3 months before lost, it trades that bar anyway.'
+
+
+def fixed(floor, gate=False, ns=False):
+    i = sid(10, floor, CAP, gate) + ('_ns' if ns else '')
+    return {**ml._REAL, 'id': i, 'S': 'nbSx_t10', 'cap': CAP, 'minTurnover': floor * 1e7, 'gate': gate, 'ns': ns, 'posFixed': 1_000_000,
+            'name': f'₹10 lakh · ₹{floor} cr+ a day · {CAP} a day' + (' · market gate' if gate else '') + (' · never stands aside' if ns else ''),
+            'desc': f'F on ₹250-1000 stocks trading at least ₹{floor} crore a day, up to {CAP} trades a day, priced at ₹10 lakh positions.' + gate_desc(gate) + (NS_DESC if ns else '')}
+
+
+def liquid(bp, floor, gate=False, ns=False):
+    return {**ml._REAL, 'id': lid(bp, floor, gate, ns), 'S': f'nbSx_l{bp}', 'cap': CAP, 'minTurnover': floor * 1e7, 'gate': gate, 'ns': ns, 'posShare': bp / 10_000,
+            'name': f'{bp / 100:.2f}% of turnover · ₹{floor} cr+ a day · {CAP} a day' + (' · market gate' if gate else '') + (' · never stands aside' if ns else ''),
+            'desc': f'F on ₹250-1000 stocks trading at least ₹{floor} crore a day, up to {CAP} a day; each position is {bp / 100:.2f}% of the stock\'s daily turnover, ₹1-25 lakh, priced with the charges and market impact of that order.' + gate_desc(gate) + (NS_DESC if ns else '')}
 
 
 NARROW = [
@@ -73,14 +85,16 @@ NARROW = [
     {**ml._REAL, 'id': 'nT10', 'S': 'nbSx_t10', 'name': '₹250–340 (control), ₹10 lakh positions', 'desc': 'The same at the ₹1 lakh a month size: big-position charges and the market impact of a ₹10 lakh order.'},
 ]
 WIDE = [
-    *block(10),
-    *block(10, gate=True),
+    fixed(100), fixed(100, gate=True),
+    *[liquid(bp, f, g) for g in (False, True) for f in FLOORS_CR for bp in SHARES_BP],
+    fixed(100, ns=True), fixed(100, gate=True, ns=True),
+    *[liquid(bp, 100, g, ns=True) for g in (False, True) for bp in SHARES_BP],
     {**ml._REAL, 'id': 'placebo', 'yS': 'nbS_shuf', 'S': f"nbSx_t{PLACEBO_AT['size']}", 'cap': PLACEBO_AT['cap'], 'minTurnover': PLACEBO_AT['floor'] * 1e7,
-     'name': f"Placebo, ₹{PLACEBO_AT['size']} lakh · ₹{PLACEBO_AT['floor']} cr+ · {PLACEBO_AT['cap']} a day (shuffled outcomes)",
-     'desc': 'Learned from outcomes shuffled among stocks of the same month and minute, priced and limited like the ₹10 lakh block. Traded on the real outcomes: it must show no edge.'},
+     'gate': PLACEBO_AT['gate'], 'posFixed': PLACEBO_AT['size'] * 100_000,
+     'name': f"Placebo, ₹{PLACEBO_AT['size']} lakh · ₹{PLACEBO_AT['floor']} cr+ · {PLACEBO_AT['cap']} a day · market gate (shuffled outcomes)",
+     'desc': 'Learned from outcomes shuffled among stocks of the same month and minute, priced and limited like iteration 15\'s pick. Traded on the real outcomes: it must show no edge.'},
 ]
-LADDER_ST = [s_ for size in LADDER for s_ in block(size)]
-UNIVERSES = {'narrow': NARROW, 'wide': WIDE, 'ladder': LADDER_ST}
+UNIVERSES = {'narrow': NARROW, 'wide': WIDE}
 # the liquidity measure here is shares scaled to a ₹340 stock (lib/ml/grid.ts wideVol), so these are rupees a day
 BANDS = [(0, '₹17–100 cr'), (3e6, '₹100–170 cr'), (5e6, '₹170–240 cr'), (7e6, '₹240–340 cr'), (10e6, '₹340 cr+')]
 
@@ -106,10 +120,32 @@ def add_stress(df):
     big = df['nbSx'].values + (df['nbS3'].values - df['nbS'].values)
     for key, pos in TARGET_POS.items():
         df[f'nbSx_{key.lower()}'] = big - impact_r(df, pos)
+    for bp in SHARES_BP:
+        df[f'nbSx_l{bp}'] = big - impact_r(df, position_rs(df, bp / 10_000))
     return df
 
 
+def position_rs(df, share):
+    """the liquidity-sized position: `share` of the stock's daily turnover, between POS_MIN and POS_MAX (a row without its
+    turnover: the typical one)"""
+    v = turnover_rs(df)
+    ok = np.isfinite(v) & (v > 0)
+    fallback = float(np.median(v[ok])) if ok.any() else 1e9
+    return np.clip(share * np.where(ok, v, fallback), POS_MIN, POS_MAX)
+
+
 _allowed = ml.allowed
+_choose_bar = ml.choose_bar
+
+
+def choose_bar(vpart, vl, vs, st):
+    """ml_walkforward's bar; a '_ns' version never stands aside: it trades the best bar of the months before even if it lost"""
+    thr, total = _choose_bar(vpart, vl, vs, st)
+    if st.get('ns') and thr is not None and not total > 0:
+        return thr, 1e-9
+    return thr, total
+
+
 
 
 def allowed(part, pl, ps, st):
@@ -151,13 +187,14 @@ def configure(universe, shard):
     ml.ITERATION = ITERATION
     ml.CHANGES = CHANGES
     ml.BANDS = BANDS
-    ml.MAX_PER_DAY = MAX_CAP
-    ml.MAX_PER_SIDE = MAX_CAP
+    ml.MAX_PER_DAY = CAP
+    ml.MAX_PER_SIDE = CAP
     ml.allowed = allowed
+    ml.choose_bar = choose_bar
     ml.SHARD = shard
     ml.SEED_OFF = 0 if shard == 'main' else int(shard.replace('seed', '') or 0)
     ml.STRATEGIES = strategies if shard == 'main' else [s for s in strategies if s['id'] != 'placebo']
-    ml.LOCKED = {'narrow': 'nT10', 'wide': sid(10, 100, 4), 'ladder': sid(5, 100, 4)}[universe]
+    ml.LOCKED = {'narrow': 'nT10', 'wide': REF}[universe]
     ml.VOL_ORDER = [ml.LOCKED]
     ml.UNTOUCHED = [s['id'] for s in strategies if s['id'] != 'placebo']
     ml._UNTOUCHED_MODELS.clear()
@@ -203,7 +240,7 @@ def pools(df):
     return out
 
 
-def diagnostics(res, df):
+def diagnostics(res, df, symbols=None):
     """per version: decide-month R by the third of the market's 20-day move the day fell in, the share of exam days in the top
     third, and how many decide days lost 2R / 3R or more (what a daily loss limit would have faced)"""
     mkt = market_move(df)
@@ -237,7 +274,75 @@ def diagnostics(res, df):
             days[t[i_day]] = days.get(t[i_day], 0.0) + float(t[i_net])
         vals = list(days.values())
         s['badDays'] = {'days': len(vals), 'le2': sum(v <= -2 for v in vals), 'le3': sum(v <= -3 for v in vals)}
+    rupees(res, df, symbols)
     return res
+
+
+def rupees(res, df, symbols=None):
+    """each version's rupees from its own positions (fixed ₹10 lakh, or its share of the stock's turnover), its risk a trade =
+    position x stop (half the usual daily range); per decide and exam month, the capital the busiest day needed, and for a
+    '_ns' twin what the months its base stood aside made"""
+    ef = (res.get('examFrom') or ml.EXAM_FROM)[:7]
+    first = df[df['slot'].values == df['slot'].min()]
+    name = (lambda c: symbols[int(c)]) if symbols else (lambda c: c)  # trades carry the symbol, the dataset its index
+    look = {(d_, name(s_)): (v, a) for d_, s_, v, a in zip(first['day'].values, first['sym'].values, turnover_rs(first), first['adrPct'].values)}
+    fallback_v = float(np.nanmedian(turnover_rs(first))) if len(first) else 1e9
+    conf = {st['id']: st for u in UNIVERSES.values() for st in u}
+    by_id = {s['id']: s for s in res['strategies']}
+    for s in res['strategies']:
+        st = conf.get(s['id'], {})
+        cols = s.get('tradeCols', ['day', 'sym', 'time', 'side', 'pred', 'net'])
+        i_day, i_sym, i_net = cols.index('day'), cols.index('sym'), cols.index('net')
+        mon = [m for m in s.get('months', []) if m.get('month')]
+        n_dec = sum(1 for m in mon if ml.DECIDE_FROM[:7] <= m['month'][:7] < ef) or 1
+        n_ex = sum(1 for m in mon if ef <= m['month'][:7] < getattr(ml, 'SHADOW_FROM', '9999')) or 1
+        dec_rs = ex_rs = 0.0
+        pos_sum, n_pos, risk_sum = 0.0, 0, 0.0
+        day_pos = {}
+        rs_by_trade = []
+        for t in s['trades']:
+            if t[i_net] is None:
+                rs_by_trade.append(0.0)
+                continue
+            v, adr = look.get((t[i_day], t[i_sym]), (fallback_v, np.nan))
+            v = v if np.isfinite(v) and v > 0 else fallback_v
+            if st.get('posShare'):
+                pos = float(np.clip(st['posShare'] * v, POS_MIN, POS_MAX))
+            else:
+                pos = float(st.get('posFixed') or 0)
+            stop = (adr / 2) if np.isfinite(adr) and adr > 0 else 2.3
+            risk = pos * stop / 100
+            r = float(t[i_net]) * risk
+            rs_by_trade.append(r)
+            m = t[i_day][:7]
+            if m < ef:
+                dec_rs += r
+                pos_sum += pos
+                risk_sum += risk
+                n_pos += 1
+                day_pos[t[i_day]] = day_pos.get(t[i_day], 0.0) + pos
+            elif m < getattr(ml, 'SHADOW_FROM', '9999'):
+                ex_rs += r
+        s['inr'] = {
+            'perMonth': round(dec_rs / n_dec), 'examPerMonth': round(ex_rs / n_ex),
+            'avgPosition': round(pos_sum / n_pos) if n_pos else None, 'avgRisk': round(risk_sum / n_pos) if n_pos else None,
+            'capital': round(max(day_pos.values(), default=0) / LEVERAGE),
+        }
+        s['_rs'] = rs_by_trade
+    for s in res['strategies']:
+        if not s['id'].endswith('_ns') or s['id'][:-3] not in by_id:
+            continue
+        base = by_id[s['id'][:-3]]
+        aside = {m['month'][:7] for m in base.get('months', []) if m.get('note')}
+        cols = s.get('tradeCols', ['day', 'sym', 'time', 'side', 'pred', 'net'])
+        i_day, i_net = cols.index('day'), cols.index('net')
+        out = {}
+        for part, keep in (('decide', lambda m: m < ef), ('exam', lambda m: ef <= m < getattr(ml, 'SHADOW_FROM', '9999'))):
+            xs = [(float(t[i_net]), r) for t, r in zip(s['trades'], s['_rs']) if t[i_net] is not None and t[i_day][:7] in aside and keep(t[i_day][:7])]
+            out[part] = {'months': len({m for m in aside if keep(m)}), 'n': len(xs), 'sumR': round(sum(x for x, _ in xs), 2), 'rupees': round(sum(r for _, r in xs))}
+        s['nsCheck'] = {'base': base['id'], **out}
+    for s in res['strategies']:
+        s.pop('_rs', None)
 
 
 def main(d, universe, shard):
@@ -248,8 +353,8 @@ def main(d, universe, shard):
     made = os.path.join(d, 'ml.json' if shard == 'main' else f'ml-{shard}.json')
     res = json.load(open(made))
     check_cap(res)
-    _, df = ml.load(d)
-    diagnostics(res, df)
+    head, df = ml.load(d)
+    diagnostics(res, df, head.get('symbols'))
     if universe == 'narrow':  # the stocks it actually had, not the whole dataset's list
         res['stocks'] = int(df['sym'].nunique())
     else:

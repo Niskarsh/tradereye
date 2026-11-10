@@ -162,4 +162,22 @@ written.
      it makes more R a month than `nT10` and the placebo is clean. Otherwise Algo Live stays as it is. On iteration 14's
      numbers the ₹10 lakh block would not hold (2 of 6 cells profitable on the exam).
    - The workflow's tag now takes the iteration from scripts/ml_wide.py (iterations 13 and 14 were tagged `algo-iter-12-*`).
+16. **Does liquidity sizing pay more, and does standing aside cost money?** (same workflow and Run button; iteration 15
+   stays under its git tag) Iteration 15's pick (₹10 lakh, ₹100 crore+, 3 a day, market gate: +0.09R, ≈ ₹55,000 a month)
+   held as a block, but at ₹10 lakh costs take about half the edge, and it stood aside in October and November 2026.
+   - Liquidity sizing (`SHARES_BP`, `position_rs`): each position is 0.05 / 0.1 / 0.2 / 0.3% of the stock's daily turnover,
+     between ₹1 and ₹25 lakh, priced with that order's charges and impact (label `nbSx_l<bp>`). Impact in R is then the same
+     for every stock between the bounds. Every version reports rupees from its own positions (`inr`: decide and exam months,
+     average position and risk, the busiest day's margin at 5x).
+   - Never stand aside (`choose_bar`): the `_ns` twin trades the best bar of the 3 months before even when it lost. Its
+     `nsCheck` says what the months its base stood aside made.
+   - Versions (job `wide`, 5 draws): `w10_f100_c3` and `w10_f100_c3_g` (iteration 15's pick); `l<bp>_f<100|170>_c3[_g]`;
+     `_ns` twins of every ₹100 crore version; the placebo at the pick's settings. 4 a day, ₹50 crore and the size ladder
+     are dropped.
+   - Rule fixed before the run (`wideVerdict`; iteration 15's is `wideVerdict15`): a liquidity-sized ₹100 crore version wins
+     if it is solid (+0.05R, t ≥ 2, 150+ trades, 50+ stocks a day, exam profitable), 2 of its 3 neighbours (next share up and
+     down, ₹170 crore at the same share, same gate) are profitable on the decide months and the exam, its draw average beats
+     `nT10`'s best draw, it makes more rupees a month than `w10_f100_c3_g` in this run with positive exam rupees, and the
+     placebo is clean; the most rupees a month wins, else iteration 15's pick stays. The stand-aside is dropped for the pick
+     only if its `_ns` twin made money (R) on the decide months the pick stood aside and the twin's exam is profitable.
 
