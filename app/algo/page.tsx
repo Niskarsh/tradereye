@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
+import { WideRunCard } from '@/components/algo/WideRunCard';
 
 /**
  * Algo Lab: walk-forward machine learning on every 10-min close of every stock in his price range
@@ -9,6 +10,12 @@ import { Card, pct, rr } from '@/components/setups/parts';
  * Each run is one iteration; the table at the top keeps every iteration so far, so luck from trying many things shows.
  */
 
+interface WideLine { id: string; name: string; netR: number; t: number; n: number; sumR: number }
+interface WideResult {
+  outcome: 'better' | 'not-better' | 'incomplete'; message: string; rule: { netR: number; t: number; n: number };
+  pick: WideLine | null; control: WideLine | null; narrowDraws: { shard: string; netR: number }[]; wideDraws: { shard: string; netR: number }[]; wideMean: number | null;
+  checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean };
+}
 interface S { n: number; hit: number; netR: number; gross: number; sumR: number; inr: number; t: number }
 interface P extends S { monthsGreen: number; monthsTraded: number; monthsTotal: number }
 interface Month extends S { month: string; thr: number | null; note: string; ic: number | null; exam: boolean; baseL: number; baseS: number }
@@ -41,6 +48,8 @@ interface Ml {
   noise?: { strategy: string; draws: { draw: string; n: number; netR: number; t: number; devNetR: number; devT: number; devGreen: [number, number] }[]; devMin: number; devMax: number; devMean: number };
   management?: Mgmt[]; managementError?: string;
   noiseAll?: Noise[];
+  wide?: WideResult;
+  narrowStocks?: number;
   volChoice?: { id: string | null; name: string | null; rule: { netR: number; t: number; n: number }; order: string[]; tried: { id: string; name: string; netR: number; t: number; n: number; perMonth?: number | null; ok: boolean }[] } | null;
   capChoice?: { id: string | null; name: string | null; rule: { netR: number; t: number }; order: string[]; tried: { id: string; name: string; netR: number; t: number; n: number; ok: boolean }[] } | null;
 }
@@ -626,11 +635,46 @@ function Picker({ history, live, ml, run, open }: { history: Head[]; live: Live 
   );
 }
 
+/** iteration 12: ₹250-340 against the wider universe, and the verdict by the rule fixed before the run */
+function WideCard({ ml }: { ml: Ml }) {
+  const w = ml.wide;
+  if (!w) return null;
+  const un = Array.isArray(ml.untouched) ? ml.untouched : ml.untouched ? [ml.untouched] : [];
+  const yes = (ok: boolean) => (ok ? '✓' : '✗');
+  const draws = (d: { netR: number }[]) => d.map((x) => rr(x.netR)).join(' · ');
+  return (
+    <Card title="Does a wider universe help?" sub={`Decide months, real fills, after costs at ₹300 risk. ${ml.narrowStocks ?? '–'} stocks in ₹250–340 against ${ml.stocks} in ₹250–1000. Algo Live is not affected by this run.`}>
+      <p className={`text-sm font-bold ${w.outcome === 'better' ? 'text-data-green' : w.outcome === 'incomplete' ? 'text-ink-2' : 'text-data-red-text'}`}>{w.message}</p>
+      <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className={HEAD}>
+        <th className="px-2 py-1.5 text-left">Version</th><th className={TH}>Trades / month</th><th className={TH}>R / trade</th><th className={TH}>t</th><th className={TH}>Months green</th><th className={TH}>₹ / month</th><th className={TH}>5 draws</th><th className={TH}>Untouched</th><th className={TH}>Exam</th>
+      </tr></thead><tbody>
+        {ml.strategies.filter((s) => s.id !== 'placebo').map((s) => {
+          const nz = ml.noiseAll?.find((x) => x.strategy === s.id), u = un.find((x) => x.id === s.id);
+          return (
+            <tr key={s.id} className={`border-b border-line/60 font-mono tabular-nums ${w.pick?.id === s.id ? 'bg-data-green/10' : ''}`}>
+              <td className="px-2 py-1.5 font-sans">{s.name}</td><td className={TH}>{s.money ? s.money.tradesPerMonth : '–'}</td>
+              <td className={`${TH} font-bold ${tone(s.dev.netR, s.dev.n > 0)}`}>{s.dev.n ? rr(s.dev.netR) : '–'}</td><td className={TH}>{fx(s.dev.t)}</td><td className={TH}>{s.dev.monthsGreen}/{s.dev.monthsTraded}</td>
+              <td className={`${TH} ${tone(s.money?.perMonth ?? 0)}`}>{s.money ? `₹${s.money.perMonth.toLocaleString('en-IN')}` : '–'}</td>
+              <td className={TH}>{nz ? `${rr(nz.devMin)} to ${rr(nz.devMax)}` : '–'}</td>
+              <td className={TH}>{u && u.overall.n ? `${rr(u.overall.netR)} (t ${fx(u.overall.t)})` : '–'}</td><td className={TH}>{passText(examPass(s.exam))}</td>
+            </tr>
+          );
+        })}
+      </tbody></table></div>
+      <p className="mt-2 text-[11px] text-ink-2">
+        Rule fixed before the run: {yes(w.checks.floor)} a version clears {rr(w.rule.netR)} a trade, t {w.rule.t}+, {w.rule.n}+ trades · {yes(w.checks.beatsNoise)} its average over the draws beats the control&apos;s best draw · {yes(w.checks.moreTotalR)} more R in total · {yes(w.checks.placeboClean)} the placebo shows no edge.
+      </p>
+      <p className="mt-1 font-mono text-[11px] text-ink-3">₹250–340 draws: {draws(w.narrowDraws)}<br />Wide draws: {draws(w.wideDraws)}{w.wideMean !== null ? ` (average ${rr(w.wideMean)})` : ''}</p>
+    </Card>
+  );
+}
+
 export default function AlgoPage() {
   const [ml, setMl] = useState<Ml | null | undefined>(undefined);
   const [history, setHistory] = useState<Head[]>([]);
   const [live, setLive] = useState<Live | null>(null);
   const [run, setRun] = useState<string | null>(null); // null until the address is read; '' = the latest
+  const [reload, setReload] = useState(0); // a finished wide run: read the iterations again
   const [pick, setPick] = useState('');
   const [err, setErr] = useState('');
   useEffect(() => { setRun(new URLSearchParams(window.location.search).get('run') ?? ''); }, []);
@@ -642,7 +686,7 @@ export default function AlgoPage() {
       if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
       setMl(j.ml); setHistory(j.history ?? []); setLive(j.live ?? null);
     }).catch((e) => setErr((e as Error).message));
-  }, [run]);
+  }, [run, reload]);
   const open = (id: string) => {
     window.history.replaceState(null, '', id ? `?run=${encodeURIComponent(id)}` : window.location.pathname);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -658,6 +702,7 @@ export default function AlgoPage() {
           <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-ink-3">Machine learning on every stock, every 10 minutes · trained on the past, tested month by month on what it had not seen</p>
         </header>
         {(history.length > 0 || live) && <Picker history={history} live={live} ml={ml} run={run ?? ''} open={open} />}
+        <WideRunCard onDone={() => setReload((n) => n + 1)} />
         {err && <p className="text-xs text-data-red-text">{err}</p>}
         {ml === undefined && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>}
         {ml === null && <Card title="No results yet" sub="Made by the backtest run: press Re-run on My Analysis → My Setups. The model step adds about an hour after the backtest."><span /></Card>}
@@ -673,7 +718,8 @@ export default function AlgoPage() {
                 At most one trade per stock a day, {v2.setup.maxPerSide} a side and {v2.setup.maxPerDay} a day. For reference, iteration 1&apos;s tight bracket taken blindly: {rr(v2.baselineTight.long)} long / {rr(v2.baselineTight.short)} short.
               </p>
             </Card>
-            {(Array.isArray(v2.untouched) ? v2.untouched : v2.untouched ? [v2.untouched] : []).filter((u) => !['f1055', 'fCap3', 'fCap2', 'fStrict', 'vAll', 'v3m', 'v5m', 'v7m', 'v10m'].includes(u.id)).map((u) => <UntouchedCard key={u.id} u={u} />)}
+            <WideCard ml={v2} />
+            {(Array.isArray(v2.untouched) ? v2.untouched : v2.untouched ? [v2.untouched] : []).filter((u) => !v2.wide && !['f1055', 'fCap3', 'fCap2', 'fStrict', 'vAll', 'v3m', 'v5m', 'v7m', 'v10m'].includes(u.id)).map((u) => <UntouchedCard key={u.id} u={u} />)}
             {v2.noise && v2.noise.draws.length > 1 && (
               <Card title="How much is luck in the training?" sub={`The locked strategy trained ${v2.noise.draws.length} times with different random draws (same data, same rules). The spread is the noise: differences smaller than this between iterations mean nothing.`}>
                 <p className="text-sm">Decide months: <b className="font-mono">{rr(v2.noise.devMin)} to {rr(v2.noise.devMax)}</b> a trade (average {rr(v2.noise.devMean)}).</p>

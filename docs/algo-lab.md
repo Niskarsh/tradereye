@@ -99,4 +99,19 @@ written.
    before the run (`VOL_RULE`): the highest floor with +0.04R a trade, t ≥ 2.0 and 150+ trades on the decide months.
    Placebo, the 5 training draws and the untouched months (a second look) as in iteration 10. To be calibrated later
    with Algo Live's own fills.
-
+12. **More stocks to choose from, research only** (`scripts/ml_wide.py`, its own workflow `Algo Lab wide universe`, Run button on
+   Algo Lab): F as Algo Live trades it, on ₹250–1000 against ₹250–340. ₹300 of risk buys about the same rupee position at any
+   share price, so the band is not a capital limit. Same facts and bar recipe; only the stocks differ.
+   - **Fills:** the same liquidity floor in rupees (about ₹17 crore a day). Above ₹340 a stock's volume is scaled to a ₹340 stock
+     and tick-based slippage grows with price, so a dearer stock is not helped by a tick being a smaller share of its price
+     (`wideVol`, `gridDay(..., wide)`). At ₹340 or less the rows equal the normal dataset's (`tests/mlWide.test.ts`).
+   - **Like for like:** the dataset holds 09:25–10:55 only (the full day on this many stocks does not fit a GitHub machine), and
+     the ₹250–340 control learns from those same moments, so its number is not comparable with earlier iterations.
+   - **Rule fixed before the run** (`wideVerdict`, decide months, real fills): the highest floor with +0.04R a trade, t ≥ 2.0 and
+     150+ trades; its average over the 5 training draws beats the control's best draw; more R in total; the placebo shows no edge.
+   - **Kept apart from Algo Live:** `ml_walkforward.py` is not edited (`ml_wide.py` sets this iteration's values in its own
+     process); the dataset is the artifact `grid-wide`, not `grid`; the results go only to the ledger, not the run index; no
+     strategy is called `fCap2`. The job stops itself 08:40–11:15 on weekdays unless "Run during market hours" is ticked (then it
+     keeps going at 1 Dhan request a second in that window, leaving Algo Live the other 4, and backs off on Dhan's rate-limit
+     reply). NSE holidays (`NSE_HOLIDAYS`, add each year's list in December) run at full speed with no override; with the override on, a
+     holiday missing from the list is caught from 09:20 by one Nifty 500 request (no candles today). It will not start during a backtest, because all of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.

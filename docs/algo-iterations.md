@@ -31,6 +31,7 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 9 | **F locked** | — | 3.4 | 19/31 | **+0.06** | Pass | 0.088 | Untouched again +0.17R (t 3.4, 9/9). Draws +0.05 to +0.07R. B +0.04R (untouched +0.20R). The add rule did **not** confirm on the untouched months (+0.04R, t 0.8): dropped. Worst day −4.25R, worst week −7.6R, deepest run −18.1R |
 | 10 | F to 10:55, first 2 a day (picked for Algo Live) | | | | | | | Tag algo-iter-10-2026-10-23-00-11-fdns |
 | 11 | (F as live, real fills by liquidity, floors 5 lakh / 3M / 5M / 7M / 10M; placebo) | | | | | | | running |
+| 12 | (F as live on ₹250–1000 against ₹250–340, real fills scaled to price; research only, see algo-lab.md) | | | | | | | to run |
 
 Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
 the first 20 minutes and are already 1.6 ATR below it.
