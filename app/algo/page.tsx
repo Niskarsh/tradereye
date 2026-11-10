@@ -16,7 +16,7 @@ interface WideResult {
   pick: WideLine | null; control: WideLine | null; narrowDraws: { shard: string; netR: number }[]; wideDraws: { shard: string; netR: number }[]; wideMean: number | null;
   checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean };
   checkList?: { label: string; ok: boolean }[];
-  goal?: { perMonth: number; positionForGoal: number | null; tradesPerMonth: number; stopPct: number } | null;
+  goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number } | null;
 }
 interface S { n: number; hit: number; netR: number; gross: number; sumR: number; inr: number; t: number }
 interface P extends S { monthsGreen: number; monthsTraded: number; monthsTotal: number }
@@ -670,8 +670,9 @@ function WideCard({ ml }: { ml: Ml }) {
       </p>}
       {w.goal && (
         <p className="mt-2 text-xs text-ink-2">
-          Against the ₹1 lakh a month goal: <span className={`font-bold ${w.goal.perMonth >= 100000 ? 'text-data-green' : ''}`}>₹{w.goal.perMonth.toLocaleString('en-IN')} a month</span> at ₹10 lakh positions
-          ({w.goal.tradesPerMonth} trades a month, stop ~{w.goal.stopPct}%){w.goal.positionForGoal ? ` · ₹1 lakh a month needs ~₹${(w.goal.positionForGoal / 100000).toFixed(1)} lakh positions${w.goal.positionForGoal > 1000000 ? ' (more than the size tested: market impact would be higher)' : ''}` : ' · not profitable at this size'}.
+          Against the ₹1–1.5 lakh a month goal (in total, not per trade): <span className={`font-bold ${w.goal.perMonth >= 100000 ? 'text-data-green' : ''}`}>₹{w.goal.perMonth.toLocaleString('en-IN')} a month</span> at ₹10 lakh positions
+          (~₹{(w.goal.riskPerTrade ?? 0).toLocaleString('en-IN')} risk a trade, {w.goal.tradesPerMonth} trades a month)
+          {w.goal.positionForGoal ? ` · ₹1 lakh a month needs ~₹${(w.goal.positionForGoal / 100000).toFixed(1)} lakh positions${w.goal.positionForHigh ? `, ₹1.5 lakh ~₹${(w.goal.positionForHigh / 100000).toFixed(1)} lakh` : ''} (compare the ₹15 / 20 lakh rows: bigger orders cost more)` : ' · not profitable at this size'}.
         </p>
       )}
       <p className="mt-1 font-mono text-[11px] text-ink-3">₹250–340 draws: {draws(w.narrowDraws)}<br />Wide draws: {draws(w.wideDraws)}{w.wideMean !== null ? ` (average ${rr(w.wideMean)})` : ''}</p>

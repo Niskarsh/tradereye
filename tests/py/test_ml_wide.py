@@ -53,7 +53,7 @@ except SystemExit as e:
     assert 'more than 2' in str(e)
 
 allowed_syms = {head['symbols'][i] for i in range(len(head['symbols'])) if i % 2 == 0}
-for universe, ids in (('narrow', ['nF', 'nT10']), ('wide', ['wAll', 'wT10', 'wT20', 'placebo'])):
+for universe, ids in (('narrow', ['nF', 'nT10']), ('wide', ['wAll', 'wT10', 'wT15', 'wT20', 'placebo'])):
     ml_wide.main(d, universe, 'main')
     res = json.load(open(os.path.join(d, f'wide-{universe}-main.json')))
     assert res['iteration'] == 13 and [s['id'] for s in res['strategies']] == ids, [s['id'] for s in res['strategies']]

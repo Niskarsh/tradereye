@@ -122,7 +122,7 @@ written.
    - Each trade priced at that size (`add_stress`): real fills + big-position charges (`nbS3 − nbS`: the same old fills at
      ~₹3 lakh and at ₹300 risk differ only in charges) − market impact `1.25 × √(order ÷ daily turnover)` R (square-root rule,
      0.5 × daily volatility per side, volatility ≈ usual range ÷ 1.6, on a stop of half the range). Thin stocks are not cut
-     out; they cost what they would cost. Versions: ₹300 risk (`wAll`), ₹10 lakh (`wT10`, the test), ₹20 lakh (`wT20`);
+     out; they cost what they would cost. Versions: ₹300 risk (`wAll`), ₹10 lakh (`wT10`, the test), ₹15 lakh (`wT15`, ₹1.5 lakh a month), ₹20 lakh (`wT20`); the goal is ₹1–1.5 lakh a month in total;
      the ₹250–340 control the same way (`nF`, `nT10`). Same model; the bar is set again on each version's costs.
    - ETFs left out of the dataset (`etfSymbols`: Dhan's instrument type, the fund name, the symbol; the run log lists them).
    - 2 a day and 2 a side set globally and checked on every trade after the run (`check_cap`; the job fails otherwise).

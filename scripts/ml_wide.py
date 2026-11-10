@@ -30,7 +30,7 @@ CAP = 2  # trades a day, as Algo Live: also enforced on every strategy's trades 
 CHANGES = [
     'Iteration 12 found F (short, 09:35-10:55, first 2 a day) much better on ₹250-1000 than on ₹250-340: +0.12R a trade, t 4.7, 24 of 29 months green, exam passed. But every liquidity floor halved it: the edge sits partly in thinner stocks. The question now is the one that matters for the goal of ₹1 lakh a month: does it hold at the size that goal needs?',
     'The size: at ~+0.15R a trade and ~30 trades a month, ₹1 lakh a month is ~₹22,000 of risk a trade, a position of about ₹10 lakh. Each trade is priced at that size: big-position charges (cheaper per R) and the market impact of a ₹10 lakh order in that stock, by the square-root rule desks use (1.25 x the square root of the order over the stock\'s daily turnover, in R: ~0.09R in a ₹20 crore a day stock, ~0.04R at ₹100 crore, ~0.02R at ₹340 crore). Thin stocks are not cut out, they just cost what they would cost.',
-    'Same model (trained once); only the cost of each trade changes, and the bar to trade is set again on those costs, as it would be live. Versions: ₹300 risk (as iteration 12), ₹10 lakh positions (the test), ₹20 lakh (room to grow past the target). The ₹250-340 control is priced the same way.',
+    'Same model (trained once); only the cost of each trade changes, and the bar to trade is set again on those costs, as it would be live. Versions: ₹300 risk (as iteration 12), ₹10 lakh positions (about ₹22,000 risk a trade, the test), ₹15 lakh (₹1.5 lakh a month) and ₹20 lakh (room to grow). The goal is ₹1-1.5 lakh a month in total, not per trade. The ₹250-340 control is priced the same way.',
     'ETFs left out (MONQ50, MON100, NIFTYBEES and the like were being picked: they are funds, and the US-tracking ones move on their premium in the Indian morning).',
     'At most 2 trades a day and 2 a side for every version, checked on every trade after the run (the job fails if any day has more).',
     'Rule fixed before this run, decide months only, at ₹10 lakh positions: +0.04R a trade, t of at least 2.0 and 150 trades; its average over 5 training draws beats the best draw of the ₹250-340 control at the same size; more R in total; profitable on the exam months; the placebo shows no edge. All five, or it is not a candidate for Algo Live. The page also shows what it makes a month at ₹10 lakh positions against the ₹1 lakh goal.',
@@ -39,7 +39,7 @@ CHANGES = [
 # Your target: ₹1 lakh a month. At about +0.15R a trade (iteration 12 at big-position charges) and ~30 trades a month that
 # is ~₹22,000 of risk a trade: with a stop near 2.2% of the price, a position of about ₹10 lakh. Each version below is
 # priced at that size: big-position charges (Dhan's ₹20 cap no longer matters) and the market impact of the order.
-TARGET_POS = {'T10': 1_000_000, 'T20': 2_000_000}
+TARGET_POS = {'T10': 1_000_000, 'T15': 1_500_000, 'T20': 2_000_000}
 # Square-root impact (the rule desks use): each side costs ~0.5 x daily volatility x sqrt(order / daily turnover), daily
 # volatility ~ the usual daily range / 1.6. On a stop of half that range, entry + exit come to 1.25 x sqrt(order / turnover)
 # in R, whatever the stock's volatility: ₹10 lakh in a ₹20 crore a day stock ~0.09R, in a ₹100 crore one ~0.04R.
@@ -53,7 +53,8 @@ NARROW = [
 WIDE = [
     {**ml._REAL, 'id': 'wAll', 'name': '₹250–1000, ₹300 risk', 'bands': True, 'desc': 'Iteration 12\'s best again (ETFs out): F as live on every stock ₹250-1000 above the liquidity floor, real fills at ₹300 risk.'},
     {**ml._REAL, 'id': 'wT10', 'S': 'nbSx_t10', 'name': '₹250–1000, ₹10 lakh positions (the test)', 'bands': True, 'desc': 'At the ₹1 lakh a month size: big-position charges and the market impact of a ₹10 lakh order in each stock.'},
-    {**ml._REAL, 'id': 'wT20', 'S': 'nbSx_t20', 'name': '₹250–1000, ₹20 lakh positions', 'bands': True, 'desc': 'Room to grow past ₹1 lakh a month: the same with ₹20 lakh orders.'},
+    {**ml._REAL, 'id': 'wT15', 'S': 'nbSx_t15', 'name': '₹250–1000, ₹15 lakh positions', 'bands': True, 'desc': 'The top of the goal (₹1.5 lakh a month): the same with ₹15 lakh orders (about ₹33,000 risk a trade).'},
+    {**ml._REAL, 'id': 'wT20', 'S': 'nbSx_t20', 'name': '₹250–1000, ₹20 lakh positions', 'bands': True, 'desc': 'Room to grow past the goal: the same with ₹20 lakh orders (about ₹44,000 risk a trade).'},
     {**ml._REAL, 'id': 'placebo', 'name': 'Placebo (shuffled outcomes)', 'yS': 'nbS_shuf', 'desc': 'Learned from outcomes shuffled among stocks of the same month and minute. Traded on the real outcomes: it must show no edge.'},
 ]
 # the liquidity measure here is shares scaled to a ₹340 stock (lib/ml/grid.ts wideVol), so these are rupees a day

@@ -111,7 +111,7 @@ function world(o: { narrow?: number[]; wide?: number[]; placebo?: ReturnType<typ
 test('verdict (iteration 13): the ₹10 lakh version must clear every check', () => {
   const ok = wideVerdict(world({}));
   assert.equal(ok.outcome, 'better'); assert.equal(ok.pick?.id, 'wT10'); assert.equal(ok.control?.id, 'nT10');
-  assert.deepEqual(ok.goal, { perMonth: 59400, positionForGoal: 1683502, tradesPerMonth: 30, stopPct: 2.2 }, 'main draw 0.09R x 30 trades x ₹22,000 risk'); assert.equal(ok.wideMean, 0.1); assert.equal(ok.checkList?.length, 5);
+  assert.deepEqual(ok.goal, { perMonth: 59400, positionForGoal: 1683502, positionForHigh: 2525253, riskPerTrade: 22000, tradesPerMonth: 30, stopPct: 2.2 }, 'main draw 0.09R x 30 trades x ₹22,000 risk'); assert.equal(ok.wideMean, 0.1); assert.equal(ok.checkList?.length, 5);
   assert.equal(wideVerdict(world({ wide: [0.05, 0.05, 0.055] })).checks.beatsNoise, false, 'inside the control\'s training noise');
   assert.equal(wideVerdict(world({ wideT: 1.5 })).outcome, 'not-better', 'the stressed edge is not sure enough');
   assert.equal(wideVerdict(world({ wideN: 100 })).outcome, 'not-better', 'too few trades');

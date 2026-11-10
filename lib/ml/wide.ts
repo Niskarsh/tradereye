@@ -100,7 +100,7 @@ export const WIDE_PICK = 'wT10';
 export const WIDE_BASE = 'wAll';
 export const WIDE_CONTROL = 'nT10';
 /** the goal, and the position size the test is priced at */
-export const MONTHLY_GOAL = 100_000, TARGET_POSITION = 1_000_000;
+export const MONTHLY_GOAL = 100_000, MONTHLY_GOAL_HIGH = 150_000, TARGET_POSITION = 1_000_000;
 /** fewer training draws than this on either side and the comparison says nothing */
 export const WIDE_MIN_DRAWS = 3;
 
@@ -119,7 +119,7 @@ export interface WideVerdict {
   /** (iteration 13 on) the rule as shown on the page, check by check */
   checkList?: { label: string; ok: boolean }[];
   /** (iteration 13 on) the test version in rupees: a month at ₹10 lakh positions, and the position ₹1 lakh a month needs */
-  goal?: { perMonth: number; positionForGoal: number | null; tradesPerMonth: number; stopPct: number } | null;
+  goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number } | null;
 }
 
 /** rupees a month at a position size, and the position that makes `goal` a month (decide months, no compounding) */
@@ -172,7 +172,7 @@ export function wideVerdict(shards: WideShard[]): WideVerdict {
     { label: 'the placebo shows no edge', ok: checks.placeboClean },
   ];
   const m = pick?.money;
-  const goal = d && m?.tradesPerMonth && m?.stopPct ? goalMoney(d.netR, m.tradesPerMonth, m.stopPct) : null;
+  const goal = d && m?.tradesPerMonth && m?.stopPct ? { ...goalMoney(d.netR, m.tradesPerMonth, m.stopPct), positionForHigh: goalMoney(d.netR, m.tradesPerMonth, m.stopPct, TARGET_POSITION, MONTHLY_GOAL_HIGH).positionForGoal, riskPerTrade: Math.round(TARGET_POSITION * m.stopPct / 100) } : null;
   const base = { rule: WIDE_RULE, pick: brief(pick), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList, goal };
   if (!wide || !narrow || !pick || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS || wideDraws.length < WIDE_MIN_DRAWS) {
     return { ...base, outcome: 'incomplete', message: `Not enough finished training jobs to compare (₹250–340: ${narrowDraws.length} draws, wide: ${wideDraws.length}; ${WIDE_MIN_DRAWS} each needed). See the GitHub run.` };
