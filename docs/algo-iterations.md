@@ -32,7 +32,7 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 10 | F to 10:55, first 2 a day (picked for Algo Live) | | | | | | | Tag algo-iter-10-2026-10-23-00-11-fdns |
 | 11 | (F as live, real fills by liquidity, floors 5 lakh / 3M / 5M / 7M / 10M; placebo) | | | | | | | running |
 | 12 | F as live on ₹250–1000 against ₹250–340 (control −0.01R, t −0.4); best: ₹250–1000 all +0.12R, t 4.7, 24/29 green, exam Pass, draws +0.05 to +0.12R; every liquidity floor halves it (+0.03 to +0.06R, exam Fail) | | | | | | | done 10 Nov |
-| 13 | (₹250–1000 all, ETFs out, fills 0.1% / 0.2% worse and thin stocks 0.2% worse; hard 2 a day) | | | | | | | to run |
+| 13 | (₹250–1000 all, ETFs out, priced at the ₹1 lakh a month size: ₹10 / 20 lakh positions, big-position charges + square-root market impact; control at the same size; hard 2 a day) | | | | | | | to run |
 
 Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
 the first 20 minutes and are already 1.6 ATR below it.

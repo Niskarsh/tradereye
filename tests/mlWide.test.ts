@@ -100,17 +100,18 @@ function world(o: { narrow?: number[]; wide?: number[]; placebo?: ReturnType<typ
   const narrow = o.narrow ?? [0.04, 0.05, 0.06], wide = o.wide ?? [0.09, 0.1, 0.11];
   const seed = (i: number) => (i ? `seed${i + 1}` : 'main');
   return [
-    ...narrow.map((netR, i): WideShard => ({ universe: 'narrow', shard: seed(i), strategies: [{ id: 'nF', name: 'control', dev: dev(netR) }] })),
+    ...narrow.map((netR, i): WideShard => ({ universe: 'narrow', shard: seed(i), strategies: [{ id: 'nF', name: 'control', dev: dev(netR - 0.1) }, { id: 'nT10', name: 'control at size', dev: dev(netR) }] })),
     ...wide.map((netR, i): WideShard => ({ universe: 'wide', shard: seed(i), strategies: [
       { id: 'wAll', name: 'all', dev: dev(netR + 0.04) },
-      { id: 'wS1', name: 'stress', dev: dev(netR, o.wideT ?? 3, o.wideN ?? 500), exam: o.exam ?? examOk },
+      { id: 'wT10', name: 'at size', dev: dev(netR, o.wideT ?? 3, o.wideN ?? 500), exam: o.exam ?? examOk, money: { tradesPerMonth: 30, stopPct: 2.2 } },
       ...(i ? [] : [{ id: 'placebo', name: 'p', dev: o.placebo ?? dev(0, 0.2) }]),
     ] })),
   ];
 }
-test('verdict (iteration 13): the stressed version must clear every check', () => {
+test('verdict (iteration 13): the ₹10 lakh version must clear every check', () => {
   const ok = wideVerdict(world({}));
-  assert.equal(ok.outcome, 'better'); assert.equal(ok.pick?.id, 'wS1'); assert.equal(ok.wideMean, 0.1); assert.equal(ok.checkList?.length, 5);
+  assert.equal(ok.outcome, 'better'); assert.equal(ok.pick?.id, 'wT10'); assert.equal(ok.control?.id, 'nT10');
+  assert.deepEqual(ok.goal, { perMonth: 59400, positionForGoal: 1683502, tradesPerMonth: 30, stopPct: 2.2 }, 'main draw 0.09R x 30 trades x ₹22,000 risk'); assert.equal(ok.wideMean, 0.1); assert.equal(ok.checkList?.length, 5);
   assert.equal(wideVerdict(world({ wide: [0.05, 0.05, 0.055] })).checks.beatsNoise, false, 'inside the control\'s training noise');
   assert.equal(wideVerdict(world({ wideT: 1.5 })).outcome, 'not-better', 'the stressed edge is not sure enough');
   assert.equal(wideVerdict(world({ wideN: 100 })).outcome, 'not-better', 'too few trades');

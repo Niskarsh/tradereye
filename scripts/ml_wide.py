@@ -28,27 +28,32 @@ ITERATION = 13
 CAP = 2  # trades a day, as Algo Live: also enforced on every strategy's trades after the run (check_cap)
 
 CHANGES = [
-    'Iteration 12 found F (short, 09:35-10:55, first 2 a day) much better on ₹250-1000 than on ₹250-340: +0.12R a trade, t 4.7, 24 of 29 months green, exam passed. Its edge sat in the thinnest stocks (₹17-100 crore a day): every liquidity floor halved it. Thin stocks are where real fills are most likely worse than modelled, so this iteration asks one question: does the edge survive worse fills?',
-    'Same strategy, same universe, same facts. The model is trained once; only the cost of each trade changes, and the bar to trade is set again on those costs (as it would be live).',
-    'Worse fills, as a share of the price on every trade (on top of iteration 11\'s real fills: 1-3 ticks by liquidity, stops slipping 0.04-0.2% of the price): +0.1% (about twice a ₹500 stock\'s spread, the test), +0.2%, and +0.2% only on stocks under ₹100 crore a day. On a stop of half the usual daily range, 0.1% costs about 0.04R a trade.',
+    'Iteration 12 found F (short, 09:35-10:55, first 2 a day) much better on ₹250-1000 than on ₹250-340: +0.12R a trade, t 4.7, 24 of 29 months green, exam passed. But every liquidity floor halved it: the edge sits partly in thinner stocks. The question now is the one that matters for the goal of ₹1 lakh a month: does it hold at the size that goal needs?',
+    'The size: at ~+0.15R a trade and ~30 trades a month, ₹1 lakh a month is ~₹22,000 of risk a trade, a position of about ₹10 lakh. Each trade is priced at that size: big-position charges (cheaper per R) and the market impact of a ₹10 lakh order in that stock, by the square-root rule desks use (1.25 x the square root of the order over the stock\'s daily turnover, in R: ~0.09R in a ₹20 crore a day stock, ~0.04R at ₹100 crore, ~0.02R at ₹340 crore). Thin stocks are not cut out, they just cost what they would cost.',
+    'Same model (trained once); only the cost of each trade changes, and the bar to trade is set again on those costs, as it would be live. Versions: ₹300 risk (as iteration 12), ₹10 lakh positions (the test), ₹20 lakh (room to grow past the target). The ₹250-340 control is priced the same way.',
     'ETFs left out (MONQ50, MON100, NIFTYBEES and the like were being picked: they are funds, and the US-tracking ones move on their premium in the Indian morning).',
     'At most 2 trades a day and 2 a side for every version, checked on every trade after the run (the job fails if any day has more).',
-    'Rule fixed before this run, decide months only: with +0.1% worse fills it still makes +0.04R a trade, t of at least 2.0 and 150 trades; its average over 5 training draws beats the best draw of the ₹250-340 control; it makes more R in total; it is profitable on the exam months; the placebo shows no edge. All five, or it is not a candidate for Algo Live.',
+    'Rule fixed before this run, decide months only, at ₹10 lakh positions: +0.04R a trade, t of at least 2.0 and 150 trades; its average over 5 training draws beats the best draw of the ₹250-340 control at the same size; more R in total; profitable on the exam months; the placebo shows no edge. All five, or it is not a candidate for Algo Live. The page also shows what it makes a month at ₹10 lakh positions against the ₹1 lakh goal.',
 ]
 
-# extra cost of each version, % of the price on every trade (entry and exit together)
-STRESS = {'wS1': 0.1, 'wS2': 0.2}
-THIN_VOL = 3e6       # under ₹100 crore a day (avgVol here is shares scaled to a ₹340 stock, lib/ml/grid.ts wideVol)
-THIN_STRESS = 0.2
+# Your target: ₹1 lakh a month. At about +0.15R a trade (iteration 12 at big-position charges) and ~30 trades a month that
+# is ~₹22,000 of risk a trade: with a stop near 2.2% of the price, a position of about ₹10 lakh. Each version below is
+# priced at that size: big-position charges (Dhan's ₹20 cap no longer matters) and the market impact of the order.
+TARGET_POS = {'T10': 1_000_000, 'T20': 2_000_000}
+# Square-root impact (the rule desks use): each side costs ~0.5 x daily volatility x sqrt(order / daily turnover), daily
+# volatility ~ the usual daily range / 1.6. On a stop of half that range, entry + exit come to 1.25 x sqrt(order / turnover)
+# in R, whatever the stock's volatility: ₹10 lakh in a ₹20 crore a day stock ~0.09R, in a ₹100 crore one ~0.04R.
+IMPACT_K = 1.25
+REF_PRICE = 340  # lib/ml/grid.ts WIDE_REF_PRICE: avgVol is shares scaled to a ₹340 stock above it
 
 NARROW = [
-    {**ml._REAL, 'id': 'nF', 'name': '₹250–340 (control), real fills', 'desc': 'F as live on the stocks Algo Live trades today, with fills by liquidity.'},
+    {**ml._REAL, 'id': 'nF', 'name': '₹250–340 (control), ₹300 risk', 'desc': 'F as live on the stocks Algo Live trades today, real fills at ₹300 risk.'},
+    {**ml._REAL, 'id': 'nT10', 'S': 'nbSx_t10', 'name': '₹250–340 (control), ₹10 lakh positions', 'bands': True, 'desc': 'The same at the ₹1 lakh a month size: big-position charges and the market impact of a ₹10 lakh order.'},
 ]
 WIDE = [
-    {**ml._REAL, 'id': 'wAll', 'name': '₹250–1000, real fills', 'bands': True, 'desc': 'Iteration 12\'s best again (ETFs out): F as live on every stock ₹250-1000 above the liquidity floor, with fills by liquidity.'},
-    {**ml._REAL, 'id': 'wS1', 'S': 'nbSx_s1', 'name': '₹250–1000, fills 0.1% worse (the test)', 'bands': True, 'desc': 'As above, every trade costs another 0.1% of the price.'},
-    {**ml._REAL, 'id': 'wS2', 'S': 'nbSx_s2', 'name': '₹250–1000, fills 0.2% worse', 'bands': True, 'desc': 'As above, every trade costs another 0.2% of the price: where does it break?'},
-    {**ml._REAL, 'id': 'wThin', 'S': 'nbSx_thin', 'name': '₹250–1000, thin stocks 0.2% worse', 'bands': True, 'desc': 'Only stocks under ₹100 crore a day cost another 0.2% of the price: is the edge just optimistic fills in thin stocks?'},
+    {**ml._REAL, 'id': 'wAll', 'name': '₹250–1000, ₹300 risk', 'bands': True, 'desc': 'Iteration 12\'s best again (ETFs out): F as live on every stock ₹250-1000 above the liquidity floor, real fills at ₹300 risk.'},
+    {**ml._REAL, 'id': 'wT10', 'S': 'nbSx_t10', 'name': '₹250–1000, ₹10 lakh positions (the test)', 'bands': True, 'desc': 'At the ₹1 lakh a month size: big-position charges and the market impact of a ₹10 lakh order in each stock.'},
+    {**ml._REAL, 'id': 'wT20', 'S': 'nbSx_t20', 'name': '₹250–1000, ₹20 lakh positions', 'bands': True, 'desc': 'Room to grow past ₹1 lakh a month: the same with ₹20 lakh orders.'},
     {**ml._REAL, 'id': 'placebo', 'name': 'Placebo (shuffled outcomes)', 'yS': 'nbS_shuf', 'desc': 'Learned from outcomes shuffled among stocks of the same month and minute. Traded on the real outcomes: it must show no edge.'},
 ]
 # the liquidity measure here is shares scaled to a ₹340 stock (lib/ml/grid.ts wideVol), so these are rupees a day
@@ -57,19 +62,25 @@ BANDS = [(0, '₹17–100 cr'), (3e6, '₹100–170 cr'), (5e6, '₹170–240 cr
 _load = ml.load
 
 
-def stress_r(df, pct):
-    """an extra cost of pct % of the price, in R: the stop is half the usual daily range (adrPct, % of the price)"""
-    stop = 0.5 * df['adrPct'].astype(float).values
-    ok = np.isfinite(stop) & (stop > 0)
-    fallback = float(np.median(stop[ok])) if ok.any() else 1.0  # a row without its range: the typical one
-    return pct / np.where(ok, stop, fallback)
+def turnover_rs(df):
+    """average daily turnover in rupees: avgVol is shares below ₹340 and shares x price / 340 above it"""
+    return df['avgVol'].astype(float).values * np.minimum(df['priceRs'].astype(float).values, REF_PRICE)
+
+
+def impact_r(df, position):
+    """entry + exit market impact of a `position` rupee order, in R (see IMPACT_K)"""
+    v = turnover_rs(df)
+    ok = np.isfinite(v) & (v > 0)
+    fallback = float(np.median(v[ok])) if ok.any() else 1e9  # a row without its turnover: the typical one
+    return IMPACT_K * np.sqrt(position / np.where(ok, v, fallback))
 
 
 def add_stress(df):
-    for col, pct in STRESS.items():
-        df[f'nbSx_{col[1:].lower()}'] = df['nbSx'].values - stress_r(df, pct)
-    thin = df['avgVol'].values < THIN_VOL
-    df['nbSx_thin'] = df['nbSx'].values - np.where(thin, stress_r(df, THIN_STRESS), 0.0)
+    """each target size: real fills, the charges of a big position (nbS3 - nbS: the same old fills at ~₹3 lakh and at ₹300
+    risk differ only in charges, which are a flat share of the trade above ~₹67k), and the market impact of the order"""
+    big = df['nbSx'].values + (df['nbS3'].values - df['nbS'].values)
+    for key, pos in TARGET_POS.items():
+        df[f'nbSx_{key.lower()}'] = big - impact_r(df, pos)
     return df
 
 
@@ -85,8 +96,8 @@ def configure(universe, shard):
     ml.SEED_OFF = 0 if shard == 'main' else int(shard.replace('seed', '') or 0)
     strategies = WIDE if wide else NARROW
     ml.STRATEGIES = strategies if shard == 'main' else [s for s in strategies if s['id'] != 'placebo']
-    ml.LOCKED = 'wS1' if wide else 'nF'
-    ml.VOL_ORDER = ['wS1'] if wide else ['nF']
+    ml.LOCKED = 'wT10' if wide else 'nT10'
+    ml.VOL_ORDER = ['wT10'] if wide else ['nT10']
     ml.UNTOUCHED = [s['id'] for s in strategies if s['id'] != 'placebo']
     ml._UNTOUCHED_MODELS.clear()
     ml._LOOKUP.clear()

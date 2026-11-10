@@ -92,19 +92,21 @@ export function etfSymbols(csv: string): Set<string> {
 /* ---- the verdict, by a rule fixed before the run ------------------------------------------------------------ */
 
 /**
- * Iteration 13: is iteration 12's edge (₹250-1000, all) still there when every fill is worse than modelled? The test
- * version is 'wS1' (an extra 0.1% of the price on every trade, about twice what a ₹500 stock's spread costs).
+ * Iteration 13: does iteration 12's edge (₹250-1000, all) hold at the size the ₹1 lakh a month goal needs? The test
+ * version is 'wT10': ₹10 lakh positions, big-position charges and the market impact of the order (scripts/ml_wide.py).
  */
 export const WIDE_RULE = { netR: 0.04, t: 2, n: 150 };
-export const WIDE_PICK = 'wS1';
+export const WIDE_PICK = 'wT10';
 export const WIDE_BASE = 'wAll';
-export const WIDE_CONTROL = 'nF';
+export const WIDE_CONTROL = 'nT10';
+/** the goal, and the position size the test is priced at */
+export const MONTHLY_GOAL = 100_000, TARGET_POSITION = 1_000_000;
 /** fewer training draws than this on either side and the comparison says nothing */
 export const WIDE_MIN_DRAWS = 3;
 
 interface Dev { n: number; netR: number; t: number; sumR: number }
 type Exam = { n?: number; netR?: number; t?: number; pass?: boolean | null } | null | undefined;
-export interface WideShard { universe: 'narrow' | 'wide'; shard: string; strategies: { id: string; name: string; dev: Dev; exam?: Exam }[] }
+export interface WideShard { universe: 'narrow' | 'wide'; shard: string; strategies: { id: string; name: string; dev: Dev; exam?: Exam; money?: { tradesPerMonth?: number; stopPct?: number } | null }[] }
 export interface WideDraw { shard: string; netR: number }
 export interface WideVerdict {
   outcome: 'better' | 'not-better' | 'incomplete';
@@ -116,6 +118,16 @@ export interface WideVerdict {
   checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean; examPass?: boolean };
   /** (iteration 13 on) the rule as shown on the page, check by check */
   checkList?: { label: string; ok: boolean }[];
+  /** (iteration 13 on) the test version in rupees: a month at ₹10 lakh positions, and the position ₹1 lakh a month needs */
+  goal?: { perMonth: number; positionForGoal: number | null; tradesPerMonth: number; stopPct: number } | null;
+}
+
+/** rupees a month at a position size, and the position that makes `goal` a month (decide months, no compounding) */
+export function goalMoney(netR: number, tradesPerMonth: number, stopPct: number, position = TARGET_POSITION, goal = MONTHLY_GOAL) {
+  const perR = (pos: number) => (pos * stopPct) / 100;
+  const perMonth = Math.round(netR * tradesPerMonth * perR(position));
+  const positionForGoal = netR > 0 && tradesPerMonth > 0 && stopPct > 0 ? Math.round(goal / (netR * tradesPerMonth * stopPct / 100)) : null;
+  return { perMonth, positionForGoal, tradesPerMonth, stopPct };
 }
 
 const draws = (shards: WideShard[], universe: WideShard['universe'], id: string | undefined): WideDraw[] =>
@@ -153,18 +165,20 @@ export function wideVerdict(shards: WideShard[]): WideVerdict {
     placeboClean: !!placebo && !(placebo.dev.n >= 100 && placebo.dev.t >= 2 && placebo.dev.netR > 0),
   };
   const checkList = [
-    { label: `with 0.1% worse fills: +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades`, ok: checks.floor },
-    { label: "its average over the draws beats the ₹250–340 control's best draw", ok: checks.beatsNoise },
-    { label: 'more R in total than the control', ok: checks.moreTotalR },
+    { label: `at ₹10 lakh positions: +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades`, ok: checks.floor },
+    { label: "its average over the draws beats the ₹250–340 control's best draw at the same size", ok: checks.beatsNoise },
+    { label: 'more R in total than the control at the same size', ok: checks.moreTotalR },
     { label: 'profitable on the exam months', ok: checks.examPass },
     { label: 'the placebo shows no edge', ok: checks.placeboClean },
   ];
-  const base = { rule: WIDE_RULE, pick: brief(pick), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList };
+  const m = pick?.money;
+  const goal = d && m?.tradesPerMonth && m?.stopPct ? goalMoney(d.netR, m.tradesPerMonth, m.stopPct) : null;
+  const base = { rule: WIDE_RULE, pick: brief(pick), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList, goal };
   if (!wide || !narrow || !pick || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS || wideDraws.length < WIDE_MIN_DRAWS) {
     return { ...base, outcome: 'incomplete', message: `Not enough finished training jobs to compare (₹250–340: ${narrowDraws.length} draws, wide: ${wideDraws.length}; ${WIDE_MIN_DRAWS} each needed). See the GitHub run.` };
   }
   if (!checks.placeboClean) return { ...base, outcome: 'not-better', message: 'The placebo shows an edge: something leaks. Do not trust this run.' };
   const failed = checkList.filter((c) => !c.ok).map((c) => c.label);
   if (failed.length) return { ...base, outcome: 'not-better', message: `Not robust: the wide edge fails "${failed[0]}"${failed.length > 1 ? ` (and ${failed.length - 1} more)` : ''}. Do not move Algo Live to it.` };
-  return { ...base, outcome: 'better', message: 'Robust: ₹250–1000 keeps its edge with 0.1% worse fills, beats ₹250–340 by more than training luck and passes the exam. A candidate for Algo Live.' };
+  return { ...base, outcome: 'better', message: 'Holds at size: ₹250–1000 keeps its edge at ₹10 lakh positions (charges and market impact), beats ₹250–340 by more than training luck and passes the exam. A candidate for Algo Live.' };
 }
