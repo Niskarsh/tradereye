@@ -1,3 +1,4 @@
+import { relabelSized } from './sized';
 /**
  * One Algo Lab iteration as a Markdown file, for pasting into a chat with Claude: everything the Algo Lab page shows for
  * every version (not only the one open on screen). Built from the same JSON the page loads, so nothing new is fetched.
@@ -15,7 +16,7 @@ interface Strat {
   overall?: P; dev?: P; exam?: P; shadow?: P | null;
   ic?: { mean?: Num; positive?: number; months?: number };
   daily?: { tradingDays?: number; daysWithTrades?: number; perTradedDay?: number; maxPerDay?: number; at0935?: number; greenDays?: number; worstDayR?: number; bestDayR?: number; worstWeekR?: number; greenWeeks?: number } | null;
-  money?: { stopPct?: number; position?: number; tradesPerMonth?: number; perTrade?: number; perMonth?: number; capital?: number; pct?: number; worstMonth?: number; bestMonth?: number; maxDrawdownR?: number } | null;
+  money?: { riskInr?: number; sizeLabel?: string; stopPct?: number; position?: number; maxPerDay?: number; margin?: number; tradesPerMonth?: number; perTrade?: number; perMonth?: number; capital?: number; pct?: number; worstMonth?: number; bestMonth?: number; maxDrawdownR?: number } | null;
   costs?: { name: string; dev?: S; devMonths?: [number, number]; exam?: S }[] | null;
   bySide?: { long?: S; short?: S }; byHour?: (S & { hour: string })[];
   months?: (S & { month: string; ic?: Num; note?: string; exam?: boolean })[];
@@ -51,14 +52,15 @@ export const EXPORT_LIMITS = { recentTrades: Infinity, importance: Infinity, lik
 const f = (x: Num, d = 2) => (x == null || !Number.isFinite(x) ? '–' : x.toFixed(d));
 const r = (x: Num) => (x == null || !Number.isFinite(x) ? '–' : `${x >= 0 ? '+' : ''}${x.toFixed(2)}R`);
 const pct = (x: Num) => (x == null || !Number.isFinite(x) ? '–' : `${Math.round(x * 100)}%`);
-const inr = (x: Num) => (x == null || !Number.isFinite(x) ? '–' : `₹${Math.round(x).toLocaleString('en-IN')}`);
+const inr = (x: Num) => (x == null || !Number.isFinite(x) ? '–' : `${x < 0 ? '-' : ''}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`);
 const cell = (s: unknown) => String(s ?? '–').replace(/\|/g, '/').replace(/\n/g, ' ');
 const table = (head: string[], rows: unknown[][]) =>
   [`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`, ...rows.map((x) => `| ${x.map(cell).join(' | ')} |`)].join('\n');
 const examText = (e: P | undefined) => (!e ? '–' : e.pass === true ? 'Pass' : e.pass === false ? 'Fail' : e.n ? `${r(e.netR)} (${e.n})` : '–');
 const green = (p: P | undefined) => (p?.monthsTraded ? `${p.monthsGreen}/${p.monthsTraded}` : '–');
 
-export function mlToMarkdown(ml: ExportMl): string {
+export function mlToMarkdown(raw: ExportMl): string {
+  const ml = relabelSized(raw); // sized versions: money and labels at their own size (lib/ml/sized.ts)
   const out: string[] = [];
   const un = Array.isArray(ml.untouched) ? ml.untouched : ml.untouched ? [ml.untouched] : [];
   const noise = (id: string) => ml.noiseAll?.find((x) => x.strategy === id);
@@ -66,7 +68,7 @@ export function mlToMarkdown(ml: ExportMl): string {
 
   out.push(`# Algo Lab iteration ${ml.iteration} — run ${ml.runId}`);
   out.push([
-    `- Run: ${when} UTC · code ${ml.code ?? '–'}${ml.locked ? ` · locked version: ${ml.locked}` : ''}${ml.best ? ` · page's pick: ${ml.best}` : ''}`,
+    `- Run: ${when} UTC · code ${ml.code ?? '–'}${ml.locked && !ml.wide ? ` · locked version: ${ml.locked}` : ''}${ml.best ? ` · page's pick: ${ml.best}` : ''}`,
     `- Data: ${ml.period ? `${ml.period.from} to ${ml.period.to}` : '–'} · ${ml.stocks ?? '–'} stocks${ml.narrowStocks ? ` (${ml.narrowStocks} in ₹250–340)` : ''} · ${ml.rows?.toLocaleString('en-IN') ?? '–'} moments · exam months from ${ml.examFrom ?? '–'}${ml.shadowFrom ? ` · shadow from ${ml.shadowFrom}` : ''}`,
     `- Setup: at most ${ml.setup?.maxPerDay ?? '–'} a day, ${ml.setup?.maxPerSide ?? '–'} a side (each version may cap lower) · ₹${ml.setup?.riskInr ?? 300} risk unless the version says a position size`,
     '- All numbers are decide months (before the exam months) after costs unless marked. R = one unit of risk.',
@@ -102,14 +104,14 @@ export function mlToMarkdown(ml: ExportMl): string {
   }
 
   out.push('## All versions\n' + table(
-    ['id', 'Version', 'Trades', 'Trades/mo', 'R/trade', 'Before costs', 't', 'Months green', 'Exam', 'Untouched', 'Draws (min to max, avg)', 'Shadow', '₹/mo at ₹300', 'Worst day', 'Deepest losses', 'Signal'],
+    ['id', 'Version', 'Trades', 'Trades/mo', 'R/trade', 'Before costs', 't', 'Months green', 'Exam', 'Untouched', 'Draws (min to max, avg)', 'Shadow', '₹/mo at its size', 'Worst day', 'Deepest losses', 'Signal'],
     ml.strategies.map((s) => {
       const u = un.find((x) => x.id === s.id), nz = noise(s.id);
       return [s.id, s.name, s.dev?.n, f(s.money?.tradesPerMonth, 1), r(s.dev?.netR), r(s.dev?.gross), f(s.dev?.t, 1), green(s.dev), examText(s.exam),
         u?.overall?.n ? `${r(u.overall.netR)} t ${f(u.overall.t, 1)} (${u.overall.n})` : '–',
         nz ? `${r(nz.devMin)} to ${r(nz.devMax)} (${r(nz.devMean)})` : '–',
         s.shadow?.n ? `${r(s.shadow.netR)} (${s.shadow.n})` : '–',
-        inr(s.money?.perMonth), s.daily ? `${f(s.daily.worstDayR)}R` : '–', s.money?.maxDrawdownR != null ? `-${f(s.money.maxDrawdownR, 1)}R` : '–',
+        s.money ? `${inr(s.money.perMonth)} (${s.money.sizeLabel ?? '₹300 risk'})` : '–', s.daily ? `${f(s.daily.worstDayR)}R` : '–', s.money?.maxDrawdownR != null ? `-${f(s.money.maxDrawdownR, 1)}R` : '–',
         s.ic?.mean != null ? `${f(s.ic.mean, 3)} (${s.ic.positive}/${s.ic.months})` : '–'];
     }),
   ));
@@ -121,7 +123,7 @@ export function mlToMarkdown(ml: ExportMl): string {
     sec.push([
       `- Decide months: ${s.dev?.n ?? 0} trades · ${r(s.dev?.netR)} a trade (${r(s.dev?.gross)} before costs) · t ${f(s.dev?.t, 1)} · hit ${pct(s.dev?.hit)} · total ${f(s.dev?.sumR, 1)}R · months green ${green(s.dev)} · exam ${examText(s.exam)}`,
       s.baseline ? `- Taking every moment blindly: ${r(s.baseline.long)} long / ${r(s.baseline.short)} short after costs (${r(s.baseline.longGross)} / ${r(s.baseline.shortGross)} before)` : '',
-      s.money ? `- Money at ₹300 risk: stop ~${f(s.money.stopPct)}% · ${inr(s.money.perTrade)} a trade · ${f(s.money.tradesPerMonth, 1)} trades a month · ${inr(s.money.perMonth)} a month on ${inr(s.money.capital)} (${f(s.money.pct, 1)}%) · worst month ${inr(s.money.worstMonth)} · best ${inr(s.money.bestMonth)}` : '',
+      s.money ? `- Money at ${s.money.sizeLabel ? `${s.money.sizeLabel} (~${inr(s.money.riskInr)} risk a trade)` : '₹300 risk'}: stop ~${f(s.money.stopPct)}% · ${inr(s.money.perTrade)} a trade · ${f(s.money.tradesPerMonth, 1)} trades a month · ${inr(s.money.perMonth)} a month on ${inr(s.money.capital)} (${f(s.money.pct, 1)}%) · worst month ${inr(s.money.worstMonth)} · best ${inr(s.money.bestMonth)} · deepest run of losses ${f(s.money.maxDrawdownR, 1)}R` : '',
       s.daily ? `- Days: ${s.daily.daysWithTrades}/${s.daily.tradingDays} with a trade · ${f(s.daily.perTradedDay)} avg, ${s.daily.maxPerDay} max a day · fired at 09:35 ${pct(s.daily.at0935)} · green days ${pct(s.daily.greenDays)} · worst day ${f(s.daily.worstDayR)}R · best ${f(s.daily.bestDayR)}R · worst week ${f(s.daily.worstWeekR)}R · green weeks ${pct(s.daily.greenWeeks)}` : '',
       s.shadow?.n ? `- Shadow months: ${s.shadow.n} trades · ${r(s.shadow.netR)} · green ${green(s.shadow)}` : '',
     ].filter(Boolean).join('\n'));
