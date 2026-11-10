@@ -9,8 +9,8 @@ import { WIDE_REF_PRICE, wideVol } from './grid';
  * and the same liquidity floor as now, measured in rupees. A stock inside ₹250-340 is treated exactly as before.
  */
 /** the iteration the Run button starts (must equal ITERATION in scripts/ml_wide.py: tests/mlWide.test.ts checks), and what it tests */
-export const WIDE_ITERATION = 14;
-export const WIDE_QUESTION = 'Which liquidity floor (₹17–1,000 crore a day) and how many trades a day (2, 3 or 4) make ₹250–1000 pay at ₹10 lakh positions, the ₹1–1.5 lakh a month size?';
+export const WIDE_ITERATION = 15;
+export const WIDE_QUESTION = 'Does iteration 14\'s region (₹50–170 crore a day, 3–4 trades a day) hold as a block, also on the exam months; which position size (₹5–15 lakh) makes the most a month; and does a market gate fix 2026?';
 
 export const WIDE_PRICE_MIN = 250, WIDE_PRICE_MAX = 1000, WIDE_VOL_MIN = 500_000;
 
@@ -96,16 +96,18 @@ export function etfSymbols(csv: string): Set<string> {
 /* ---- the verdict, by a rule fixed before the run ------------------------------------------------------------ */
 
 /**
- * Iteration 14: every version priced at ₹10 lakh positions (also ₹5 lakh), across turnover floors x trades a day, plus
- * size-aware picking (scripts/ml_wide.py). The rule judges the pattern, not the best cell: a winner must be good on its
- * own AND have good neighbours, so one lucky cell among ~60 does not count.
+ * Iteration 15 (scripts/ml_wide.py): iteration 14's region judged as a BLOCK, at one size at a time: ₹50 / 100 / 170 crore a
+ * day x 3 / 4 trades a day, at ₹5, 8, 10, 12 and 15 lakh positions, and the ₹10 lakh block again with the market gate. A
+ * block holds only if it is good on the decide months AND mostly profitable on the exam months, so one cell that got lucky on
+ * the exam (iteration 14's pick) cannot carry it.
  */
-export const WIDE_RULE = { netR: 0.05, t: 2, n: 150, pool: 50 };
+export const WIDE_RULE = { netR: 0.05, t: 2, n: 150, pool: 50, strongMin: 5, examMin: 4 };
 export const WIDE_CONTROL = 'nT10';
-/** the goal, and the position size the test is priced at */
+/** the goal, and the size the draws are trained at */
 export const MONTHLY_GOAL = 100_000, MONTHLY_GOAL_HIGH = 150_000, TARGET_POSITION = 1_000_000;
-export const FLOORS_CR = [17, 50, 100, 170, 250, 340, 500, 750, 1000];
-export const CAPS = [2, 3, 4];
+export const FLOORS_CR = [50, 100, 170];
+export const CAPS = [3, 4];
+export const SIZES_LAKH = [5, 8, 10, 12, 15];
 /** fewer training draws than this on either side and the comparison says nothing */
 export const WIDE_MIN_DRAWS = 3;
 
@@ -113,7 +115,7 @@ interface Dev { n: number; netR: number; t: number; sumR: number }
 type Exam = { n?: number; netR?: number; t?: number; pass?: boolean | null } | null | undefined;
 type Money = { tradesPerMonth?: number; stopPct?: number } | null;
 export interface WideShard {
-  universe: 'narrow' | 'wide' | 'wide5'; shard: string; pools?: Record<string, number>;
+  universe: 'narrow' | 'wide' | 'wide5' | 'ladder'; shard: string; pools?: Record<string, number>;
   strategies: { id: string; name: string; dev: Dev; exam?: Exam; money?: Money }[];
 }
 export interface WideDraw { shard: string; netR: number }
@@ -121,8 +123,12 @@ export interface WideCell {
   id: string; size: number; floor: number | 'aware'; cap: number;
   n: number; netR: number; t: number; rPerMonth: number; tradesPerMonth: number; exam: boolean; pool: number | null;
   /** clears the bar on its own (trades, R, t, pool, exam) */ solid: boolean;
-  /** solid and its neighbours are profitable too */ candidate: boolean;
+  /** (iteration 14) solid and its neighbours are profitable too; (15) solid and in a block that holds */ candidate: boolean;
+  /** (iteration 15) with the market gate */ gate?: boolean;
+  /** (iteration 15) rupees a month at its own size: R a month x its risk a trade */ inrPerMonth?: number;
 }
+/** (iteration 15) one block: 6 cells at one size, gated or not */
+export interface WideBlock { size: number; gate: boolean; cells: number; strong: number; examOk: number; holds: boolean; best: string | null; inrPerMonth: number | null }
 export interface WideVerdict {
   outcome: 'better' | 'not-better' | 'incomplete';
   message: string;
@@ -132,10 +138,12 @@ export interface WideVerdict {
   narrowDraws: WideDraw[]; wideDraws: WideDraw[]; wideMean: number | null;
   checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean; examPass?: boolean };
   checkList?: { label: string; ok: boolean }[];
-  goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number } | null;
-  /** (iteration 14 on) every floor x cap cell, both sizes */
+  goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number; position?: number } | null;
+  /** (iteration 14 on) every cell */
   grid?: WideCell[];
   pools?: Record<string, number>;
+  /** (iteration 15 on) every block */
+  blocks?: WideBlock[];
 }
 
 /** rupees a month at a position size, and the position that makes `goal` a month (decide months, no compounding) */
@@ -146,88 +154,110 @@ export function goalMoney(netR: number, tradesPerMonth: number, stopPct: number,
   return { perMonth, positionForGoal, tradesPerMonth, stopPct };
 }
 
-const draws = (shards: WideShard[], universe: WideShard['universe'], id: string | undefined): WideDraw[] =>
-  shards.filter((s) => s.universe === universe).flatMap((s) => {
-    const st = s.strategies.find((x) => x.id === id);
-    return st && st.dev.n ? [{ shard: s.shard, netR: st.dev.netR }] : [];
-  });
-
 /** the exam months (from May 26) as Algo Lab marks them: profitable after costs */
 export const examPasses = (e: Exam) => !!e && (e.pass !== undefined && e.pass !== null ? e.pass : (e.n ?? 0) >= 30 && (e.netR ?? 0) > 0);
 
-const CELL_ID = /^w(\d+)_(?:f(\d+)|(aware))_c(\d)$/;
+const CELL_ID = /^w(\d+)_(?:f(\d+)|(aware))_c(\d)(_g)?$/;
+const mean = (x: number[]) => (x.length ? x.reduce((a, b) => a + b, 0) / x.length : NaN);
 
-/** the grid of one size from a main shard */
+/** the cells of one shard's strategies (any size) */
 export function gridCells(strategies: WideShard['strategies'], pools: Record<string, number> | undefined): WideCell[] {
-  const cells: WideCell[] = strategies.flatMap((s) => {
+  return strategies.flatMap((s) => {
     const m = CELL_ID.exec(s.id);
     if (!m) return [];
-    const floor = m[3] ? 'aware' as const : Number(m[2]);
-    const tpm = s.money?.tradesPerMonth ?? 0;
-    const pool = pools ? pools[String(floor === 'aware' ? FLOORS_CR[0] : floor)] ?? null : null;
+    const floor = m[3] ? 'aware' as const : Number(m[2]), size = Number(m[1]);
+    const tpm = s.money?.tradesPerMonth ?? 0, stop = s.money?.stopPct ?? 0;
+    const pool = pools ? pools[String(floor === 'aware' ? 17 : floor)] ?? null : null;
     const exam = examPasses(s.exam);
     const solid = s.dev.n >= WIDE_RULE.n && s.dev.netR >= WIDE_RULE.netR && s.dev.t >= WIDE_RULE.t && exam && (pool ?? 0) >= WIDE_RULE.pool;
-    return [{ id: s.id, size: Number(m[1]), floor, cap: Number(m[4]), n: s.dev.n, netR: s.dev.netR, t: s.dev.t, tradesPerMonth: tpm,
-      rPerMonth: Math.round(s.dev.netR * tpm * 100) / 100, exam, pool, solid, candidate: false }];
+    const rPerMonth = Math.round(s.dev.netR * tpm * 100) / 100;
+    return [{ id: s.id, size, floor, cap: Number(m[4]), n: s.dev.n, netR: s.dev.netR, t: s.dev.t, tradesPerMonth: tpm, rPerMonth, exam, pool, solid,
+      candidate: false, gate: !!m[5], inrPerMonth: Math.round(s.dev.netR * tpm * size * 100_000 * stop / 100) }];
   });
-  const at = (size: number, floor: WideCell['floor'], cap: number) => cells.find((c) => c.size === size && c.floor === floor && c.cap === cap);
-  for (const c of cells) {
-    if (!c.solid) continue;
-    const near: (WideCell | undefined)[] = [at(c.size, c.floor, c.cap - 1), at(c.size, c.floor, c.cap + 1)];
-    if (c.floor !== 'aware') {
-      const k = FLOORS_CR.indexOf(c.floor);
-      near.push(at(c.size, FLOORS_CR[k - 1], c.cap), at(c.size, FLOORS_CR[k + 1], c.cap));
-    }
-    const have = near.filter((x): x is WideCell => !!x);
-    const good = have.filter((x) => x.netR > 0 && x.n > 0).length;
-    c.candidate = have.length > 0 && good >= Math.min(2, have.length);
-  }
-  return cells;
+}
+
+/** each block's numbers by the rule; marks the cells of the blocks that hold */
+export function blocksOf(cells: WideCell[]): WideBlock[] {
+  const keys = [...new Set(cells.map((c) => `${c.size}|${c.gate ? 1 : 0}`))];
+  return keys.map((k) => {
+    const [size, g] = k.split('|').map(Number), gate = g === 1;
+    const mine = cells.filter((c) => c.size === size && !!c.gate === gate);
+    const strong = mine.filter((c) => c.n >= WIDE_RULE.n && c.netR >= WIDE_RULE.netR && c.t >= WIDE_RULE.t).length;
+    const examOk = mine.filter((c) => c.exam).length;
+    const holds = mine.length === FLOORS_CR.length * CAPS.length && strong >= WIDE_RULE.strongMin && examOk >= WIDE_RULE.examMin;
+    const best = holds ? mine.filter((c) => c.solid).sort((a, b) => (b.inrPerMonth ?? 0) - (a.inrPerMonth ?? 0))[0] : undefined;
+    if (holds) for (const c of mine) c.candidate = c.solid;
+    return { size, gate, cells: mine.length, strong, examOk, holds, best: best?.id ?? null, inrPerMonth: best?.inrPerMonth ?? null };
+  }).sort((a, b) => Number(a.gate) - Number(b.gate) || a.size - b.size);
 }
 
 /**
- * Decide months, ₹10 lakh positions. The pick is the candidate (solid on its own, profitable neighbours) making the most R a
- * month; it wins only if its average over the training draws beats the ₹250-340 control's best draw and the placebo shows
- * no edge. ₹5 lakh cells are shown, not judged.
+ * The pick: from the blocks that hold, the solid cell making the most rupees a month at its size. It wins only if the ₹10
+ * lakh block it belongs to (gated or not) averages, over the training draws, more than the ₹250-340 control's best draw; it
+ * makes more R a month than the control; and the placebo (at the pick's own settings) shows no edge.
  */
 export function wideVerdict(shards: WideShard[]): WideVerdict {
   const main = (u: WideShard['universe']) => shards.find((s) => s.universe === u && s.shard === 'main');
-  const wide = main('wide'), narrow = main('narrow'), wide5 = main('wide5');
+  const wide = main('wide'), narrow = main('narrow'), ladder = main('ladder');
   const brief = (x: { id: string; name: string; dev: Dev } | undefined) => (x ? { id: x.id, name: x.name, netR: x.dev.netR, t: x.dev.t, n: x.dev.n, sumR: x.dev.sumR } : null);
-  const grid = [...(wide ? gridCells(wide.strategies, wide.pools) : []), ...(wide5 ? gridCells(wide5.strategies, wide5.pools ?? wide?.pools) : [])];
-  const tens = grid.filter((c) => c.size === 10);
-  const best = tens.filter((c) => c.candidate).sort((a, b) => b.rPerMonth - a.rPerMonth)[0];
-  const pickSt = best ? wide?.strategies.find((s) => s.id === best.id) : undefined;
+  const grid = [...(wide ? gridCells(wide.strategies, wide.pools) : []), ...(ladder ? gridCells(ladder.strategies, ladder.pools ?? wide?.pools) : [])];
+  const blocks = blocksOf(grid);
   const control = narrow?.strategies.find((x) => x.id === WIDE_CONTROL);
   const placebo = wide?.strategies.find((x) => x.id === 'placebo');
-  const narrowDraws = draws(shards, 'narrow', WIDE_CONTROL), wideDraws = best ? draws(shards, 'wide', best.id) : [];
-  const wideMean = wideDraws.length ? Math.round((wideDraws.reduce((a, d) => a + d.netR, 0) / wideDraws.length) * 1000) / 1000 : null;
-  const ctrlTpm = control?.money?.tradesPerMonth ?? 0;
+  const ctrlTpm = control?.money?.tradesPerMonth ?? 0, ctrlRpm = control ? control.dev.netR * ctrlTpm : 0;
+  const narrowDraws: WideDraw[] = shards.filter((s) => s.universe === 'narrow').flatMap((s) => {
+    const st = s.strategies.find((x) => x.id === WIDE_CONTROL);
+    return st && st.dev.n ? [{ shard: s.shard, netR: st.dev.netR }] : [];
+  });
+  const ctrlBest = narrowDraws.length ? Math.max(...narrowDraws.map((x) => x.netR)) : Infinity;
+  /** the ₹10 lakh block's (gated or not) average R a trade in each training draw */
+  const blockDraws = (gate: boolean): WideDraw[] => shards.filter((s) => s.universe === 'wide').flatMap((s) => {
+    const xs = gridCells(s.strategies, s.pools).filter((c) => c.size === 10 && !!c.gate === gate && c.n > 0).map((c) => c.netR);
+    return xs.length === FLOORS_CR.length * CAPS.length ? [{ shard: s.shard, netR: Math.round(mean(xs) * 1000) / 1000 }] : [];
+  });
+  const drawsG = blockDraws(true), drawsU = blockDraws(false);
+  const drawsOf = (gate: boolean) => (gate ? drawsG : drawsU);
+  const meanOf = (d: WideDraw[]) => (d.length ? Math.round(mean(d.map((x) => x.netR)) * 1000) / 1000 : null);
+  const beats = (gate: boolean) => { const d = drawsOf(gate), mm = meanOf(d); return mm !== null && d.length >= WIDE_MIN_DRAWS && mm > ctrlBest; };
+  const byRupees = (a: WideCell, b: WideCell) => (b.inrPerMonth ?? 0) - (a.inrPerMonth ?? 0);
+  const held = blocks.filter((b) => b.holds && b.best).map((b) => grid.find((c) => c.id === b.best)).filter((c): c is WideCell => !!c).sort(byRupees);
+  // the best cell that passes every check; if none does, the best of the blocks that hold (so the message says why)
+  const best = held.find((c) => beats(!!c.gate) && c.rPerMonth > ctrlRpm) ?? held[0];
+  const gate = !!best?.gate;
+  const wideDraws = best ? drawsOf(gate) : [], wideMean = meanOf(wideDraws);
+  const pickSt = best ? [...(wide?.strategies ?? []), ...(ladder?.strategies ?? [])].find((s) => s.id === best.id) : undefined;
   const checks = {
-    floor: tens.some((c) => c.solid),
+    floor: blocks.some((b) => b.holds),
     examPass: !!best?.exam,
-    beatsNoise: wideMean !== null && narrowDraws.length > 0 && wideMean > Math.max(...narrowDraws.map((x) => x.netR)),
-    moreTotalR: !!best && !!control && best.rPerMonth > control.dev.netR * ctrlTpm,
+    beatsNoise: !!best && beats(gate),
+    moreTotalR: !!best && !!control && best.rPerMonth > ctrlRpm,
     placeboClean: !!placebo && !(placebo.dev.n >= 100 && placebo.dev.t >= 2 && placebo.dev.netR > 0),
   };
   const checkList = [
-    { label: `a version at ₹10 lakh makes +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades, ${WIDE_RULE.pool}+ stocks a day, exam profitable`, ok: checks.floor },
-    { label: 'its neighbours (next floor, next cap) are profitable too', ok: !!best },
-    { label: "its average over the draws beats the ₹250–340 control's best draw at the same size", ok: checks.beatsNoise },
+    { label: `a block (6 cells at one size) has ${WIDE_RULE.strongMin}+ cells at +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades, and ${WIDE_RULE.examMin}+ cells profitable on the exam months`, ok: checks.floor },
+    { label: `its best cell is solid on its own (${WIDE_RULE.pool}+ stocks a day, exam profitable)`, ok: !!best },
+    { label: "the ₹10 lakh block's average over the training draws beats the ₹250–340 control's best draw", ok: checks.beatsNoise },
     { label: 'more R a month than the control', ok: checks.moreTotalR },
-    { label: 'the placebo shows no edge', ok: checks.placeboClean },
+    { label: "the placebo (at the pick's settings) shows no edge", ok: checks.placeboClean },
   ];
   const m = pickSt?.money;
-  const goal = best && m?.tradesPerMonth && m?.stopPct ? { ...goalMoney(best.netR, m.tradesPerMonth, m.stopPct), positionForHigh: goalMoney(best.netR, m.tradesPerMonth, m.stopPct, TARGET_POSITION, MONTHLY_GOAL_HIGH).positionForGoal, riskPerTrade: Math.round(TARGET_POSITION * m.stopPct / 100) } : null;
-  const base = { rule: WIDE_RULE, pick: brief(pickSt), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList, goal, grid, pools: wide?.pools };
+  const position = (best?.size ?? 10) * 100_000;
+  const goal = best && m?.tradesPerMonth && m?.stopPct
+    ? { ...goalMoney(best.netR, m.tradesPerMonth, m.stopPct, position), positionForHigh: goalMoney(best.netR, m.tradesPerMonth, m.stopPct, position, MONTHLY_GOAL_HIGH).positionForGoal, riskPerTrade: Math.round(position * m.stopPct / 100), position }
+    : null;
+  const base = { rule: WIDE_RULE, pick: brief(pickSt), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList, goal, grid, pools: wide?.pools, blocks };
+  const name = pickSt?.name ?? best?.id;
   if (!wide || !narrow || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS) {
     return { ...base, outcome: 'incomplete', message: `Not enough finished jobs to judge (₹250–340 draws: ${narrowDraws.length}; ${WIDE_MIN_DRAWS} needed). See the GitHub run.` };
   }
   if (!checks.placeboClean) return { ...base, outcome: 'not-better', message: 'The placebo shows an edge: something leaks. Do not trust this run.' };
-  if (!checks.floor) return { ...base, outcome: 'not-better', message: 'No floor or cap holds at ₹10 lakh positions. Higher volume does not fix size for this strategy.' };
-  if (!best) return { ...base, outcome: 'not-better', message: 'Only isolated cells hold at ₹10 lakh, with weak neighbours: likely luck. Do not move Algo Live.' };
-  if (wideDraws.length < WIDE_MIN_DRAWS) return { ...base, outcome: 'incomplete', message: `${pickSt?.name ?? best.id} looks best but too few training draws finished to check it (${wideDraws.length}).` };
-  if (!checks.beatsNoise) return { ...base, outcome: 'not-better', message: `${pickSt?.name ?? best.id} is the best pattern but does not beat ₹250–340 by more than training luck.` };
-  if (!checks.moreTotalR) return { ...base, outcome: 'not-better', message: `${pickSt?.name ?? best.id} makes less a month than ₹250–340.` };
-  return { ...base, outcome: 'better', message: `${pickSt?.name ?? best.id} holds at ₹10 lakh positions, with good neighbours, beyond training luck. A candidate for Algo Live.` };
+  if (!checks.floor) {
+    const ten = blocks.find((b) => b.size === 10 && !b.gate);
+    return { ...base, outcome: 'not-better', message: `No block holds: the region is not good on the decide months and the exam together${ten ? ` (₹10 lakh: ${ten.strong}/6 cells good on the decide months, ${ten.examOk}/6 profitable on the exam)` : ''}. Algo Live stays as it is.` };
+  }
+  if (!best) return { ...base, outcome: 'not-better', message: 'A block holds, but none of its cells is solid on its own (too few stocks a day, or its own exam lost). Algo Live stays as it is.' };
+  if (wideDraws.length < WIDE_MIN_DRAWS) return { ...base, outcome: 'incomplete', message: `${name} looks best but too few training draws finished to check it (${wideDraws.length}).` };
+  if (!checks.beatsNoise) return { ...base, outcome: 'not-better', message: `${name} is the best of the blocks that hold, but the block does not beat ₹250–340 by more than training luck.` };
+  if (!checks.moreTotalR) return { ...base, outcome: 'not-better', message: `${name} makes less a month than ₹250–340.` };
+  return { ...base, outcome: 'better', message: `${name} holds as a block on the decide months and the exam, beyond training luck: about ₹${(best.inrPerMonth ?? 0).toLocaleString('en-IN')} a month. A candidate for Algo Live, at a small size first.` };
 }

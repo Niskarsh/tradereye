@@ -143,3 +143,23 @@ written.
      are profitable too; the candidate with the most R a month wins if its draw average beats `nT10`'s best draw, it makes
      more R a month than `nT10` and the placebo is clean. ₹5 lakh is shown, not judged.
    - The page's "~₹1 / 3 lakh position" rows use the old fills (no liquidity cost) and now say so.
+15. **Does iteration 14's region hold as a block, at which size, and does a market gate fix 2026?** (same workflow and Run
+   button; iteration 14 stays under its git tag) Iteration 14's pick (₹10 lakh, ₹100 crore+ a day, 4 a day: +0.08R, t 4.2)
+   passed its rule, but the exam was weak (4 of 27 cells profitable; two of the pick's neighbours lost; Jul–Sep 2026 lost
+   almost everywhere) and the neighbour check had been applied to the decide months only.
+   - The block: ₹50, 100 and 170 crore a day x 3 and 4 a day (`FLOORS_CR`, `CAPS` in scripts/ml_wide.py). Job `wide`: the
+     block at ₹10 lakh, the same block with the market gate (`_g`), and the placebo at ₹10 lakh / ₹100 cr / 4 a day, with the
+     5 training draws. Job `ladder` (main draw only): the block at ₹5, 8, 12 and 15 lakh (`LADDER`), priced as in iteration 13.
+   - Market gate (`hot_days`): the market's 20-day move = the median `ret20d` of every stock in the dataset at the day's first
+     minute; a day is hot if that is above the top third of the 250 trading days before it (60 days of history at least).
+     Fixed before the run, not tuned. Every version also reports its decide-month R by the third of that move
+     (`regime`), the share of exam days that were hot, and how many decide days lost 2R / 3R+ (`badDays`). A daily loss stop
+     is not modelled: the dataset has no exit times, so it would use results not yet known.
+   - Rule fixed before the run (`wideVerdict`, `blocksOf`): a block (6 cells at one size, gated or not) holds if 5+ cells
+     make +0.05R, t ≥ 2, 150+ trades on the decide months AND 4+ cells are profitable on the exam months. From the blocks that
+     hold, the pick is the cell solid on its own (+0.05R, t ≥ 2, 150+ trades, 50+ stocks a day, exam profitable) making the
+     most rupees a month at its size; it wins if the ₹10 lakh block's draw average (gated or not) beats `nT10`'s best draw,
+     it makes more R a month than `nT10` and the placebo is clean. Otherwise Algo Live stays as it is. On iteration 14's
+     numbers the ₹10 lakh block would not hold (2 of 6 cells profitable on the exam).
+   - The workflow's tag now takes the iteration from scripts/ml_wide.py (iterations 13 and 14 were tagged `algo-iter-12-*`).
+

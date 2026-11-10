@@ -96,41 +96,58 @@ test('the run never competes with Algo Live for Dhan requests', () => {
 
 const dev = (netR: number, t = 3, n = 500, sumR = netR * n) => ({ n, netR, t, sumR });
 const examOk = { n: 60, netR: 0.05, t: 1, pass: true }, examBad = { n: 60, netR: -0.05, t: -1, pass: false };
-const FLOORS = [17, 50, 100, 170, 250, 340, 500, 750, 1000];
-/** a ₹10 lakh grid: netR by (floor, cap); everything else solid unless overridden */
-function world(o: { cell?: (f: number, c: number) => number; exam?: (f: number, c: number) => boolean; seedsOf?: number[]; narrow?: number[]; placebo?: ReturnType<typeof dev>; pools?: Record<string, number> }): WideShard[] {
+const FLOORS = [50, 100, 170], CAPS3 = [3, 4];
+type CellFn = (size: number, f: number, c: number, gate: boolean) => number;
+type ExamFn = (size: number, f: number, c: number, gate: boolean) => boolean;
+/** iteration 15: the block at ₹10 lakh (and gated) in 'wide' with draws, the ladder in 'ladder' (main only) */
+function world(o: { cell?: CellFn; exam?: ExamFn; seedsOf?: number[]; narrow?: number[]; placebo?: ReturnType<typeof dev>; pools?: Record<string, number> }): WideShard[] {
   const cell = o.cell ?? (() => 0.0), exam = o.exam ?? (() => true);
   const narrow = o.narrow ?? [0.01, 0.02, 0.03];
-  const pools = o.pools ?? Object.fromEntries(FLOORS.map((f) => [String(f), Math.round(2000 / Math.sqrt(f))]));
-  const grid = (bump: number) => FLOORS.flatMap((f) => [2, 3, 4].map((c) => ({ id: `w10_f${f}_c${c}`, name: `₹${f} cr · ${c}`, dev: dev(cell(f, c) + bump), exam: exam(f, c) ? examOk : examBad, money: { tradesPerMonth: 10 * c, stopPct: 2.2 } })));
+  const pools = o.pools ?? { 50: 117, 100: 70, 170: 55 };
+  const block = (size: number, gate: boolean, bump: number) => FLOORS.flatMap((f) => CAPS3.map((c) => ({
+    id: `w${size}_f${f}_c${c}${gate ? '_g' : ''}`, name: `₹${size} lakh · ₹${f} cr · ${c}${gate ? ' · gate' : ''}`, dev: dev(cell(size, f, c, gate) + bump),
+    exam: exam(size, f, c, gate) ? examOk : examBad, money: { tradesPerMonth: 10 * c, stopPct: 2.32 } })));
   const seeds = o.seedsOf ?? [0, 0.01, -0.01];
   const seed = (i: number) => (i ? `seed${i + 1}` : 'main');
   return [
-    ...narrow.map((netR, i): WideShard => ({ universe: 'narrow', shard: seed(i), strategies: [{ id: 'nT10', name: 'control at size', dev: dev(netR), money: { tradesPerMonth: 20, stopPct: 2.2 } }] })),
-    ...seeds.map((b, i): WideShard => ({ universe: 'wide', shard: seed(i), pools, strategies: [...grid(b), ...(i ? [] : [{ id: 'placebo', name: 'p', dev: o.placebo ?? dev(0, 0.2) }])] })),
+    ...narrow.map((netR, i): WideShard => ({ universe: 'narrow', shard: seed(i), strategies: [{ id: 'nT10', name: 'control at size', dev: dev(netR), money: { tradesPerMonth: 20, stopPct: 2.32 } }] })),
+    ...seeds.map((b, i): WideShard => ({ universe: 'wide', shard: seed(i), pools, strategies: [...block(10, false, b), ...block(10, true, b), ...(i ? [] : [{ id: 'placebo', name: 'p', dev: o.placebo ?? dev(0, 0.2) }])] })),
+    { universe: 'ladder', shard: 'main', pools, strategies: [5, 8, 12, 15].flatMap((k) => block(k, false, 0)) },
   ];
 }
-test('verdict (iteration 14): the best cell with good neighbours wins', () => {
-  // a smooth hill: better with liquidity up to ₹250 crore, more trades a day helps a little
-  const hill = (f: number, c: number) => 0.09 - Math.abs(Math.log(f / 250)) * 0.02 + (c - 2) * 0.005;
-  const ok = wideVerdict(world({ cell: hill }));
-  assert.equal(ok.outcome, 'better', ok.message);
-  assert.equal(ok.pick?.id, 'w10_f250_c4', 'the most R a month among candidates');
-  assert.equal(ok.grid?.filter((c) => c.size === 10).length, 27);
-  assert.ok(ok.goal && ok.goal.perMonth > 0 && ok.goal.riskPerTrade === 22000);
+// bigger orders cost more impact: R a trade falls with size
+const sized: CellFn = (size, f, c) => 0.11 - size * 0.003 + (f === 100 ? 0.005 : 0) + (c === 4 ? 0.002 : 0);
+test('verdict (iteration 15): the block that holds and makes the most rupees a month wins', () => {
+  const v = wideVerdict(world({ cell: sized }));
+  assert.equal(v.outcome, 'better', v.message);
+  assert.equal(v.blocks?.length, 6, '5 sizes + the gated ₹10 lakh block');
+  assert.ok(v.blocks?.every((b) => b.holds), JSON.stringify(v.blocks));
+  // R a month x size: 15 lakh makes the most rupees even at a lower R a trade
+  assert.equal(v.pick?.id, 'w15_f100_c4');
+  assert.equal(v.goal?.position, 1_500_000); assert.equal(v.goal?.riskPerTrade, 34800);
+  assert.equal(v.grid?.length, 36);
 });
-test('verdict (iteration 14): one lucky cell among bad neighbours does not count', () => {
-  const v = wideVerdict(world({ cell: (f, c) => (f === 340 && c === 3 ? 0.12 : -0.03) }));
-  assert.equal(v.outcome, 'not-better'); assert.equal(v.checks.floor, true); assert.equal(v.pick, null); assert.match(v.message, /isolated/);
+test('verdict (iteration 15): iteration 14 again (good decide months, the exam lost in most cells) holds nowhere', () => {
+  // the shape iteration 14 had at ₹10 lakh: 2 of 6 cells profitable on the exam
+  const exam: ExamFn = (_s, f, c) => (f === 50 && c === 3) || (f === 100 && c === 4);
+  const v = wideVerdict(world({ cell: () => 0.07, exam }));
+  assert.equal(v.outcome, 'not-better'); assert.equal(v.checks.floor, false); assert.equal(v.pick, null);
+  assert.match(v.message, /No block holds.*2\/6 profitable on the exam/);
 });
-test('verdict (iteration 14): a floor with too few stocks, or a failed exam, is not solid', () => {
-  const pools = Object.fromEntries(FLOORS.map((f) => [String(f), f >= 500 ? 20 : 200]));
-  const v = wideVerdict(world({ cell: (f) => (f >= 500 ? 0.1 : -0.02), pools }));
-  assert.equal(v.checks.floor, false, 'only floors with 20 stocks a day look good'); assert.equal(v.outcome, 'not-better');
-  const e = wideVerdict(world({ cell: () => 0.08, exam: () => false }));
-  assert.equal(e.checks.floor, false); assert.equal(e.outcome, 'not-better');
+test('verdict (iteration 15): one weak cell is fine, two are not', () => {
+  const one = wideVerdict(world({ cell: (s, f, c) => (f === 170 && c === 3 ? 0.01 : 0.07) }));
+  assert.equal(one.outcome, 'better', one.message);
+  const two = wideVerdict(world({ cell: (s, f) => (f === 170 ? 0.01 : 0.07) }));
+  assert.equal(two.checks.floor, false); assert.equal(two.outcome, 'not-better');
 });
-test('verdict (iteration 14): within the control\'s training noise, or a leaking placebo, fails', () => {
+test('verdict (iteration 15): the gated block can win where the plain one fails the exam', () => {
+  const v = wideVerdict(world({ cell: () => 0.07, exam: (s, f, c, g) => g }));
+  assert.equal(v.outcome, 'better', v.message); assert.equal(v.pick?.id.endsWith('_g'), true);
+  assert.equal(v.blocks?.find((b) => b.gate)?.holds, true); assert.equal(v.blocks?.find((b) => !b.gate && b.size === 10)?.holds, false);
+});
+test('verdict (iteration 15): a pick with too few stocks a day is not solid; training luck or a leak fails', () => {
+  const thin = wideVerdict(world({ cell: () => 0.07, pools: { 50: 30, 100: 20, 170: 10 } }));
+  assert.equal(thin.checks.floor, true); assert.equal(thin.pick, null); assert.equal(thin.outcome, 'not-better');
   const near = wideVerdict(world({ cell: () => 0.06, narrow: [0.06, 0.07, 0.065] }));
   assert.equal(near.checks.beatsNoise, false); assert.equal(near.outcome, 'not-better');
   const leak = wideVerdict(world({ cell: () => 0.08, placebo: dev(0.1, 3) }));

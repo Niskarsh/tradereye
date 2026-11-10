@@ -5,7 +5,7 @@
  * both say what each number really is. Older iterations, and versions without a size, pass through unchanged.
  */
 
-/** the position a version is priced at, in lakh: w10_f170_c3 / w5_aware_c2 / nT10 / (iteration 13) wT15; null = ₹300 risk */
+/** the position a version is priced at, in lakh: w10_f170_c3 / w5_aware_c2 / w12_f100_c4_g / nT10 / (iteration 13) wT15; null = ₹300 risk */
 export function sizeLakh(id: string): number | null {
   const m = /^w(\d+)_/.exec(id) ?? /^[nw]T(\d+)$/.exec(id);
   return m ? Number(m[1]) : null;
@@ -47,7 +47,8 @@ export function relabelSized<T extends MlIn>(ml: T): T {
       const lakh = sizeLakh(s.id);
       const months = s.months?.map((m) => (!m.n && !m.note ? { ...m, note: NO_TRADE_NOTE } : m));
       const out = { ...s, months };
-      if (s.id === 'placebo') return { ...out, name: PLACEBO_NAME };
+      // iterations 12-14 priced the placebo at ₹300 risk on all stocks under a plain name; from 15 its name says its own settings
+      if (s.id === 'placebo') return s.name === 'Placebo (shuffled outcomes)' ? { ...out, name: PLACEBO_NAME } : out;
       if (lakh == null) return out;
       return {
         ...out,

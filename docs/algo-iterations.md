@@ -33,7 +33,8 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 11 | (F as live, real fills by liquidity, floors 5 lakh / 3M / 5M / 7M / 10M; placebo) | | | | | | | running |
 | 12 | F as live on ₹250–1000 against ₹250–340 (control −0.01R, t −0.4); best: ₹250–1000 all +0.12R, t 4.7, 24/29 green, exam Pass, draws +0.05 to +0.12R; every liquidity floor halves it (+0.03 to +0.06R, exam Fail) | | | | | | | done 10 Nov |
 | 13 | ₹250–1000 at size (ETFs out): ₹300 risk +0.07R (t 2.7, exam Pass); ₹10 lakh +0.04R (t 1.5, exam Fail), ₹15 lakh +0.03R, ₹20 lakh 0; ₹250–340 control −0.03R / −0.06R. Before costs +0.17R: impact of ₹10 lakh orders in thin picks eats it | | | | | | | done 10 Nov |
-| 14 | (₹10 and ₹5 lakh positions × turnover floors ₹17–1,000 cr × 2/3/4 a day, plus size-aware picking; pattern rule) | | | | | | | to run |
+| 14 | ₹10 lakh positions, ₹100 cr+ a day, 4 a day passed (+0.08R, t 4.2, 3.9R a month ≈ ₹90,000; draws +0.04 to +0.08R; untouched +0.13R); sweet spot ₹100–340 cr; size-aware +0.04R (dropped). But only 4 of 27 cells profitable on the exam, two of the pick's neighbours lost there, Jul–Sep 2026 lost almost everywhere, pick stood aside Oct–Nov: Algo Live not changed | | | | | | | done 10 Nov |
+| 15 | (the region as a block: ₹50/100/170 cr × 3/4 a day at ₹5/8/10/12/15 lakh, plus a market gate on the ₹10 lakh block; placebo at the pick's settings; block rule on decide + exam) | | | | | | | to run |
 
 Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
 the first 20 minutes and are already 1.6 ATR below it.

@@ -59,15 +59,15 @@ jobs:
   models:
     needs: dataset
     runs-on: ubuntu-latest
-    timeout-minutes: 355  # ~30 versions a job from iteration 14 on: GitHub's limit is 360
+    timeout-minutes: 355  # 13 versions in 'wide', 24 in 'ladder' (iteration 15): GitHub's limit is 360
     strategy:
       fail-fast: false
       matrix:
-        # narrow: the ₹250-340 control · wide: the ₹10 lakh grid (+ placebo) · wide5: the same at ₹5 lakh (main only)
+        # narrow: the ₹250-340 control · wide: the ₹10 lakh block, gated block and placebo · ladder: the block at ₹5/8/12/15 lakh (main only)
         universe: [narrow, wide]
         shard: [main, seed2, seed3, seed4, seed5]
         include:
-          - universe: wide5
+          - universe: ladder
             shard: main
     steps:
       - uses: actions/checkout@v4
@@ -117,8 +117,10 @@ jobs:
       - name: Tag the code of this iteration
         if: success()
         continue-on-error: true
+        # the iteration number comes from the models script (iterations 13 and 14 were tagged algo-iter-12-* by mistake)
         run: |
-          git tag "algo-iter-12-${RUN_ID}" "$GITHUB_SHA"
-          git push origin "algo-iter-12-${RUN_ID}"
+          ITER=$(grep -oP '^ITERATION = \K\d+' scripts/ml_wide.py)
+          git tag "algo-iter-${ITER}-${RUN_ID}" "$GITHUB_SHA"
+          git push origin "algo-iter-${ITER}-${RUN_ID}"
         env:
           RUN_ID: ${{ inputs.run_id }}

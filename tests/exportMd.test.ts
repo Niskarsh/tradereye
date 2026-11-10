@@ -96,3 +96,26 @@ test('5. an empty month says why', () => {
   assert.match(md, /\| 2026-09 \(exam\) \| 0 \|.*\| no trade passed the bar \|/);
   assert.match(md, /\| 2026-10 \| 0 \|.*\| stood aside \|/);
 });
+
+test('iteration 15: blocks, gated rows, rupees at size, the market and the bad days', () => {
+  const st = { ...strat('w12_f100_c4', 0.07), regime: { cuts: [1.2, 4.5], low: { n: 300, netR: 0.1 }, mid: { n: 300, netR: 0.08 }, high: { n: 300, netR: -0.02 }, examHotShare: 0.61 }, badDays: { days: 500, le2: 31, le3: 9 } };
+  const md = mlToMarkdown({
+    ...ml, iteration: 15, strategies: [st],
+    wide: {
+      outcome: 'better', message: 'm', pick: { id: 'w12_f100_c4', name: 'n' }, pools: { 50: 117, 100: 70, 170: 41 },
+      goal: { perMonth: 98000, positionForGoal: 1_220_000, positionForHigh: 1_840_000, riskPerTrade: 27840, tradesPerMonth: 50, position: 1_200_000 },
+      blocks: [{ size: 12, gate: false, cells: 6, strong: 6, examOk: 5, holds: true, best: 'w12_f100_c4', inrPerMonth: 98000 }, { size: 10, gate: true, cells: 6, strong: 4, examOk: 3, holds: false, best: null, inrPerMonth: null }],
+      grid: [
+        { id: 'w12_f100_c4', size: 12, floor: 100, cap: 4, n: 1700, netR: 0.07, t: 4, rPerMonth: 3.5, tradesPerMonth: 50, exam: true, pool: 70, solid: true, candidate: true, inrPerMonth: 98000 },
+        { id: 'w10_f100_c4_g', size: 10, floor: 100, cap: 4, n: 1400, netR: 0.06, t: 3, rPerMonth: 2.5, tradesPerMonth: 42, exam: false, pool: 70, solid: false, candidate: false, gate: true, inrPerMonth: 58000 },
+      ],
+    },
+  });
+  assert.match(md, /\| ₹12 lakh \| no \| 6\/6 \| 5\/6 \| yes \| w12_f100_c4 \| ₹98,000 \|/);
+  assert.match(md, /- Goal: ₹98,000 a month at ₹12 lakh positions/);
+  assert.match(md, /\| ₹100 cr\+ · market gate \| 70 \| \+0\.06R · t 3\.0 · 1400 · 2\.5R\/mo · ₹58,000 · exam Fail \|/);
+  assert.match(md, /3\.5R\/mo · ₹98,000 · exam Pass C \*/);
+  assert.match(md, /low \+0\.10R \(300\) · mid \+0\.08R \(300\) · high -0\.02R \(300\) · exam days in the gate's top third 61%/);
+  assert.match(md, /lost 2R or more: 31 · 3R or more: 9 \(of 500 days with a trade\)/);
+  assert.match(md, /Money at ₹12 lakh positions/);
+});
