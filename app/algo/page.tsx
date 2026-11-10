@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
 import { WideRunCard } from '@/components/algo/WideRunCard';
-import type { WideCell } from '@/lib/ml/wide';
+import type { WideBlock, WideCell } from '@/lib/ml/wide';
 import { exportFileName, mlToMarkdown, type ExportMl } from '@/lib/ml/exportMd';
 import { relabelSized } from '@/lib/ml/sized';
 
@@ -21,7 +21,8 @@ interface WideResult {
   checkList?: { label: string; ok: boolean }[];
   grid?: WideCell[];
   pools?: Record<string, number>;
-  goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number } | null;
+  goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number; position?: number } | null;
+  blocks?: WideBlock[];
 }
 interface S { n: number; hit: number; netR: number; gross: number; sumR: number; inr: number; t: number }
 interface P extends S { monthsGreen: number; monthsTraded: number; monthsTotal: number }
@@ -642,32 +643,36 @@ function Picker({ history, live, ml, run, open }: { history: Head[]; live: Live 
   );
 }
 
-const CELL_ID = /^w(\d+)_(?:f(\d+)|aware)_c(\d)$/;
+const CELL_ID = /^w(\d+)_(?:f(\d+)|aware)_c(\d)(_g)?$/;
 
-/** iteration 14 on: floors x trades a day at one position size; the pick outlined, cells solid on their own in green */
+/** iteration 14 on: floors x trades a day at one position size (from 15 also the gated rows); the pick outlined, cells solid on
+ * their own in green */
 function GridTable({ cells, size, pools, pick }: { cells: WideCell[]; size: number; pools?: Record<string, number>; pick?: string }) {
   const mine = cells.filter((c) => c.size === size);
   if (!mine.length) return null;
   const caps = [...new Set(mine.map((c) => c.cap))].sort();
-  const floors = [...new Set(mine.map((c) => c.floor))].sort((a, b) => (a === 'aware' ? 1 : b === 'aware' ? -1 : a - b));
+  const rows = [...new Set(mine.map((c) => `${c.gate ? 1 : 0}|${c.floor}`))]
+    .map((k) => { const [g, fl] = k.split('|'); return { gate: g === '1', floor: fl === 'aware' ? 'aware' as const : Number(fl) }; })
+    .sort((a, b) => Number(a.gate) - Number(b.gate) || (a.floor === 'aware' ? 1 : b.floor === 'aware' ? -1 : a.floor - b.floor));
+  const poolOf = (f: number | 'aware') => pools?.[String(f === 'aware' ? 17 : f)];
   return (
     <div className="mt-3">
-      <p className="text-xs font-black text-ink-1">₹{size} lakh positions (~₹{(size * 2200).toLocaleString('en-IN')} risk a trade)</p>
+      <p className="text-xs font-black text-ink-1">₹{size} lakh positions (~₹{(size * 2300).toLocaleString('en-IN')} risk a trade)</p>
       <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[560px] text-xs"><thead><tr className={HEAD}>
         <th className="px-2 py-1.5 text-left">Stocks trading</th><th className={TH}>Stocks a day</th>
         {caps.map((c) => <th key={c} className={TH}>{c} a day</th>)}
       </tr></thead><tbody>
-        {floors.map((f) => (
-          <tr key={String(f)} className="border-b border-line/60 font-mono tabular-nums">
-            <td className="px-2 py-1.5 font-sans">{f === 'aware' ? 'Size-aware (all)' : `₹${f.toLocaleString('en-IN')} cr+ a day`}</td>
-            <td className={`${TH} ${pools && (pools[String(f === 'aware' ? 17 : f)] ?? 0) < 50 ? 'text-data-red-text' : 'text-ink-2'}`}>{pools ? pools[String(f === 'aware' ? 17 : f)] ?? '–' : '–'}</td>
+        {rows.map(({ floor: f, gate }) => (
+          <tr key={`${gate}${f}`} className="border-b border-line/60 font-mono tabular-nums">
+            <td className="px-2 py-1.5 font-sans">{f === 'aware' ? 'Size-aware (all)' : `₹${f.toLocaleString('en-IN')} cr+ a day`}{gate ? ' · market gate' : ''}</td>
+            <td className={`${TH} ${(poolOf(f) ?? 0) < 50 ? 'text-data-red-text' : 'text-ink-2'}`}>{poolOf(f) ?? '–'}</td>
             {caps.map((cap) => {
-              const c = mine.find((x) => x.floor === f && x.cap === cap);
+              const c = mine.find((x) => x.floor === f && x.cap === cap && !!x.gate === gate);
               if (!c) return <td key={cap} className={TH}>–</td>;
               return (
                 <td key={cap} className={`${TH} ${c.solid ? 'bg-data-green/10' : ''} ${pick === c.id ? 'outline outline-2 outline-brand-accent' : ''}`}>
                   <span className={`font-bold ${tone(c.netR, c.n > 0)}`}>{c.n ? rr(c.netR) : '–'}</span>
-                  <span className="text-ink-3"> t {fx(c.t)} · {c.rPerMonth >= 0 ? '+' : ''}{fx(c.rPerMonth, 1)}R/mo{c.exam ? '' : ' · exam ✗'}</span>
+                  <span className="text-ink-3"> t {fx(c.t)} · {c.rPerMonth >= 0 ? '+' : ''}{fx(c.rPerMonth, 1)}R/mo{c.inrPerMonth != null ? ` · ₹${c.inrPerMonth.toLocaleString('en-IN')}` : ''}{c.exam ? '' : ' · exam ✗'}</span>
                 </td>
               );
             })}
@@ -675,6 +680,23 @@ function GridTable({ cells, size, pools, pick }: { cells: WideCell[]; size: numb
         ))}
       </tbody></table></div>
     </div>
+  );
+}
+
+/** iteration 15 on: each block (6 cells at one size) against the rule */
+function BlockTable({ blocks }: { blocks: WideBlock[] }) {
+  return (
+    <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-xs"><thead><tr className={HEAD}>
+      <th className="px-2 py-1.5 text-left">Block</th><th className={TH}>Good on decide months</th><th className={TH}>Profitable on the exam</th><th className={TH}>Holds</th><th className={TH}>Best cell</th><th className={TH}>₹ a month</th>
+    </tr></thead><tbody>
+      {blocks.map((b) => (
+        <tr key={`${b.size}${b.gate}`} className={`border-b border-line/60 font-mono tabular-nums ${b.holds ? 'bg-data-green/10' : ''}`}>
+          <td className="px-2 py-1.5 font-sans">₹{b.size} lakh{b.gate ? ' · market gate' : ''}</td>
+          <td className={TH}>{b.strong}/{b.cells}</td><td className={TH}>{b.examOk}/{b.cells}</td><td className={`${TH} font-bold`}>{b.holds ? 'yes' : 'no'}</td>
+          <td className={TH}>{b.best ?? '–'}</td><td className={TH}>{b.inrPerMonth != null ? `₹${b.inrPerMonth.toLocaleString('en-IN')}` : '–'}</td>
+        </tr>
+      ))}
+    </tbody></table></div>
   );
 }
 
@@ -686,7 +708,7 @@ function WideCard({ ml }: { ml: Ml }) {
   const yes = (ok: boolean) => (ok ? '✓' : '✗');
   const draws = (d: { netR: number }[]) => d.map((x) => rr(x.netR)).join(' · ');
   return (
-    <Card title="Does a wider universe help?" sub={`Decide months, real fills, after costs at ₹300 risk. ${ml.narrowStocks ?? '–'} stocks in ₹250–340 against ${ml.stocks} in ₹250–1000. Algo Live is not affected by this run.`}>
+    <Card title="Does a wider universe help?" sub={`Decide months, real fills, after costs at each version's own size. ${ml.narrowStocks ?? '–'} stocks in ₹250–340 against ${ml.stocks} in ₹250–1000. Algo Live is not affected by this run.`}>
       <p className={`text-sm font-bold ${w.outcome === 'better' ? 'text-data-green' : w.outcome === 'incomplete' ? 'text-ink-2' : 'text-data-red-text'}`}>{w.message}</p>
       <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className={HEAD}>
         <th className="px-2 py-1.5 text-left">Version</th><th className={TH}>Trades / month</th><th className={TH}>R / trade</th><th className={TH}>t</th><th className={TH}>Months green</th><th className={TH}>₹ / month</th><th className={TH}>5 draws</th><th className={TH}>Untouched</th><th className={TH}>Exam</th>
@@ -706,8 +728,10 @@ function WideCard({ ml }: { ml: Ml }) {
       </tbody></table></div>
       {!!w.grid?.length && (
         <>
-          <GridTable cells={w.grid} size={10} pools={w.pools} pick={w.pick?.id} />
-          <GridTable cells={w.grid} size={5} pools={w.pools} />
+          {w.blocks?.length ? <BlockTable blocks={w.blocks} /> : null}
+          {[...new Set(w.grid.map((c) => c.size))].sort((a, b) => (a === 10 ? -1 : b === 10 ? 1 : a - b)).map((size) => (
+            <GridTable key={size} cells={w.grid!} size={size} pools={w.pools} pick={w.pick?.id} />
+          ))}
           <p className="mt-1 text-[11px] text-ink-3">Each cell: R a trade after costs at that size · t · R a month. Green = solid on its own (+{w.rule.netR}R, t {w.rule.t}+, {w.rule.n}+ trades, {(w.rule as { pool?: number }).pool ?? 50}+ stocks a day, exam profitable). Outlined = the pick. Stocks a day in red: too few to judge.</p>
         </>
       )}
@@ -718,9 +742,9 @@ function WideCard({ ml }: { ml: Ml }) {
       </p>}
       {w.goal && (
         <p className="mt-2 text-xs text-ink-2">
-          Against the ₹1–1.5 lakh a month goal (in total, not per trade): <span className={`font-bold ${w.goal.perMonth >= 100000 ? 'text-data-green' : ''}`}>₹{w.goal.perMonth.toLocaleString('en-IN')} a month</span> at ₹10 lakh positions
-          (~₹{(w.goal.riskPerTrade ?? 0).toLocaleString('en-IN')} risk a trade, {w.goal.tradesPerMonth} trades a month)
-          {w.goal.positionForGoal ? ` · ₹1 lakh a month needs ~₹${(w.goal.positionForGoal / 100000).toFixed(1)} lakh positions${w.goal.positionForHigh ? `, ₹1.5 lakh ~₹${(w.goal.positionForHigh / 100000).toFixed(1)} lakh` : ''} (compare the ₹15 / 20 lakh rows: bigger orders cost more)` : ' · not profitable at this size'}.
+          Against the ₹1–1.5 lakh a month goal (in total, not per trade): <span className={`font-bold ${w.goal.perMonth >= 100000 ? 'text-data-green' : ''}`}>₹{w.goal.perMonth.toLocaleString('en-IN')} a month</span> at ₹{(w.goal.position ?? 1_000_000) / 100_000} lakh positions
+          {' '}(~₹{(w.goal.riskPerTrade ?? 0).toLocaleString('en-IN')} risk a trade, {w.goal.tradesPerMonth} trades a month)
+          {w.goal.positionForGoal ? ` · ₹1 lakh a month needs ~₹${(w.goal.positionForGoal / 100000).toFixed(1)} lakh positions${w.goal.positionForHigh ? `, ₹1.5 lakh ~₹${(w.goal.positionForHigh / 100000).toFixed(1)} lakh` : ''} (bigger orders cost more impact: see the size ladder)` : ' · not profitable at this size'}.
         </p>
       )}
       <p className="mt-1 font-mono text-[11px] text-ink-3">₹250–340 draws: {draws(w.narrowDraws)}<br />Wide draws: {draws(w.wideDraws)}{w.wideMean !== null ? ` (average ${rr(w.wideMean)})` : ''}</p>

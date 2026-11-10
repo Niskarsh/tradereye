@@ -24,10 +24,14 @@ interface Strat {
   liked?: { side: string; label: string; z: number; taken: number; all: number }[];
   recent?: { day: string; sym: string; time: string; side: string; pred: number; net: number }[];
   bands?: (S & { band: string })[] | null;
+  /** (iteration 15) decide-month R by the third of the market's 20-day move; days that lost 2R / 3R+ */
+  regime?: { cuts?: number[] | null; low?: { n: number; netR: number | null }; mid?: { n: number; netR: number | null }; high?: { n: number; netR: number | null }; examHotShare?: number | null } | null;
+  badDays?: { days: number; le2: number; le3: number } | null;
 }
 interface Untouched { id: string; name?: string; from?: string; to?: string; overall?: P }
 interface Noise { strategy: string; devMin: number; devMax: number; devMean: number; draws?: { draw: string; devNetR: number; devT: number }[] }
-interface Cell { id: string; size: number; floor: number | 'aware'; cap: number; n: number; netR: number; t: number; rPerMonth: number; tradesPerMonth: number; exam: boolean; pool: number | null; solid: boolean; candidate: boolean }
+interface Cell { id: string; size: number; floor: number | 'aware'; cap: number; n: number; netR: number; t: number; rPerMonth: number; tradesPerMonth: number; exam: boolean; pool: number | null; solid: boolean; candidate: boolean; gate?: boolean; inrPerMonth?: number }
+interface Block { size: number; gate: boolean; cells: number; strong: number; examOk: number; holds: boolean; best: string | null; inrPerMonth: number | null }
 export interface ExportMl {
   iteration: number; runId: string; code?: string | null; createdAt: number; changes?: string[];
   period?: { from: string; to: string }; examFrom?: string; rows?: number; stocks?: number; days?: number; narrowStocks?: number;
@@ -38,8 +42,8 @@ export interface ExportMl {
     outcome: string; message: string; checkList?: { label: string; ok: boolean }[];
     pick?: { id: string; name: string } | null; control?: { id: string; name: string } | null;
     narrowDraws?: { shard: string; netR: number }[]; wideDraws?: { shard: string; netR: number }[]; wideMean?: number | null;
-    goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number } | null;
-    grid?: Cell[]; pools?: Record<string, number>;
+    goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; position?: number } | null;
+    grid?: Cell[]; pools?: Record<string, number>; blocks?: Block[];
   };
 }
 
@@ -82,9 +86,16 @@ export function mlToMarkdown(raw: ExportMl): string {
     lines.push(`- Pick: ${w.pick ? `${w.pick.id} (${w.pick.name})` : 'none'} · control: ${w.control ? `${w.control.id} (${w.control.name})` : '–'}`);
     if (w.narrowDraws?.length) lines.push(`- Control draws: ${w.narrowDraws.map((d) => r(d.netR)).join(', ')}`);
     if (w.wideDraws?.length) lines.push(`- Pick draws: ${w.wideDraws.map((d) => r(d.netR)).join(', ')} (average ${r(w.wideMean)})`);
-    if (w.goal) lines.push(`- Goal: ${inr(w.goal.perMonth)} a month at ₹10 lakh positions (~${inr(w.goal.riskPerTrade)} risk a trade, ${w.goal.tradesPerMonth} trades a month) · ₹1 lakh a month needs ~${w.goal.positionForGoal ? `₹${(w.goal.positionForGoal / 1e5).toFixed(1)} lakh` : '–'} positions, ₹1.5 lakh ~${w.goal.positionForHigh ? `₹${(w.goal.positionForHigh / 1e5).toFixed(1)} lakh` : '–'}`);
+    if (w.goal) lines.push(`- Goal: ${inr(w.goal.perMonth)} a month at ₹${(w.goal.position ?? 1e6) / 1e5} lakh positions (~${inr(w.goal.riskPerTrade)} risk a trade, ${w.goal.tradesPerMonth} trades a month) · ₹1 lakh a month needs ~${w.goal.positionForGoal ? `₹${(w.goal.positionForGoal / 1e5).toFixed(1)} lakh` : '–'} positions, ₹1.5 lakh ~${w.goal.positionForHigh ? `₹${(w.goal.positionForHigh / 1e5).toFixed(1)} lakh` : '–'}`);
     if (w.pools) lines.push(`- Stocks clearing each turnover floor on a typical day: ${Object.entries(w.pools).map(([k, v]) => `₹${k} cr+: ${v}`).join(' · ')}`);
     out.push(lines.join('\n'));
+  }
+
+  if (w?.blocks?.length) {
+    out.push('## Blocks (6 cells at one size: ₹50 / 100 / 170 cr+ x 3 / 4 a day)\n' + table(
+      ['Size', 'Market gate', 'Cells good on decide months', 'Cells profitable on the exam', 'Holds', 'Best solid cell', '₹ a month (best cell)'],
+      w.blocks.map((b) => [`₹${b.size} lakh`, b.gate ? 'yes' : 'no', `${b.strong}/${b.cells}`, `${b.examOk}/${b.cells}`, b.holds ? 'yes' : 'no', b.best ?? '–', inr(b.inrPerMonth)]),
+    ));
   }
 
   if (w?.grid?.length) {
@@ -92,12 +103,13 @@ export function mlToMarkdown(raw: ExportMl): string {
     for (const size of sizes) {
       const mine = w.grid.filter((c) => c.size === size);
       const caps = [...new Set(mine.map((c) => c.cap))].sort();
-      const floors = [...new Set(mine.map((c) => c.floor))].sort((a, b) => (a === 'aware' ? 1 : b === 'aware' ? -1 : a - b));
-      out.push(`## Grid at ₹${size} lakh positions\nEach cell: R a trade · t · trades · R a month · exam. S = solid on its own, C = candidate (solid with profitable neighbours), * = the pick.\n\n` + table(
+      const rows = [...new Set(mine.map((c) => `${c.gate ? 1 : 0}|${c.floor}`))].map((k) => { const [g, fl] = k.split('|'); return { gate: g === '1', floor: fl === 'aware' ? 'aware' as const : Number(fl) }; })
+        .sort((a, b) => Number(a.gate) - Number(b.gate) || (a.floor === 'aware' ? 1 : b.floor === 'aware' ? -1 : a.floor - b.floor));
+      out.push(`## Grid at ₹${size} lakh positions\nEach cell: R a trade · t · trades · R a month${mine.some((c) => c.inrPerMonth != null) ? ' · ₹ a month' : ''} · exam. S = solid on its own, C = candidate (solid, and its neighbours or its block hold), * = the pick.\n\n` + table(
         ['Turnover floor', 'Stocks a day', ...caps.map((c) => `${c} a day`)],
-        floors.map((fl) => [fl === 'aware' ? 'size-aware (all)' : `₹${fl} cr+`, w.pools?.[String(fl === 'aware' ? 17 : fl)] ?? '–', ...caps.map((cap) => {
-          const c = mine.find((x) => x.floor === fl && x.cap === cap);
-          return c ? `${r(c.netR)} · t ${f(c.t, 1)} · ${c.n} · ${f(c.rPerMonth, 1)}R/mo · exam ${c.exam ? 'Pass' : 'Fail'}${c.candidate ? ' C' : c.solid ? ' S' : ''}${w.pick?.id === c.id ? ' *' : ''}` : '–';
+        rows.map(({ floor: fl, gate }) => [`${fl === 'aware' ? 'size-aware (all)' : `₹${fl} cr+`}${gate ? ' · market gate' : ''}`, w.pools?.[String(fl === 'aware' ? 17 : fl)] ?? '–', ...caps.map((cap) => {
+          const c = mine.find((x) => x.floor === fl && x.cap === cap && !!x.gate === gate);
+          return c ? `${r(c.netR)} · t ${f(c.t, 1)} · ${c.n} · ${f(c.rPerMonth, 1)}R/mo${c.inrPerMonth != null ? ` · ${inr(c.inrPerMonth)}` : ''} · exam ${c.exam ? 'Pass' : 'Fail'}${c.candidate ? ' C' : c.solid ? ' S' : ''}${w.pick?.id === c.id ? ' *' : ''}` : '–';
         })]),
       ));
     }
@@ -126,6 +138,8 @@ export function mlToMarkdown(raw: ExportMl): string {
       s.money ? `- Money at ${s.money.sizeLabel ? `${s.money.sizeLabel} (~${inr(s.money.riskInr)} risk a trade)` : '₹300 risk'}: stop ~${f(s.money.stopPct)}% · ${inr(s.money.perTrade)} a trade · ${f(s.money.tradesPerMonth, 1)} trades a month · ${inr(s.money.perMonth)} a month on ${inr(s.money.capital)} (${f(s.money.pct, 1)}%) · worst month ${inr(s.money.worstMonth)} · best ${inr(s.money.bestMonth)} · deepest run of losses ${f(s.money.maxDrawdownR, 1)}R` : '',
       s.daily ? `- Days: ${s.daily.daysWithTrades}/${s.daily.tradingDays} with a trade · ${f(s.daily.perTradedDay)} avg, ${s.daily.maxPerDay} max a day · fired at 09:35 ${pct(s.daily.at0935)} · green days ${pct(s.daily.greenDays)} · worst day ${f(s.daily.worstDayR)}R · best ${f(s.daily.bestDayR)}R · worst week ${f(s.daily.worstWeekR)}R · green weeks ${pct(s.daily.greenWeeks)}` : '',
       s.shadow?.n ? `- Shadow months: ${s.shadow.n} trades · ${r(s.shadow.netR)} · green ${green(s.shadow)}` : '',
+      s.regime ? `- By the market's 20-day move (decide months, thirds${s.regime.cuts ? ` split at ${s.regime.cuts.map((x) => `${x}%`).join(' / ')}` : ''}): low ${r(s.regime.low?.netR)} (${s.regime.low?.n ?? 0}) · mid ${r(s.regime.mid?.netR)} (${s.regime.mid?.n ?? 0}) · high ${r(s.regime.high?.netR)} (${s.regime.high?.n ?? 0}) · exam days in the gate's top third ${pct(s.regime.examHotShare)}` : '',
+      s.badDays ? `- Decide days that lost 2R or more: ${s.badDays.le2} · 3R or more: ${s.badDays.le3} (of ${s.badDays.days} days with a trade)` : '',
     ].filter(Boolean).join('\n'));
     if (s.months?.length) sec.push('Month by month (traded blind)\n\n' + table(['Month', 'Trades', 'Hit', 'Before costs', 'R/trade', 'Total R', 'Signal', 'Note'],
       s.months.map((m) => [`${m.month}${m.exam ? ' (exam)' : ''}`, m.n, m.n ? pct(m.hit) : '–', m.n ? r(m.gross) : '–', m.n ? r(m.netR) : '–', m.n ? f(m.sumR, 1) : '–', f(m.ic, 3), m.note ?? ''])));
