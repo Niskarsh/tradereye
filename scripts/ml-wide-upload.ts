@@ -52,6 +52,7 @@ async function main() {
     untouched: [narrow, wide, wide5].flatMap((x) => ((x as unknown as { untouched?: unknown[] } | undefined)?.untouched ?? [])),
     noiseAll: [noiseOf(narrows, 'nF'), noiseOf(narrows, 'nT10'), ...wide.strategies.filter((s) => s.id !== 'placebo').map((s) => noiseOf(wides, s.id))].filter((x) => x.draws.length > 1),
     best: verdict.pick?.id ?? 'nF',
+    locked: 'nF', // Algo Live's own setup (₹250-340, ₹300 risk), not the grid's first cell
     narrowStocks: (narrow as unknown as { stocks?: number }).stocks,
     wide: verdict,
   };

@@ -57,3 +57,42 @@ test('no list is cut: every trade, fact and pattern row the page has goes in', (
   const md = mlToMarkdown({ iteration: 14, runId: 'r', createdAt: 0, strategies: [{ id: 'x', name: 'x', recent: many, importance: facts, liked }] });
   assert.match(md, /\| S44 \|/); assert.match(md, /fact29/); assert.match(md, /like24/);
 });
+
+/* ---- labels at size (lib/ml/sized.ts), the five export fixes ---- */
+const sizedMl = (): ExportMl => ({
+  iteration: 14, runId: 'r', createdAt: 0, locked: 'w10_f17_c2',
+  wide: { outcome: 'not-better', message: 'm' },
+  strategies: [
+    { id: 'nF', name: 'control', money: { stopPct: 2.32, perTrade: -9, tradesPerMonth: 16.6, perMonth: -151, capital: 15565, pct: -1, worstMonth: -3441, bestMonth: 2856, maxDrawdownR: 34.9 },
+      costs: [{ name: 'Market orders, ₹300 risk', dev: { n: 564, netR: -0.03 } }] },
+    { id: 'nT10', name: 'control at size', money: { stopPct: 2.32, maxPerDay: 2, perTrade: -18, tradesPerMonth: 14.2, perMonth: -257, capital: 15741, pct: -1.6, worstMonth: -3839, bestMonth: 2682, maxDrawdownR: 35.6 },
+      costs: [{ name: 'Market orders, ₹300 risk', dev: { n: 484, netR: -0.06 } }, { name: 'Market orders, ~₹1 lakh position', dev: { n: 484, netR: 0.03 } }] },
+    { id: 'w5_f1000_c2', name: 'thin pool', months: [{ month: '2026-09', n: 0, note: '', exam: true }, { month: '2026-10', n: 0, note: 'stood aside' }] },
+    { id: 'placebo', name: 'Placebo (shuffled outcomes)' },
+  ],
+});
+test('1. the first size row says the size the version is priced at', () => {
+  const md = mlToMarkdown(sizedMl());
+  assert.match(md, /\| As priced \(₹10 lakh positions\) \| 484 \| -0\.06R \|/);
+  assert.match(md, /\| Market orders, ~₹1 lakh position \| 484 \|/);
+  assert.match(md, /\| Market orders, ₹300 risk \| 564 \| -0\.03R \|/, 'nF is at ₹300 risk: unchanged');
+});
+test('2. money at the version\'s own size, said which', () => {
+  const md = mlToMarkdown(sizedMl());
+  // ₹10 lakh x 2.32% = ₹23,200 risk, k = 77.33
+  assert.match(md, /Money at ₹10 lakh positions \(~₹23,200 risk a trade\): stop ~2\.32% · -₹1,392 a trade · 14\.2 trades a month · -₹19,875 a month on ₹12,25,920 \(-1\.6%\)/);
+  assert.match(md, /Money at ₹300 risk: stop ~2\.32% · -₹9 a trade/, 'nF stays at ₹300');
+  assert.match(md, /\| nT10 \| control at size \|.*\| -₹19,875 \(₹10 lakh positions\) \|/);
+});
+test('3. no "locked version" line in a wide iteration', () => {
+  assert.doesNotMatch(mlToMarkdown(sizedMl()), /locked version/);
+  assert.match(mlToMarkdown({ iteration: 9, runId: 'r', createdAt: 0, locked: 'fNear', strategies: [] }), /locked version: fNear/);
+});
+test('4. the placebo says how it is priced', () => {
+  assert.match(mlToMarkdown(sizedMl()), /### placebo — Placebo, ₹300 risk, all stocks \(shuffled outcomes\)/);
+});
+test('5. an empty month says why', () => {
+  const md = mlToMarkdown(sizedMl());
+  assert.match(md, /\| 2026-09 \(exam\) \| 0 \|.*\| no trade passed the bar \|/);
+  assert.match(md, /\| 2026-10 \| 0 \|.*\| stood aside \|/);
+});

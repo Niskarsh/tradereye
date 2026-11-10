@@ -5,6 +5,7 @@ import { Card, pct, rr } from '@/components/setups/parts';
 import { WideRunCard } from '@/components/algo/WideRunCard';
 import type { WideCell } from '@/lib/ml/wide';
 import { exportFileName, mlToMarkdown, type ExportMl } from '@/lib/ml/exportMd';
+import { relabelSized } from '@/lib/ml/sized';
 
 /**
  * Algo Lab: walk-forward machine learning on every 10-min close of every stock in his price range
@@ -236,7 +237,7 @@ function LiveFillsCard({ ml }: { ml: Ml }) {
 interface Untouched { id: string; name: string; from?: string; to?: string; note?: string; overall: P; months?: (S & { month: string })[]; trainMonths?: [string, string]; valMonths?: [string, string] }
 interface CPart { n: number; base: number; rule: number; diff: number; t: number; monthsGreenBase: number; monthsGreenRule: number; months: number; addRate: number }
 interface Confirmed { strategy: string; rule: string; label: string; decide: CPart; exam: { pass: boolean | null; n: number }; untouched: CPart | null; shadow: CPart | null; baseMismatch: number }
-interface Money { stopPct: number; position: number; margin: number; maxPerDay: number; tradesPerMonth: number; perTrade: number; perMonth: number; worstMonth: number; bestMonth: number; maxDrawdownR: number; capital: number; pct: number; bigger: { position: number; risk: number; netR: number; perMonth: number; capital: number; pct: number }[] }
+interface Money { riskInr?: number; sizeLabel?: string; stopPct: number; position: number; margin: number; maxPerDay: number; tradesPerMonth: number; perTrade: number; perMonth: number; worstMonth: number; bestMonth: number; maxDrawdownR: number; capital: number; pct: number; bigger: { position: number; risk: number; netR: number; perMonth: number; capital: number; pct: number }[] }
 
 function UntouchedCard({ u }: { u: Untouched }) {
   return (
@@ -281,7 +282,7 @@ function ConfirmCard({ c }: { c: Confirmed }) {
 
 function MoneyCard({ m, oldFills }: { m: Money; oldFills?: boolean }) {
   return (
-    <Card title="What it means in money" sub={`Decide months, after charges, at ₹300 risk a trade. The stop is about ${m.stopPct}% of the price, so ₹300 risk buys about ₹${m.position.toLocaleString('en-IN')} of stock: ₹${m.margin.toLocaleString('en-IN')} of margin at 5×, up to ${m.maxPerDay} at once. Capital = that margin for ${m.maxPerDay} trades + the deepest run of losses (${m.maxDrawdownR}R). Before income tax.`}>
+    <Card title="What it means in money" sub={m.sizeLabel ? `Decide months, after charges, at ${m.sizeLabel}: the stop is about ${m.stopPct}% of the price, so each trade risks about ₹${(m.riskInr ?? 0).toLocaleString('en-IN')}; ₹${m.margin.toLocaleString('en-IN')} of margin at 5×, up to ${m.maxPerDay} at once. Capital = that margin for ${m.maxPerDay} trades + the deepest run of losses (${m.maxDrawdownR}R). Before income tax.` : `Decide months, after charges, at ₹300 risk a trade. The stop is about ${m.stopPct}% of the price, so ₹300 risk buys about ₹${m.position.toLocaleString('en-IN')} of stock: ₹${m.margin.toLocaleString('en-IN')} of margin at 5×, up to ${m.maxPerDay} at once. Capital = that margin for ${m.maxPerDay} trades + the deepest run of losses (${m.maxDrawdownR}R). Before income tax.`}>
       <Tiles items={[
         ['Per trade, average', inr(m.perTrade)],
         ['Trades a month', String(m.tradesPerMonth)],
@@ -290,7 +291,7 @@ function MoneyCard({ m, oldFills }: { m: Money; oldFills?: boolean }) {
         ['% a month on that capital', `${m.pct}%`, tone(m.pct)],
         ['Worst month', inr(m.worstMonth), 'text-data-red-text'],
         ['Best month', inr(m.bestMonth), 'text-data-green'],
-        ['Deepest run of losses', `−${m.maxDrawdownR}R (${inr(-m.maxDrawdownR * 300)})`],
+        ['Deepest run of losses', `−${m.maxDrawdownR}R (${inr(-m.maxDrawdownR * (m.riskInr ?? 300))})`],
       ]} />
       {!!m.bigger.length && (
         <p className="mt-2 text-[11px] text-ink-2">Bigger positions (cheaper charges per R): {m.bigger.map((b) => `₹${(b.position / 1e5).toFixed(0)} lakh positions risk ~₹${b.risk.toLocaleString('en-IN')} a trade → ${inr(b.perMonth)} a month on ~₹${b.capital.toLocaleString('en-IN')} capital (${b.pct}%)`).join(' · ')}.{oldFills ? ' (old fills, no liquidity cost: optimistic at size. The ₹10 lakh versions price size properly.)' : ''}</p>
@@ -759,7 +760,7 @@ export default function AlgoPage() {
     fetch(`/api/algo${run ? `?run=${encodeURIComponent(run)}` : ''}`, { cache: 'no-store' }).then(async (r) => {
       const j = await r.json();
       if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
-      setMl(j.ml); setHistory(j.history ?? []); setLive(j.live ?? null);
+      setMl(j.ml ? relabelSized(j.ml as Ml) : j.ml); setHistory(j.history ?? []); setLive(j.live ?? null);
     }).catch((e) => setErr((e as Error).message));
   }, [run, reload]);
   const open = (id: string) => {
