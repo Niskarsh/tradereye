@@ -5,8 +5,9 @@ import { useAuth } from '@/context/AuthContext';
 import { ProgressBar } from '@/components/ui/progress';
 import { Card } from '@/components/setups/parts';
 import type { RunStatus } from '@/lib/setups/store';
+import { WIDE_ITERATION, WIDE_QUESTION } from '@/lib/ml/wide';
 
-/** Starts and follows Algo Lab's wide-universe run (iteration 12). Research only: Algo Live does not read its results. */
+/** Starts and follows Algo Lab's wide-universe run (WIDE_ITERATION). Research only: Algo Live does not read its results. */
 export function WideRunCard({ onDone }: { onDone: () => void }) {
   const { token } = useAuth();
   const [status, setStatus] = useState<RunStatus | null>(null);
@@ -35,7 +36,7 @@ export function WideRunCard({ onDone }: { onDone: () => void }) {
     } catch (e) { setErr((e as Error).message); } finally { setStarting(false); }
   };
   return (
-    <Card title="Wider universe (iteration 12)" sub="F on ₹250–1000 stocks against ₹250–340. Research only: Algo Live keeps its model, its list and its orders."
+    <Card title={`Run iteration ${WIDE_ITERATION}`} sub={`${WIDE_QUESTION} Research only: Algo Live keeps its model, its list and its orders.`}
       right={<button onClick={start} disabled={!token || starting || active} className="flex h-10 items-center gap-2 rounded-xl border border-brand-accent px-4 text-xs font-black text-brand-accent disabled:opacity-40">
         {(starting || active) && <Loader2 className="h-4 w-4 animate-spin" />}{active ? 'Running' : 'Run'}
       </button>}>
@@ -45,7 +46,7 @@ export function WideRunCard({ onDone }: { onDone: () => void }) {
           <ProgressBar value={status.total ? (status.done ?? 0) / status.total : undefined} />
         </div>
       )}
-      {!active && status?.message && <p className={`text-xs ${status.state === 'failed' ? 'text-data-red-text' : 'text-ink-2'}`}>{status.message}</p>}
+      {!active && status?.message && <p className={`text-xs ${status.state === 'failed' ? 'text-data-red-text' : 'text-ink-2'}`}>Last run{status.finishedAt ? ` (${new Date(status.finishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : ''}: {status.message}</p>}
       {!active && !status?.message && <p className="text-xs text-ink-3">{token ? 'Takes most of a day the first time. Start it in the evening or at a weekend: it stops itself between 08:40 and 11:15 on trading days unless you tick the box below. NSE holidays run at full speed.' : 'Log in on the Dhan login tab first.'}</p>}
       {!active && (
         <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">

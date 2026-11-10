@@ -8,6 +8,10 @@ import { WIDE_REF_PRICE, wideVol } from './grid';
  * Which stocks: previous close ₹250-1000 (₹0.05 is the NSE tick all through that range, so the fill code holds as it is)
  * and the same liquidity floor as now, measured in rupees. A stock inside ₹250-340 is treated exactly as before.
  */
+/** the iteration the Run button starts (must equal ITERATION in scripts/ml_wide.py: tests/mlWide.test.ts checks), and what it tests */
+export const WIDE_ITERATION = 13;
+export const WIDE_QUESTION = 'Does ₹250–1000 keep its edge at the size of the ₹1–1.5 lakh a month goal (₹10 / 15 / 20 lakh positions: big-position charges and market impact)?';
+
 export const WIDE_PRICE_MIN = 250, WIDE_PRICE_MAX = 1000, WIDE_VOL_MIN = 500_000;
 
 const IST = 19800_000;
