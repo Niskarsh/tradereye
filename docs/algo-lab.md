@@ -129,3 +129,17 @@ written.
    - Rule fixed before the run (`wideVerdict`): `wT10` makes +0.04R, t ≥ 2, 150+ trades; its draw average beats `nT10`'s
      best draw; more R in total than `nT10`; exam profitable; placebo clean. All five, or not a candidate for Algo Live. The
      page also shows `wT10` in rupees a month at ₹10 lakh positions and the position ₹1 lakh a month would need.
+14. **Which liquidity floor and how many trades a day pay at size?** (same workflow and Run button; iterations 12 and 13 stay
+   under their git tags) Iteration 13: at ₹10 lakh positions +0.04R (t 1.5, exam Fail) from +0.17R before costs; the model
+   picks thin stocks (~₹15–25 crore a day) and a ₹10 lakh order's impact eats the edge. Iteration 12's floors were priced at
+   ₹300 risk, where liquidity barely matters; at size it does.
+   - Every version priced at ₹10 lakh (job `wide`) or ₹5 lakh (job `wide5`): turnover floors in rupees (`minTurnover`:
+     ₹17, 50, 100, 170, 250, 340, 500, 750, 1,000 crore a day) × 2, 3 and 4 trades a day (`cap`), plus size-aware picking
+     (`aware`: each candidate's score cut by its own impact before ranking and the bar). One model per job; the bar still
+     decides, the cap is a ceiling. `pools` = stocks clearing each floor on a typical day.
+   - `check_cap`: every version's trades within its own cap (never above 4); the job fails otherwise.
+   - Rule fixed before the run (`wideVerdict`, ₹10 lakh only): a cell is solid at +0.05R, t ≥ 2, 150+ trades, 50+ stocks a
+     day and a profitable exam; a candidate if at least 2 neighbours (next floor at the same cap, next cap at the same floor)
+     are profitable too; the candidate with the most R a month wins if its draw average beats `nT10`'s best draw, it makes
+     more R a month than `nT10` and the placebo is clean. ₹5 lakh is shown, not judged.
+   - The page's "~₹1 / 3 lakh position" rows use the old fills (no liquidity cost) and now say so.

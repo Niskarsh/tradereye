@@ -59,12 +59,16 @@ jobs:
   models:
     needs: dataset
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 355  # ~30 versions a job from iteration 14 on: GitHub's limit is 360
     strategy:
       fail-fast: false
       matrix:
+        # narrow: the ₹250-340 control · wide: the ₹10 lakh grid (+ placebo) · wide5: the same at ₹5 lakh (main only)
         universe: [narrow, wide]
         shard: [main, seed2, seed3, seed4, seed5]
+        include:
+          - universe: wide5
+            shard: main
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

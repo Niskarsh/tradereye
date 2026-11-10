@@ -9,8 +9,8 @@ import { WIDE_REF_PRICE, wideVol } from './grid';
  * and the same liquidity floor as now, measured in rupees. A stock inside ₹250-340 is treated exactly as before.
  */
 /** the iteration the Run button starts (must equal ITERATION in scripts/ml_wide.py: tests/mlWide.test.ts checks), and what it tests */
-export const WIDE_ITERATION = 13;
-export const WIDE_QUESTION = 'Does ₹250–1000 keep its edge at the size of the ₹1–1.5 lakh a month goal (₹10 / 15 / 20 lakh positions: big-position charges and market impact)?';
+export const WIDE_ITERATION = 14;
+export const WIDE_QUESTION = 'Which liquidity floor (₹17–1,000 crore a day) and how many trades a day (2, 3 or 4) make ₹250–1000 pay at ₹10 lakh positions, the ₹1–1.5 lakh a month size?';
 
 export const WIDE_PRICE_MIN = 250, WIDE_PRICE_MAX = 1000, WIDE_VOL_MIN = 500_000;
 
@@ -96,22 +96,33 @@ export function etfSymbols(csv: string): Set<string> {
 /* ---- the verdict, by a rule fixed before the run ------------------------------------------------------------ */
 
 /**
- * Iteration 13: does iteration 12's edge (₹250-1000, all) hold at the size the ₹1 lakh a month goal needs? The test
- * version is 'wT10': ₹10 lakh positions, big-position charges and the market impact of the order (scripts/ml_wide.py).
+ * Iteration 14: every version priced at ₹10 lakh positions (also ₹5 lakh), across turnover floors x trades a day, plus
+ * size-aware picking (scripts/ml_wide.py). The rule judges the pattern, not the best cell: a winner must be good on its
+ * own AND have good neighbours, so one lucky cell among ~60 does not count.
  */
-export const WIDE_RULE = { netR: 0.04, t: 2, n: 150 };
-export const WIDE_PICK = 'wT10';
-export const WIDE_BASE = 'wAll';
+export const WIDE_RULE = { netR: 0.05, t: 2, n: 150, pool: 50 };
 export const WIDE_CONTROL = 'nT10';
 /** the goal, and the position size the test is priced at */
 export const MONTHLY_GOAL = 100_000, MONTHLY_GOAL_HIGH = 150_000, TARGET_POSITION = 1_000_000;
+export const FLOORS_CR = [17, 50, 100, 170, 250, 340, 500, 750, 1000];
+export const CAPS = [2, 3, 4];
 /** fewer training draws than this on either side and the comparison says nothing */
 export const WIDE_MIN_DRAWS = 3;
 
 interface Dev { n: number; netR: number; t: number; sumR: number }
 type Exam = { n?: number; netR?: number; t?: number; pass?: boolean | null } | null | undefined;
-export interface WideShard { universe: 'narrow' | 'wide'; shard: string; strategies: { id: string; name: string; dev: Dev; exam?: Exam; money?: { tradesPerMonth?: number; stopPct?: number } | null }[] }
+type Money = { tradesPerMonth?: number; stopPct?: number } | null;
+export interface WideShard {
+  universe: 'narrow' | 'wide' | 'wide5'; shard: string; pools?: Record<string, number>;
+  strategies: { id: string; name: string; dev: Dev; exam?: Exam; money?: Money }[];
+}
 export interface WideDraw { shard: string; netR: number }
+export interface WideCell {
+  id: string; size: number; floor: number | 'aware'; cap: number;
+  n: number; netR: number; t: number; rPerMonth: number; tradesPerMonth: number; exam: boolean; pool: number | null;
+  /** clears the bar on its own (trades, R, t, pool, exam) */ solid: boolean;
+  /** solid and its neighbours are profitable too */ candidate: boolean;
+}
 export interface WideVerdict {
   outcome: 'better' | 'not-better' | 'incomplete';
   message: string;
@@ -120,10 +131,11 @@ export interface WideVerdict {
   control: { id: string; name: string; netR: number; t: number; n: number; sumR: number } | null;
   narrowDraws: WideDraw[]; wideDraws: WideDraw[]; wideMean: number | null;
   checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean; examPass?: boolean };
-  /** (iteration 13 on) the rule as shown on the page, check by check */
   checkList?: { label: string; ok: boolean }[];
-  /** (iteration 13 on) the test version in rupees: a month at ₹10 lakh positions, and the position ₹1 lakh a month needs */
   goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number } | null;
+  /** (iteration 14 on) every floor x cap cell, both sizes */
+  grid?: WideCell[];
+  pools?: Record<string, number>;
 }
 
 /** rupees a month at a position size, and the position that makes `goal` a month (decide months, no compounding) */
@@ -143,46 +155,79 @@ const draws = (shards: WideShard[], universe: WideShard['universe'], id: string 
 /** the exam months (from May 26) as Algo Lab marks them: profitable after costs */
 export const examPasses = (e: Exam) => !!e && (e.pass !== undefined && e.pass !== null ? e.pass : (e.n ?? 0) >= 30 && (e.netR ?? 0) > 0);
 
+const CELL_ID = /^w(\d+)_(?:f(\d+)|(aware))_c(\d)$/;
+
+/** the grid of one size from a main shard */
+export function gridCells(strategies: WideShard['strategies'], pools: Record<string, number> | undefined): WideCell[] {
+  const cells: WideCell[] = strategies.flatMap((s) => {
+    const m = CELL_ID.exec(s.id);
+    if (!m) return [];
+    const floor = m[3] ? 'aware' as const : Number(m[2]);
+    const tpm = s.money?.tradesPerMonth ?? 0;
+    const pool = pools ? pools[String(floor === 'aware' ? FLOORS_CR[0] : floor)] ?? null : null;
+    const exam = examPasses(s.exam);
+    const solid = s.dev.n >= WIDE_RULE.n && s.dev.netR >= WIDE_RULE.netR && s.dev.t >= WIDE_RULE.t && exam && (pool ?? 0) >= WIDE_RULE.pool;
+    return [{ id: s.id, size: Number(m[1]), floor, cap: Number(m[4]), n: s.dev.n, netR: s.dev.netR, t: s.dev.t, tradesPerMonth: tpm,
+      rPerMonth: Math.round(s.dev.netR * tpm * 100) / 100, exam, pool, solid, candidate: false }];
+  });
+  const at = (size: number, floor: WideCell['floor'], cap: number) => cells.find((c) => c.size === size && c.floor === floor && c.cap === cap);
+  for (const c of cells) {
+    if (!c.solid) continue;
+    const near: (WideCell | undefined)[] = [at(c.size, c.floor, c.cap - 1), at(c.size, c.floor, c.cap + 1)];
+    if (c.floor !== 'aware') {
+      const k = FLOORS_CR.indexOf(c.floor);
+      near.push(at(c.size, FLOORS_CR[k - 1], c.cap), at(c.size, FLOORS_CR[k + 1], c.cap));
+    }
+    const have = near.filter((x): x is WideCell => !!x);
+    const good = have.filter((x) => x.netR > 0 && x.n > 0).length;
+    c.candidate = have.length > 0 && good >= Math.min(2, have.length);
+  }
+  return cells;
+}
+
 /**
- * Decide months only, at the worse fills. The wide universe counts as robust only if ALL of these hold:
- *  1. with an extra 0.1% a trade it still makes +0.04R a trade, t 2+, 150+ trades;
- *  2. its average over the training draws beats the BEST draw of the ₹250-340 control (more than training luck);
- *  3. it still makes more R in total than the control;
- *  4. it is profitable on the exam months too (iteration 12's ₹340 cr+ pick failed them);
- *  5. the placebo shows no edge.
+ * Decide months, ₹10 lakh positions. The pick is the candidate (solid on its own, profitable neighbours) making the most R a
+ * month; it wins only if its average over the training draws beats the ₹250-340 control's best draw and the placebo shows
+ * no edge. ₹5 lakh cells are shown, not judged.
  */
 export function wideVerdict(shards: WideShard[]): WideVerdict {
   const main = (u: WideShard['universe']) => shards.find((s) => s.universe === u && s.shard === 'main');
-  const wide = main('wide'), narrow = main('narrow');
+  const wide = main('wide'), narrow = main('narrow'), wide5 = main('wide5');
   const brief = (x: { id: string; name: string; dev: Dev } | undefined) => (x ? { id: x.id, name: x.name, netR: x.dev.netR, t: x.dev.t, n: x.dev.n, sumR: x.dev.sumR } : null);
-  const pick = wide?.strategies.find((x) => x.id === WIDE_PICK);
+  const grid = [...(wide ? gridCells(wide.strategies, wide.pools) : []), ...(wide5 ? gridCells(wide5.strategies, wide5.pools ?? wide?.pools) : [])];
+  const tens = grid.filter((c) => c.size === 10);
+  const best = tens.filter((c) => c.candidate).sort((a, b) => b.rPerMonth - a.rPerMonth)[0];
+  const pickSt = best ? wide?.strategies.find((s) => s.id === best.id) : undefined;
   const control = narrow?.strategies.find((x) => x.id === WIDE_CONTROL);
   const placebo = wide?.strategies.find((x) => x.id === 'placebo');
-  const narrowDraws = draws(shards, 'narrow', WIDE_CONTROL), wideDraws = draws(shards, 'wide', WIDE_PICK);
+  const narrowDraws = draws(shards, 'narrow', WIDE_CONTROL), wideDraws = best ? draws(shards, 'wide', best.id) : [];
   const wideMean = wideDraws.length ? Math.round((wideDraws.reduce((a, d) => a + d.netR, 0) / wideDraws.length) * 1000) / 1000 : null;
-  const d = pick?.dev;
+  const ctrlTpm = control?.money?.tradesPerMonth ?? 0;
   const checks = {
-    floor: !!d && d.n >= WIDE_RULE.n && d.netR >= WIDE_RULE.netR && d.t >= WIDE_RULE.t,
+    floor: tens.some((c) => c.solid),
+    examPass: !!best?.exam,
     beatsNoise: wideMean !== null && narrowDraws.length > 0 && wideMean > Math.max(...narrowDraws.map((x) => x.netR)),
-    moreTotalR: !!d && !!control && d.sumR > control.dev.sumR,
-    examPass: examPasses(pick?.exam),
+    moreTotalR: !!best && !!control && best.rPerMonth > control.dev.netR * ctrlTpm,
     placeboClean: !!placebo && !(placebo.dev.n >= 100 && placebo.dev.t >= 2 && placebo.dev.netR > 0),
   };
   const checkList = [
-    { label: `at ₹10 lakh positions: +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades`, ok: checks.floor },
+    { label: `a version at ₹10 lakh makes +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades, ${WIDE_RULE.pool}+ stocks a day, exam profitable`, ok: checks.floor },
+    { label: 'its neighbours (next floor, next cap) are profitable too', ok: !!best },
     { label: "its average over the draws beats the ₹250–340 control's best draw at the same size", ok: checks.beatsNoise },
-    { label: 'more R in total than the control at the same size', ok: checks.moreTotalR },
-    { label: 'profitable on the exam months', ok: checks.examPass },
+    { label: 'more R a month than the control', ok: checks.moreTotalR },
     { label: 'the placebo shows no edge', ok: checks.placeboClean },
   ];
-  const m = pick?.money;
-  const goal = d && m?.tradesPerMonth && m?.stopPct ? { ...goalMoney(d.netR, m.tradesPerMonth, m.stopPct), positionForHigh: goalMoney(d.netR, m.tradesPerMonth, m.stopPct, TARGET_POSITION, MONTHLY_GOAL_HIGH).positionForGoal, riskPerTrade: Math.round(TARGET_POSITION * m.stopPct / 100) } : null;
-  const base = { rule: WIDE_RULE, pick: brief(pick), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList, goal };
-  if (!wide || !narrow || !pick || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS || wideDraws.length < WIDE_MIN_DRAWS) {
-    return { ...base, outcome: 'incomplete', message: `Not enough finished training jobs to compare (₹250–340: ${narrowDraws.length} draws, wide: ${wideDraws.length}; ${WIDE_MIN_DRAWS} each needed). See the GitHub run.` };
+  const m = pickSt?.money;
+  const goal = best && m?.tradesPerMonth && m?.stopPct ? { ...goalMoney(best.netR, m.tradesPerMonth, m.stopPct), positionForHigh: goalMoney(best.netR, m.tradesPerMonth, m.stopPct, TARGET_POSITION, MONTHLY_GOAL_HIGH).positionForGoal, riskPerTrade: Math.round(TARGET_POSITION * m.stopPct / 100) } : null;
+  const base = { rule: WIDE_RULE, pick: brief(pickSt), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList, goal, grid, pools: wide?.pools };
+  if (!wide || !narrow || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS) {
+    return { ...base, outcome: 'incomplete', message: `Not enough finished jobs to judge (₹250–340 draws: ${narrowDraws.length}; ${WIDE_MIN_DRAWS} needed). See the GitHub run.` };
   }
   if (!checks.placeboClean) return { ...base, outcome: 'not-better', message: 'The placebo shows an edge: something leaks. Do not trust this run.' };
-  const failed = checkList.filter((c) => !c.ok).map((c) => c.label);
-  if (failed.length) return { ...base, outcome: 'not-better', message: `Not robust: the wide edge fails "${failed[0]}"${failed.length > 1 ? ` (and ${failed.length - 1} more)` : ''}. Do not move Algo Live to it.` };
-  return { ...base, outcome: 'better', message: 'Holds at size: ₹250–1000 keeps its edge at ₹10 lakh positions (charges and market impact), beats ₹250–340 by more than training luck and passes the exam. A candidate for Algo Live.' };
+  if (!checks.floor) return { ...base, outcome: 'not-better', message: 'No floor or cap holds at ₹10 lakh positions. Higher volume does not fix size for this strategy.' };
+  if (!best) return { ...base, outcome: 'not-better', message: 'Only isolated cells hold at ₹10 lakh, with weak neighbours: likely luck. Do not move Algo Live.' };
+  if (wideDraws.length < WIDE_MIN_DRAWS) return { ...base, outcome: 'incomplete', message: `${pickSt?.name ?? best.id} looks best but too few training draws finished to check it (${wideDraws.length}).` };
+  if (!checks.beatsNoise) return { ...base, outcome: 'not-better', message: `${pickSt?.name ?? best.id} is the best pattern but does not beat ₹250–340 by more than training luck.` };
+  if (!checks.moreTotalR) return { ...base, outcome: 'not-better', message: `${pickSt?.name ?? best.id} makes less a month than ₹250–340.` };
+  return { ...base, outcome: 'better', message: `${pickSt?.name ?? best.id} holds at ₹10 lakh positions, with good neighbours, beyond training luck. A candidate for Algo Live.` };
 }

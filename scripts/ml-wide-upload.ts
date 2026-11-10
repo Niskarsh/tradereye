@@ -36,20 +36,21 @@ async function main() {
   const prev = await getJson<RunStatus>(store, WIDE_STATUS_KEY);
   if (!prev || prev.runId !== runId || prev.state === 'failed') { console.log('the dataset step did not finish; nothing to add'); return; }
   const shards: Shard[] = (existsSync(dir) ? readdirSync(dir) : []).flatMap((f: string) => {
-    const m = /^wide-(narrow|wide)-(main|seed\d+)\.json$/.exec(f);
+    const m = /^wide-(narrow|wide|wide5)-(main|seed\d+)\.json$/.exec(f);
     if (!m) return [];
     return [{ ...(JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as Shard), universe: m[1] as WideShard['universe'], shard: m[2] }];
   });
   const wide = shards.find((s) => s.universe === 'wide' && s.shard === 'main');
   const narrow = shards.find((s) => s.universe === 'narrow' && s.shard === 'main');
+  const wide5 = shards.find((s) => s.universe === 'wide5' && s.shard === 'main');
   if (!wide || !narrow) { await finish(runId, 'failed', 'The run did not finish (see the GitHub run log). Nothing was filed; candles fetched so far are saved, so pressing Run again carries on.'); process.exit(1); }
   const verdict = wideVerdict(shards);
   const wides = shards.filter((s) => s.universe === 'wide'), narrows = shards.filter((s) => s.universe === 'narrow');
   const ml = {
     ...wide,
-    strategies: [...narrow.strategies, ...wide.strategies],
-    untouched: [...((narrow as unknown as { untouched?: unknown[] }).untouched ?? []), ...((wide as unknown as { untouched?: unknown[] }).untouched ?? [])],
-    noiseAll: [noiseOf(narrows, 'nF'), ...wide.strategies.filter((s) => s.id !== 'placebo').map((s) => noiseOf(wides, s.id))].filter((x) => x.draws.length > 1),
+    strategies: [...narrow.strategies, ...wide.strategies, ...(wide5?.strategies ?? [])],
+    untouched: [narrow, wide, wide5].flatMap((x) => ((x as unknown as { untouched?: unknown[] } | undefined)?.untouched ?? [])),
+    noiseAll: [noiseOf(narrows, 'nF'), noiseOf(narrows, 'nT10'), ...wide.strategies.filter((s) => s.id !== 'placebo').map((s) => noiseOf(wides, s.id))].filter((x) => x.draws.length > 1),
     best: verdict.pick?.id ?? 'nF',
     narrowStocks: (narrow as unknown as { stocks?: number }).stocks,
     wide: verdict,

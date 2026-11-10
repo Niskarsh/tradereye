@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
 import { WideRunCard } from '@/components/algo/WideRunCard';
+import type { WideCell } from '@/lib/ml/wide';
 
 /**
  * Algo Lab: walk-forward machine learning on every 10-min close of every stock in his price range
@@ -16,6 +17,8 @@ interface WideResult {
   pick: WideLine | null; control: WideLine | null; narrowDraws: { shard: string; netR: number }[]; wideDraws: { shard: string; netR: number }[]; wideMean: number | null;
   checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean };
   checkList?: { label: string; ok: boolean }[];
+  grid?: WideCell[];
+  pools?: Record<string, number>;
   goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number } | null;
 }
 interface S { n: number; hit: number; netR: number; gross: number; sumR: number; inr: number; t: number }
@@ -275,7 +278,7 @@ function ConfirmCard({ c }: { c: Confirmed }) {
   );
 }
 
-function MoneyCard({ m }: { m: Money }) {
+function MoneyCard({ m, oldFills }: { m: Money; oldFills?: boolean }) {
   return (
     <Card title="What it means in money" sub={`Decide months, after charges, at ₹300 risk a trade. The stop is about ${m.stopPct}% of the price, so ₹300 risk buys about ₹${m.position.toLocaleString('en-IN')} of stock: ₹${m.margin.toLocaleString('en-IN')} of margin at 5×, up to ${m.maxPerDay} at once. Capital = that margin for ${m.maxPerDay} trades + the deepest run of losses (${m.maxDrawdownR}R). Before income tax.`}>
       <Tiles items={[
@@ -289,7 +292,7 @@ function MoneyCard({ m }: { m: Money }) {
         ['Deepest run of losses', `−${m.maxDrawdownR}R (${inr(-m.maxDrawdownR * 300)})`],
       ]} />
       {!!m.bigger.length && (
-        <p className="mt-2 text-[11px] text-ink-2">Bigger positions (cheaper charges per R): {m.bigger.map((b) => `₹${(b.position / 1e5).toFixed(0)} lakh positions risk ~₹${b.risk.toLocaleString('en-IN')} a trade → ${inr(b.perMonth)} a month on ~₹${b.capital.toLocaleString('en-IN')} capital (${b.pct}%)`).join(' · ')}.</p>
+        <p className="mt-2 text-[11px] text-ink-2">Bigger positions (cheaper charges per R): {m.bigger.map((b) => `₹${(b.position / 1e5).toFixed(0)} lakh positions risk ~₹${b.risk.toLocaleString('en-IN')} a trade → ${inr(b.perMonth)} a month on ~₹${b.capital.toLocaleString('en-IN')} capital (${b.pct}%)`).join(' · ')}.{oldFills ? ' (old fills, no liquidity cost: optimistic at size. The ₹10 lakh versions price size properly.)' : ''}</p>
       )}
     </Card>
   );
@@ -452,7 +455,7 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
         {neutral && ` Baskets at ${ml.setup.neutralTimes.join(', ')}: ${ml.setup.neutralK} longs + ${ml.setup.neutralK} shorts, each stock once a day.`}
       </p>
 
-      {s.money && <MoneyCard m={s.money} />}
+      {s.money && <MoneyCard m={s.money} oldFills={!!ml.wide} />}
       {s.shadow && (
         <Card title={`Shadow months (from ${mon(s.shadow.from ?? ml.shadowFrom ?? '2026-11')})`} sub="Months that did not exist when this code was written: the forward test. Never used for any decision. Re-run once a month to add the newest month.">
           {s.shadow.n ? <Tiles items={[
@@ -481,7 +484,7 @@ function StrategyView({ s, ml }: { s: Strat; ml: Ml }) {
       )}
 
       {s.costs && (
-        <Card title="The same trades at different position sizes" sub="Which trades are taken does not change; only how big they are. Dhan's brokerage is capped at ₹20 an order, so bigger positions pay less in charges per R. A bigger position risks far more than ₹300 per trade (about ₹1,800 at ₹1 lakh and ₹5,500 at ₹3 lakh with this stop): compare R, not rupees. (Iteration 4 showed limit orders at the close lose: the ones that never fill are the winners.)">
+        <Card title="The same trades at different position sizes" sub={`Which trades are taken does not change; only how big they are. Dhan's brokerage is capped at ₹20 an order, so bigger positions pay less in charges per R. A bigger position risks far more than ₹300 per trade (about ₹1,800 at ₹1 lakh and ₹5,500 at ₹3 lakh with this stop): compare R, not rupees. (Iteration 4 showed limit orders at the close lose: the ones that never fill are the winners.)${ml.wide ? ' These rows use the old fills (no liquidity cost), so they are optimistic at size: the ₹10 lakh versions price size properly.' : ''}`}>
           <div className="-mx-2 overflow-x-auto">
             <table className="w-full min-w-[620px] text-xs">
               <thead><tr className={HEAD}>
@@ -637,6 +640,42 @@ function Picker({ history, live, ml, run, open }: { history: Head[]; live: Live 
   );
 }
 
+const CELL_ID = /^w(\d+)_(?:f(\d+)|aware)_c(\d)$/;
+
+/** iteration 14 on: floors x trades a day at one position size; the pick outlined, cells solid on their own in green */
+function GridTable({ cells, size, pools, pick }: { cells: WideCell[]; size: number; pools?: Record<string, number>; pick?: string }) {
+  const mine = cells.filter((c) => c.size === size);
+  if (!mine.length) return null;
+  const caps = [...new Set(mine.map((c) => c.cap))].sort();
+  const floors = [...new Set(mine.map((c) => c.floor))].sort((a, b) => (a === 'aware' ? 1 : b === 'aware' ? -1 : a - b));
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-black text-ink-1">₹{size} lakh positions (~₹{(size * 2200).toLocaleString('en-IN')} risk a trade)</p>
+      <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[560px] text-xs"><thead><tr className={HEAD}>
+        <th className="px-2 py-1.5 text-left">Stocks trading</th><th className={TH}>Stocks a day</th>
+        {caps.map((c) => <th key={c} className={TH}>{c} a day</th>)}
+      </tr></thead><tbody>
+        {floors.map((f) => (
+          <tr key={String(f)} className="border-b border-line/60 font-mono tabular-nums">
+            <td className="px-2 py-1.5 font-sans">{f === 'aware' ? 'Size-aware (all)' : `₹${f.toLocaleString('en-IN')} cr+ a day`}</td>
+            <td className={`${TH} ${pools && (pools[String(f === 'aware' ? 17 : f)] ?? 0) < 50 ? 'text-data-red-text' : 'text-ink-2'}`}>{pools ? pools[String(f === 'aware' ? 17 : f)] ?? '–' : '–'}</td>
+            {caps.map((cap) => {
+              const c = mine.find((x) => x.floor === f && x.cap === cap);
+              if (!c) return <td key={cap} className={TH}>–</td>;
+              return (
+                <td key={cap} className={`${TH} ${c.solid ? 'bg-data-green/10' : ''} ${pick === c.id ? 'outline outline-2 outline-brand-accent' : ''}`}>
+                  <span className={`font-bold ${tone(c.netR, c.n > 0)}`}>{c.n ? rr(c.netR) : '–'}</span>
+                  <span className="text-ink-3"> t {fx(c.t)} · {c.rPerMonth >= 0 ? '+' : ''}{fx(c.rPerMonth, 1)}R/mo{c.exam ? '' : ' · exam ✗'}</span>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody></table></div>
+    </div>
+  );
+}
+
 /** iteration 12: ₹250-340 against the wider universe, and the verdict by the rule fixed before the run */
 function WideCard({ ml }: { ml: Ml }) {
   const w = ml.wide;
@@ -650,7 +689,7 @@ function WideCard({ ml }: { ml: Ml }) {
       <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className={HEAD}>
         <th className="px-2 py-1.5 text-left">Version</th><th className={TH}>Trades / month</th><th className={TH}>R / trade</th><th className={TH}>t</th><th className={TH}>Months green</th><th className={TH}>₹ / month</th><th className={TH}>5 draws</th><th className={TH}>Untouched</th><th className={TH}>Exam</th>
       </tr></thead><tbody>
-        {ml.strategies.filter((s) => s.id !== 'placebo').map((s) => {
+        {ml.strategies.filter((s) => s.id !== 'placebo' && !(w.grid?.length && CELL_ID.test(s.id))).map((s) => {
           const nz = ml.noiseAll?.find((x) => x.strategy === s.id), u = un.find((x) => x.id === s.id);
           return (
             <tr key={s.id} className={`border-b border-line/60 font-mono tabular-nums ${w.pick?.id === s.id ? 'bg-data-green/10' : ''}`}>
@@ -663,6 +702,13 @@ function WideCard({ ml }: { ml: Ml }) {
           );
         })}
       </tbody></table></div>
+      {!!w.grid?.length && (
+        <>
+          <GridTable cells={w.grid} size={10} pools={w.pools} pick={w.pick?.id} />
+          <GridTable cells={w.grid} size={5} pools={w.pools} />
+          <p className="mt-1 text-[11px] text-ink-3">Each cell: R a trade after costs at that size · t · R a month. Green = solid on its own (+{w.rule.netR}R, t {w.rule.t}+, {w.rule.n}+ trades, {(w.rule as { pool?: number }).pool ?? 50}+ stocks a day, exam profitable). Outlined = the pick. Stocks a day in red: too few to judge.</p>
+        </>
+      )}
       {w.checkList ? (
         <p className="mt-2 text-[11px] text-ink-2">Rule fixed before the run: {w.checkList.map((c) => `${yes(c.ok)} ${c.label}`).join(' · ')}.</p>
       ) : <p className="mt-2 text-[11px] text-ink-2">
