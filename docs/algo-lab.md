@@ -113,4 +113,5 @@ written.
      process); the dataset is the artifact `grid-wide`, not `grid`; the results go only to the ledger, not the run index; no
      strategy is called `fCap2`. The job stops itself 08:40–11:15 on weekdays unless "Run during market hours" is ticked (then it
      keeps going at 1 Dhan request a second in that window, leaving Algo Live the other 4, and backs off on Dhan's rate-limit
-     reply), and will not start during a backtest, because all of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.
+     reply). NSE holidays (`NSE_HOLIDAYS`, add each year's list in December) run at full speed with no override; with the override on, a
+     holiday missing from the list is caught from 09:20 by one Nifty 500 request (no candles today). It will not start during a backtest, because all of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.

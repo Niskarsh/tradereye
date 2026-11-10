@@ -46,7 +46,7 @@ export function WideRunCard({ onDone }: { onDone: () => void }) {
         </div>
       )}
       {!active && status?.message && <p className={`text-xs ${status.state === 'failed' ? 'text-data-red-text' : 'text-ink-2'}`}>{status.message}</p>}
-      {!active && !status?.message && <p className="text-xs text-ink-3">{token ? 'Takes most of a day the first time. Start it in the evening or at a weekend: it stops itself between 08:40 and 11:15 on weekdays unless you tick the box below.' : 'Log in on the Dhan login tab first.'}</p>}
+      {!active && !status?.message && <p className="text-xs text-ink-3">{token ? 'Takes most of a day the first time. Start it in the evening or at a weekend: it stops itself between 08:40 and 11:15 on trading days unless you tick the box below. NSE holidays run at full speed.' : 'Log in on the Dhan login tab first.'}</p>}
       {!active && (
         <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">
           <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-0.5 accent-brand-accent" />

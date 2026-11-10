@@ -31,10 +31,22 @@ export function wideDays(daily: Candles, from: string, to: string): WideDay[] {
   return out;
 }
 
-/** The run would compete with Algo Live for Dhan's request limit (same account) in this window, so it never runs then. */
+/**
+ * NSE equity holidays on weekdays (NSE's list; add next year's when NSE publishes it in December). On these days the run
+ * goes at full speed all morning. A holiday missing from here is still caught by the job's own check from 09:20
+ * (no Nifty 500 candles today), when the market-hours override is on.
+ */
+export const NSE_HOLIDAYS = new Set([
+  '2026-01-15', '2026-01-26', '2026-03-03', '2026-03-26', '2026-03-31', '2026-04-03', '2026-04-14', '2026-05-01', '2026-05-28',
+  '2026-06-26', '2026-09-14', '2026-10-02', '2026-10-20', '2026-11-10', '2026-11-24', '2026-12-25',
+]);
+export const istDate = (ms: number) => new Date(ms + IST).toISOString().slice(0, 10);
+export const istMinute = (ms: number) => { const t = new Date(ms + IST); return t.getUTCHours() * 60 + t.getUTCMinutes(); };
+
+/** The run would compete with Algo Live for Dhan's request limit (same account) in this window on a trading day. */
 export function inLiveWindow(ms: number): boolean {
-  const t = new Date(ms + IST), day = t.getUTCDay(), min = t.getUTCHours() * 60 + t.getUTCMinutes();
-  return day >= 1 && day <= 5 && min >= 8 * 60 + 40 && min < 11 * 60 + 15;
+  const day = new Date(ms + IST).getUTCDay(), min = istMinute(ms);
+  return day >= 1 && day <= 5 && min >= 8 * 60 + 40 && min < 11 * 60 + 15 && !NSE_HOLIDAYS.has(istDate(ms));
 }
 
 /* ---- the verdict, by a rule fixed before the run ------------------------------------------------------------ */

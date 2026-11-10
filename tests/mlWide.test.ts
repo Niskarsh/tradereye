@@ -85,10 +85,12 @@ test('writer: an extra column is written after the labels; no extra column = the
 
 test('the run never competes with Algo Live for Dhan requests', () => {
   const at = (d: string, t: string) => Date.parse(`${d}T${t}:00+05:30`);
-  assert.equal(inLiveWindow(at('2026-11-10', '08:39')), false);
-  assert.equal(inLiveWindow(at('2026-11-10', '08:40')), true);
-  assert.equal(inLiveWindow(at('2026-11-10', '11:14')), true);
-  assert.equal(inLiveWindow(at('2026-11-10', '11:15')), false);
+  assert.equal(inLiveWindow(at('2026-11-11', '08:39')), false);
+  assert.equal(inLiveWindow(at('2026-11-11', '08:40')), true);
+  assert.equal(inLiveWindow(at('2026-11-11', '11:14')), true);
+  assert.equal(inLiveWindow(at('2026-11-11', '11:15')), false);
+  assert.equal(inLiveWindow(at('2026-11-10', '09:30')), false, 'Diwali Balipratipada: NSE holiday');
+  assert.equal(inLiveWindow(at('2026-12-25', '09:30')), false, 'Christmas');
   assert.equal(inLiveWindow(at('2026-11-14', '09:30')), false, 'Saturday');
 });
 
@@ -122,7 +124,7 @@ test('override: keeps going in market hours, slowed, and rides out Dhan\'s rate 
   const { DhanError } = await import('../lib/dhan');
   const files = new Map<string, Uint8Array>();
   const store = { get: async (k: string) => files.get(k), put: async (k: string, b: Uint8Array) => { files.set(k, b); } };
-  const tuesday0930 = Date.parse('2026-11-10T09:30:00+05:30');
+  const tuesday0930 = Date.parse('2026-11-11T09:30:00+05:30'); // a Wednesday, in fact: a trading day
   const make = (override: boolean, failFirst: number) => {
     let calls = 0;
     const dhan = {
@@ -137,4 +139,28 @@ test('override: keeps going in market hours, slowed, and rides out Dhan\'s rate 
   const o = make(true, 2);
   await assert.rejects(o.run(), /no Nifty 500 daily candles/, 'override: went past the window check to the (empty) Dhan reply');
   assert.equal(o.calls(), 3, 'two rate-limited replies retried');
+});
+
+test('holiday not in the list: from 09:20 the run sees no Nifty candles today and goes full speed', async () => {
+  const { runWideGrid, LIVE_WINDOW_GAP_MS } = await import('../lib/ml/wideJob');
+  const files = new Map<string, Uint8Array>();
+  const store = { get: async (k: string) => files.get(k), put: async (k: string, b: Uint8Array) => { files.set(k, b); } };
+  const go = async (start: string, todayBars: boolean, override = true) => {
+    let checks = 0; const logs: string[] = [];
+    let t = Date.parse(start);
+    const dhan = {
+      intraday: async () => { checks++; const s = Math.floor(t / 1000); return todayBars ? { t: [s], o: [1], h: [1], l: [1], c: [1], v: [1] } : { t: [], o: [], h: [], l: [], c: [], v: [] }; },
+      daily: async () => ({ t: [], o: [], h: [], l: [], c: [], v: [] }),
+    };
+    const began = Date.now();
+    await runWideGrid('r', t, { store, dhan, fetchText: async () => '', gridDir: mkdtempSync(join(tmpdir(), 'wide-')), now: () => (t += 1), override, minGapMs: 0, log: (m) => logs.push(m) }).catch(() => {});
+    return { checks, logs, waited: Date.now() - began };
+  };
+  const closed = await go('2027-01-04T09:30:00+05:30', false); // a Monday not in the list, no candles
+  assert.equal(closed.checks, 1); assert.ok(closed.logs.some((l) => /closed today/.test(l)), closed.logs.join('|'));
+  const trading = await go('2027-01-04T09:30:00+05:30', true);
+  assert.equal(trading.checks, 1); assert.ok(!trading.logs.some((l) => /closed today/.test(l)), 'a trading day stays slow');
+  const early = await go('2027-01-04T09:00:00+05:30', false);
+  assert.equal(early.checks, 0, 'before 09:20 an empty reply proves nothing: no check');
+  assert.ok(LIVE_WINDOW_GAP_MS >= 1000);
 });

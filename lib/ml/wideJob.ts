@@ -7,7 +7,7 @@ import { getJson, monthKey, putJson, type RunStatus, type Store } from '../setup
 import { NIFTY500 } from '../setups/job';
 import { gridDay } from './grid';
 import { GridWriter } from './writer';
-import { inLiveWindow, wideDays, type WideDay } from './wide';
+import { inLiveWindow, istDate, istMinute, wideDays, type WideDay } from './wide';
 
 /**
  * Algo Lab iteration 12, step 1: the dataset for the wide universe (lib/ml/wide.ts), written to disk for the model jobs.
@@ -57,9 +57,27 @@ export async function runWideGrid(runId: string, startedAt: number, deps: WideDe
   const now = deps.now ?? Date.now, log = deps.log ?? (() => {});
   const gap = deps.minGapMs ?? 250;
   let next = 0, lastStatus = 0;
+  // a weekday holiday missing from NSE_HOLIDAYS: from 09:20 one request tells (no Nifty 500 candles today)
+  const closed = new Set<string>(), open = new Set<string>();
+  let checkAfter = 0;
+  const marketOn = async (ms: number): Promise<boolean> => {
+    if (!inLiveWindow(ms)) return false;
+    const date = istDate(ms);
+    if (closed.has(date)) return false;
+    if (open.has(date) || !deps.override || istMinute(ms) < 9 * 60 + 20 || ms < checkAfter) return true;
+    checkAfter = ms + 5 * 60_000; // an unclear reply: assume open (the safe side) and ask again in 5 minutes
+    try {
+      const c = await deps.dhan.intraday({ securityId: NIFTY500.securityId, segment: NIFTY500.segment, instrument: NIFTY500.instrument, from: date, to: addDays(date, 1), interval: 1 });
+      if (c.t.some((t) => dateOf(t) === date)) { open.add(date); return true; }
+      closed.add(date);
+      log(`${date}: no Nifty 500 candles after 09:20, the market is closed today: full speed`);
+      return false;
+    } catch (e) { if (e instanceof DhanError && e.isAuth) throw e; }
+    return true;
+  };
   const dhanCall = async <T>(fn: () => Promise<T>): Promise<T> => {
     for (let attempt = 0; ; attempt++) {
-      const live = inLiveWindow(now());
+      const live = await marketOn(now());
       if (live && !deps.override) throw new LiveWindowError();
       const t = now(), at = Math.max(t, next);
       next = at + (live ? LIVE_WINDOW_GAP_MS : gap);
