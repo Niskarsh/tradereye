@@ -29,7 +29,7 @@ export class LiveWindowError extends Error {
 
 export interface WideDeps {
   store: Store;
-  dhan: Pick<DhanClient, 'intraday' | 'daily'>;
+  dhan: Pick<DhanClient, 'intraday' | 'daily'> & Partial<Pick<DhanClient, 'profile'>>;
   fetchText: (url: string) => Promise<string>;
   gridDir: string;
   now?: () => number;
@@ -108,13 +108,37 @@ export async function runWideGrid(runId: string, startedAt: number, deps: WideDe
   const to = sessions.at(-1);
   if (!to) throw new Error('Dhan returned no Nifty 500 daily candles.');
 
+  /**
+   * A per-stock reply that reads like "token dead" or "no data plan" stopped the whole run before (10 Nov: one reply 20
+   * minutes in, with the plan active). Now Dhan's profile is asked first: only a dead token or a lapsed plan there stops
+   * the run; otherwise the reply was about that one request, so it is logged as Dhan sent it and the stock-month skipped.
+   */
+  let odd = 0, verified = 0;
+  const describe = (e: DhanError) => `HTTP ${e.status}${e.code ? ` ${e.code}` : ''}: ${e.message}`;
+  const perStock = async (e: unknown, what: string) => {
+    if (e instanceof LiveWindowError || !(e instanceof DhanError)) throw e;
+    if (!e.isAuth && !e.isNoDataPlan) return;
+    log(`${what}: Dhan replied ${describe(e)}`);
+    if (deps.dhan.profile && now() - verified > 60_000) {
+      let p;
+      try { p = await dhanCall(() => deps.dhan.profile!()); }
+      catch (pe) { throw pe instanceof DhanError ? new DhanError(pe.status, pe.code, `profile check failed too (${describe(pe)}); the request before: ${describe(e)}`) : pe; }
+      const plan = String(p?.dataPlan ?? '').trim();
+      const lapsed = (!!plan && !/^(active|subscribed)$/i.test(plan)) || (!!p?.dataValidity && Date.parse(String(p.dataValidity)) < now());
+      if (lapsed) throw new DhanError(e.status, 'DH-902', `Dhan's profile says the data plan is "${p?.dataPlan}" (valid till ${p?.dataValidity}). The request: ${describe(e)}`);
+      log(`profile: token works, data plan "${p?.dataPlan ?? '?'}" valid till ${p?.dataValidity ?? '?'}: skipping ${what} only`);
+      verified = now();
+    } else if (!deps.dhan.profile) throw e;
+    if (++odd > 25) throw new DhanError(e.status, e.code, `more than 25 requests failed this way although the profile says all is fine; the last: ${describe(e)}`);
+  };
+
   const plan: { symbol: string; securityId: string; days: WideDay[]; daily: Candles }[] = [];
   await pool(universe, deps.concurrency ?? 4, async (u, i) => {
     try {
       const daily = await dhanCall(() => deps.dhan.daily({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: addDays(fromAll, -1150), to: today }));
       const days = wideDays(daily, fromAll, to);
       if (days.length) plan.push({ ...u, days, daily });
-    } catch (e) { if (e instanceof LiveWindowError || (e instanceof DhanError && (e.isAuth || e.isNoDataPlan))) throw e; }
+    } catch (e) { await perStock(e, `${u.symbol} daily`); }
     await status('Daily candles: which stocks are in the wide universe', i + 1, universe.length);
   });
   plan.sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -143,7 +167,7 @@ export async function runWideGrid(runId: string, startedAt: number, deps: WideDe
     const parts: Candles[] = [];
     for (const m of monthsNeeded(p.days.map((d) => d.date))) {
       try { parts.push(await loadMonth({ symbol: p.symbol, securityId: p.securityId, segment: 'NSE_EQ', instrument: 'EQUITY' }, m)); }
-      catch (e) { if (e instanceof LiveWindowError || (e instanceof DhanError && (e.isAuth || e.isNoDataPlan))) throw e; skipped++; }
+      catch (e) { await perStock(e, `${p.symbol} ${m}`); skipped++; }
     }
     const sess = toSessions(joinCandles(parts));
     const byDate = new Map(sess.map((s, i) => [s.date, i]));

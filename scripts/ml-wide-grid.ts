@@ -34,7 +34,7 @@ async function main() {
 
 main().catch(async (e) => {
   const msg = e instanceof DhanError
-    ? (e.isAuth ? 'Dhan rejected the token (expired?). Log in again and press Run.' : e.isNoDataPlan ? 'Dhan says the Data API plan is not active.' : `Dhan error: ${e.message}`)
+    ? (e.isAuth ? 'Dhan rejected the token (expired?). Log in again and press Run.' : e.isNoDataPlan ? 'Dhan refused a data request as "no data plan".' : `Dhan error: ${e.message}`) + ` [Dhan replied HTTP ${e.status}${e.code ? ` ${e.code}` : ''}: ${e.message}]`
     : (e as Error)?.message ?? String(e);
   console.error(`failed: ${msg}`);
   const prev = await getJson<RunStatus>(store, WIDE_STATUS_KEY).catch(() => undefined);

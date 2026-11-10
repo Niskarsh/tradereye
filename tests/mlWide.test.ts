@@ -164,3 +164,27 @@ test('holiday not in the list: from 09:20 the run sees no Nifty candles today an
   assert.equal(early.checks, 0, 'before 09:20 an empty reply proves nothing: no check');
   assert.ok(LIVE_WINDOW_GAP_MS >= 1000);
 });
+
+test('a "no data plan" reply on one stock skips it when the profile says the plan is active; a lapsed plan still stops', async () => {
+  const { runWideGrid } = await import('../lib/ml/wideJob');
+  const { DhanError } = await import('../lib/dhan');
+  const files = new Map<string, Uint8Array>();
+  const store = { get: async (k: string) => files.get(k), put: async (k: string, b: Uint8Array) => { files.set(k, b); } };
+  const csv = 'SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_TRADING_SYMBOL,SEM_SERIES\nNSE,E,11,EQUITY,AAA,EQ\nNSE,E,22,EQUITY,BBB,EQ\n';
+  const daily = () => { const d: Candles = { t: [], o: [], h: [], l: [], c: [], v: [] }; for (let i = 0; i < 40; i++) { d.t.push(Date.parse('2026-09-01T04:00:00Z') / 1000 + i * 86400); d.o.push(300); d.h.push(303); d.l.push(297); d.c.push(300); d.v.push(4e6); } return d; };
+  const go = async (plan: string) => {
+    const logs: string[] = [];
+    const dhan = {
+      daily: async (p: { securityId: string }) => { if (p.securityId === '22') throw new DhanError(400, 'DH-902', 'Data APIs not subscribed'); return daily(); },
+      intraday: async () => ({ t: [], o: [], h: [], l: [], c: [], v: [] }),
+      profile: async () => ({ dhanClientId: 'x', dataPlan: plan, dataValidity: '2026-12-01' }),
+    };
+    let t = Date.parse('2026-11-14T20:00:00+05:30');
+    const r = await runWideGrid('r', t, { store, dhan, fetchText: async () => csv, gridDir: mkdtempSync(join(tmpdir(), 'wide-')), now: () => (t += 1), minGapMs: 0, from: '2026-10-01', log: (m) => logs.push(m) }).then(() => 'ok', (e: Error) => e.message);
+    return { r, logs };
+  };
+  const ok = await go('Active');
+  assert.equal(ok.r, 'ok', ok.r); assert.ok(ok.logs.some((l) => /BBB daily: Dhan replied HTTP 400 DH-902/.test(l)), ok.logs.join('|'));
+  const lapsed = await go('Inactive');
+  assert.match(lapsed.r, /profile says the data plan is "Inactive"/);
+});
