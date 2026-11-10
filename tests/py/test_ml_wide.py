@@ -1,5 +1,5 @@
 """
-Iteration 15 on a small made-up world (the world and the planted short edge of test_ml_walkforward.py):
+Iteration 16 on a small made-up world (the world and the planted short edge of test_ml_walkforward.py):
   * the pipeline runs for both universes; 'narrow' sees only its own stock-days and ranks among them alone;
   * no strategy is called fCap2 (the pages that follow the live strategy look for that id);
   * ml_walkforward's own settings are what the normal Re-run and the Algo Live model use, in a fresh process.
@@ -42,10 +42,15 @@ t = ml_wide.add_stress(pd.DataFrame({'nbSx': [0.5, 0.5, 0.5], 'nbS': [0.6, 0.6, 
                                      'avgVol': [1e6, 1e6, np.nan], 'priceRs': [200.0, 680.0, 300.0]}))
 # turnover: ₹200 x 1M = ₹20 cr; ₹680 with avgVol already scaled to ₹340: 1M x 340 = ₹34 cr; nan: the median (₹27 cr)
 assert np.allclose(t['nbSx_t10'], [0.6 - 1.25 * np.sqrt(1e6 / 2e8), 0.6 - 1.25 * np.sqrt(1e6 / 3.4e8), 0.6 - 1.25 * np.sqrt(1e6 / 2.7e8)]), t['nbSx_t10'].tolist()
-assert np.allclose(t['nbSx_t5'], [0.6 - 1.25 * np.sqrt(5e5 / 2e8), 0.6 - 1.25 * np.sqrt(5e5 / 3.4e8), 0.6 - 1.25 * np.sqrt(5e5 / 2.7e8)])
 assert abs((0.6 - t['nbSx_t10'][0]) - 0.088) < 0.001, 'about 0.09R for ₹10 lakh in a ₹20 crore a day stock'
-for k in (5, 8, 12, 15):
-    assert np.allclose(t[f'nbSx_t{k}'][0], 0.6 - 1.25 * np.sqrt(k * 1e5 / 2e8)), k
+# liquidity sizing: a share of the stock's turnover between ₹1 and ₹25 lakh, so impact is the same in R until a bound bites
+big = pd.DataFrame({'nbSx': [0.5] * 3, 'nbS': [0.6] * 3, 'nbS3': [0.7] * 3, 'avgVol': [2e6, 1e9 / 340, 1e5], 'priceRs': [500.0, 340.0, 300.0]})
+pos = ml_wide.position_rs(big, 0.002)  # turnover ₹68 cr, ₹100 cr, ₹30 lakh
+assert np.allclose(pos, [0.002 * 2e6 * 340, 2_000_000, 100_000]), pos  # ₹13.6 lakh, ₹20 lakh, the ₹1 lakh floor
+assert np.allclose(ml_wide.position_rs(big.assign(avgVol=[1e10, 1e10, 1e10]), 0.003), 2_500_000), 'capped at ₹25 lakh'
+tb = ml_wide.add_stress(big)
+assert np.allclose(tb['nbSx_l20'][:2], 0.6 - 1.25 * np.sqrt(0.002)), 'same impact in R for every stock between the bounds'
+assert tb['nbSx_l20'][2] < tb['nbSx_l20'][0], 'the ₹1 lakh floor costs a thin stock more'
 
 # the cap check: each version's own cap (here 2), never more than 4
 try:
@@ -53,8 +58,17 @@ try:
     raise AssertionError('4 trades a day passed a cap of 3')
 except SystemExit as e:
     assert 'more than 3' in str(e)
-ml_wide.check_cap({'strategies': [{'id': 'w10_f100_c4', 'trades': [['2025-01-02', x] for x in 'ABCD']}]})
-assert ml_wide.cap_of('placebo') == 4 and ml_wide.cap_of('nF') == 2
+ml_wide.check_cap({'strategies': [{'id': 'l20_f100_c3_g_ns', 'trades': [['2025-01-02', x] for x in 'ABC']}]})
+assert ml_wide.cap_of('placebo') == 3 and ml_wide.cap_of('nF') == 2 and ml_wide.cap_of('l5_f170_c3_g') == 3
+
+# never stand aside: the base keeps ml_walkforward's bar, the '_ns' twin trades the best bar even when it lost
+real = ml_wide._choose_bar
+ml_wide._choose_bar = lambda *a: (0.2, -3.0)
+assert ml_wide.choose_bar(None, None, None, {'ns': False}) == (0.2, -3.0)
+assert ml_wide.choose_bar(None, None, None, {'ns': True})[0] == 0.2 and ml_wide.choose_bar(None, None, None, {'ns': True})[1] > 0
+ml_wide._choose_bar = lambda *a: (None, -1e18)
+assert ml_wide.choose_bar(None, None, None, {'ns': True})[0] is None, 'no bar at all: still stands aside'
+ml_wide._choose_bar = real
 
 # the market gate: top third of the last 250 days, only with 60 days of history, never using today in its own history
 mk = pd.Series(np.r_[np.zeros(59), [5.0], np.zeros(40), [0.0, 5.0, -1.0]], index=[f'd{i:03d}' for i in range(103)])
@@ -72,20 +86,27 @@ gated = next(s_ for s_ in ml_wide.WIDE if s_['id'] == 'w10_f100_c3_g')
 _, ps = ml.allowed(part, np.full(3, -np.inf), np.array([0.5, 0.5, 0.5]), gated)
 assert ps[0] == -np.inf and ps[1] == 0.5 and ps[2] == -np.inf, ps
 pl = next(s_ for s_ in ml_wide.WIDE if s_['id'] == 'placebo')
-assert pl['S'] == 'nbSx_t10' and pl['cap'] == 4 and pl['minTurnover'] == 1e9, 'the placebo is priced and limited like the pick'
+assert pl['S'] == 'nbSx_t10' and pl['cap'] == 3 and pl['minTurnover'] == 1e9 and pl['gate'], 'the placebo is priced and limited like the pick'
 
 allowed_syms = {head['symbols'][i] for i in range(len(head['symbols'])) if i % 2 == 0}
-want = {'narrow': ['nF', 'nT10'], 'wide': [s_['id'] for s_ in ml_wide.WIDE], 'ladder': [s_['id'] for s_ in ml_wide.LADDER_ST]}
-assert len(want['wide']) == 6 + 6 + 1 and len(want['ladder']) == 4 * 6
+want = {'narrow': ['nF', 'nT10'], 'wide': [s_['id'] for s_ in ml_wide.WIDE]}
+assert len(want['wide']) == 2 + 4 * 2 * 2 + 2 + 4 * 2 + 1 and len(set(want['wide'])) == len(want['wide'])
+assert all(x[:-3] in want['wide'] for x in want['wide'] if x.endswith('_ns')), 'every _ns twin has its base'
 assert all('fCap2' != x for v in want.values() for x in v)
-for universe in ('narrow', 'wide', 'ladder'):
+for universe in ('narrow', 'wide'):
     ml_wide.main(d, universe, 'main')
     res = json.load(open(os.path.join(d, f'wide-{universe}-main.json')))
-    assert res['iteration'] == 15 and [s['id'] for s in res['strategies']] == want[universe]
-    assert res['setup']['maxPerDay'] == 4
+    assert res['iteration'] == 16 and [s['id'] for s in res['strategies']] == want[universe]
+    assert res['setup']['maxPerDay'] == 3
     for s in res['strategies']:
         assert set(s['regime']) >= {'low', 'mid', 'high', 'cuts', 'examHotShare'} and s['badDays']['days'] >= s['badDays']['le2'] >= s['badDays']['le3'], s['id']
         assert sum(s['regime'][k]['n'] for k in ('low', 'mid', 'high')) <= s['dev']['n'], s['id']
+        if universe == 'wide':
+            assert set(s['inr']) == {'perMonth', 'examPerMonth', 'avgPosition', 'avgRisk', 'capital'}, s['id']
+            if s['dev']['n']:
+                lo, hi = (1e5, 2.5e6) if s['id'].startswith('l') else (1e6, 1e6)
+                assert lo <= s['inr']['avgPosition'] <= hi, (s['id'], s['inr'])
+            assert ('nsCheck' in s) == s['id'].endswith('_ns'), s['id']
         per = {}
         for tr in s['trades']:
             per[tr[0]] = per.get(tr[0], 0) + 1
@@ -95,11 +116,18 @@ for universe in ('narrow', 'wide', 'ladder'):
     if universe == 'narrow':
         assert res['stocks'] == len(allowed_syms), (res['stocks'], len(allowed_syms))
     else:
-        assert set(res['pools']) == {str(f) for f in ml_wide.FLOORS_CR} and res['pools']['50'] >= res['pools']['170'], res['pools']
+        assert set(res['pools']) == {str(f) for f in ml_wide.FLOORS_CR} and res['pools']['100'] >= res['pools']['170'], res['pools']
     print(universe, [(s['id'], s['dev']['n'], s['dev']['netR']) for s in res['strategies']][:8], res.get('pools'))
 dev = {s['id']: s['dev'] for s in json.load(open(os.path.join(d, 'wide-wide-main.json')))['strategies']}
-assert dev['w10_f50_c4']['n'] >= dev['w10_f50_c3']['n'], 'a higher cap never takes fewer trades'
-assert dev['w10_f100_c4']['n'] >= dev['w10_f100_c4_g']['n'], 'the gate only takes trades away'
+wide = {s['id']: s for s in json.load(open(os.path.join(d, 'wide-wide-main.json')))['strategies']}
+assert dev['w10_f100_c3']['n'] >= dev['w10_f100_c3_g']['n'], 'the gate only takes trades away'
+for i, s in wide.items():
+    if i.endswith('_ns'):
+        b = wide[i[:-3]]
+        assert s['dev']['n'] >= b['dev']['n'], (i, 'never standing aside never takes fewer trades')
+        for m, mb in zip(s['months'], b['months']):
+            if not mb.get('note'):
+                assert m['n'] == mb['n'], (i, m['month'], 'outside the stood-aside months the twin trades exactly as its base')
 ml_wide.main(d, 'wide', 'seed2')
 assert 'placebo' not in [s['id'] for s in json.load(open(os.path.join(d, 'wide-wide-seed2.json')))['strategies']]
 

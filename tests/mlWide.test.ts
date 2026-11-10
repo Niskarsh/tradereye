@@ -7,7 +7,7 @@ import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
 import { gridDay, liqBand, ML_COLS, ML_WIDTH, WIDE_LAST_SLOT, wideVol } from '../lib/ml/grid';
 import { GridWriter } from '../lib/ml/writer';
-import { etfSymbols, inLiveWindow, WIDE_ITERATION, wideDays, wideVerdict, type WideShard } from '../lib/ml/wide';
+import { etfSymbols, inLiveWindow, LIQ_SHARES_BP, WIDE_ITERATION, wideDays, wideVerdict, wideVerdict15, type WideShard } from '../lib/ml/wide';
 import { screenerDays, SCREENER } from '../lib/setups/universe';
 
 const IST = 19800;
@@ -118,7 +118,7 @@ function world(o: { cell?: CellFn; exam?: ExamFn; seedsOf?: number[]; narrow?: n
 // bigger orders cost more impact: R a trade falls with size
 const sized: CellFn = (size, f, c) => 0.11 - size * 0.003 + (f === 100 ? 0.005 : 0) + (c === 4 ? 0.002 : 0);
 test('verdict (iteration 15): the block that holds and makes the most rupees a month wins', () => {
-  const v = wideVerdict(world({ cell: sized }));
+  const v = wideVerdict15(world({ cell: sized }));
   assert.equal(v.outcome, 'better', v.message);
   assert.equal(v.blocks?.length, 6, '5 sizes + the gated ₹10 lakh block');
   assert.ok(v.blocks?.every((b) => b.holds), JSON.stringify(v.blocks));
@@ -130,28 +130,76 @@ test('verdict (iteration 15): the block that holds and makes the most rupees a m
 test('verdict (iteration 15): iteration 14 again (good decide months, the exam lost in most cells) holds nowhere', () => {
   // the shape iteration 14 had at ₹10 lakh: 2 of 6 cells profitable on the exam
   const exam: ExamFn = (_s, f, c) => (f === 50 && c === 3) || (f === 100 && c === 4);
-  const v = wideVerdict(world({ cell: () => 0.07, exam }));
+  const v = wideVerdict15(world({ cell: () => 0.07, exam }));
   assert.equal(v.outcome, 'not-better'); assert.equal(v.checks.floor, false); assert.equal(v.pick, null);
   assert.match(v.message, /No block holds.*2\/6 profitable on the exam/);
 });
 test('verdict (iteration 15): one weak cell is fine, two are not', () => {
-  const one = wideVerdict(world({ cell: (s, f, c) => (f === 170 && c === 3 ? 0.01 : 0.07) }));
+  const one = wideVerdict15(world({ cell: (s, f, c) => (f === 170 && c === 3 ? 0.01 : 0.07) }));
   assert.equal(one.outcome, 'better', one.message);
-  const two = wideVerdict(world({ cell: (s, f) => (f === 170 ? 0.01 : 0.07) }));
+  const two = wideVerdict15(world({ cell: (s, f) => (f === 170 ? 0.01 : 0.07) }));
   assert.equal(two.checks.floor, false); assert.equal(two.outcome, 'not-better');
 });
 test('verdict (iteration 15): the gated block can win where the plain one fails the exam', () => {
-  const v = wideVerdict(world({ cell: () => 0.07, exam: (s, f, c, g) => g }));
+  const v = wideVerdict15(world({ cell: () => 0.07, exam: (s, f, c, g) => g }));
   assert.equal(v.outcome, 'better', v.message); assert.equal(v.pick?.id.endsWith('_g'), true);
   assert.equal(v.blocks?.find((b) => b.gate)?.holds, true); assert.equal(v.blocks?.find((b) => !b.gate && b.size === 10)?.holds, false);
 });
 test('verdict (iteration 15): a pick with too few stocks a day is not solid; training luck or a leak fails', () => {
-  const thin = wideVerdict(world({ cell: () => 0.07, pools: { 50: 30, 100: 20, 170: 10 } }));
+  const thin = wideVerdict15(world({ cell: () => 0.07, pools: { 50: 30, 100: 20, 170: 10 } }));
   assert.equal(thin.checks.floor, true); assert.equal(thin.pick, null); assert.equal(thin.outcome, 'not-better');
-  const near = wideVerdict(world({ cell: () => 0.06, narrow: [0.06, 0.07, 0.065] }));
+  const near = wideVerdict15(world({ cell: () => 0.06, narrow: [0.06, 0.07, 0.065] }));
   assert.equal(near.checks.beatsNoise, false); assert.equal(near.outcome, 'not-better');
-  const leak = wideVerdict(world({ cell: () => 0.08, placebo: dev(0.1, 3) }));
+  const leak = wideVerdict15(world({ cell: () => 0.08, placebo: dev(0.1, 3) }));
   assert.equal(leak.outcome, 'not-better'); assert.match(leak.message, /leaks/);
+});
+
+// iteration 16: references and liquidity-sized versions in 'wide' (5 draws), the control in 'narrow'
+type LiqFn = (bp: number | null, floor: number, gate: boolean) => { netR: number; exam?: boolean; inr?: number; examInr?: number };
+function world16(o: { cell: LiqFn; ns?: { sumR: number; n: number; exam?: boolean }; narrow?: number[]; placebo?: ReturnType<typeof dev>; pools?: Record<string, number> }): WideShard[] {
+  const narrow = o.narrow ?? [0.01, 0.02, 0.03];
+  const pools = o.pools ?? { 100: 70, 170: 41 };
+  const mk = (bp: number | null, f: number, g: boolean, bump: number) => {
+    const c = o.cell(bp, f, g), id = `${bp === null ? 'w10' : `l${bp}`}_f${f}_c3${g ? '_g' : ''}`;
+    return { id, name: id, dev: dev(c.netR + bump), exam: c.exam === false ? examBad : examOk, money: { tradesPerMonth: 27, stopPct: 2.3 },
+      inr: { perMonth: c.inr ?? 50000, examPerMonth: c.examInr ?? 10000, avgPosition: 1_000_000, avgRisk: 23000, capital: 600000 } };
+  };
+  const all = (bump: number) => [
+    mk(null, 100, false, bump), mk(null, 100, true, bump),
+    ...[false, true].flatMap((g) => [100, 170].flatMap((f) => LIQ_SHARES_BP.map((bp) => mk(bp, f, g, bump)))),
+  ];
+  const seed = (i: number) => (i ? `seed${i + 1}` : 'main');
+  return [
+    ...narrow.map((netR, i): WideShard => ({ universe: 'narrow', shard: seed(i), strategies: [{ id: 'nT10', name: 'c', dev: dev(netR), money: { tradesPerMonth: 20, stopPct: 2.3 } }] })),
+    ...[0, 0.01, -0.01].map((b, i): WideShard => ({ universe: 'wide', shard: seed(i), pools, strategies: [...all(b), ...(i ? [] : [
+      { id: 'placebo', name: 'p', dev: o.placebo ?? dev(0, 0.2) },
+      ...(o.ns ? [{ id: 'l20_f100_c3_g_ns', name: 'ns', dev: dev(0.08), exam: o.ns.exam === false ? examBad : examOk, nsCheck: { base: 'l20_f100_c3_g', decide: { months: 3, n: o.ns.n, sumR: o.ns.sumR, rupees: 0 }, exam: { months: 1, n: 0, sumR: 0, rupees: 0 } } },
+        { id: 'w10_f100_c3_g_ns', name: 'ns', dev: dev(0.08), exam: examOk, nsCheck: { base: 'w10_f100_c3_g', decide: { months: 3, n: o.ns.n, sumR: o.ns.sumR, rupees: 0 }, exam: { months: 1, n: 0, sumR: 0, rupees: 0 } } }] : []),
+    ])] })),
+  ];
+}
+const liq: LiqFn = (bp, f, g) => ({ netR: 0.08, inr: bp === 20 && f === 100 && g ? 80000 : bp === null ? 55000 : 60000 });
+test('verdict (iteration 16): the liquidity-sized version making the most rupees beats iteration 15\'s pick', () => {
+  const v = wideVerdict(world16({ cell: liq, ns: { sumR: 4, n: 30 } }));
+  assert.equal(v.outcome, 'better', v.message); assert.equal(v.pick?.id, 'l20_f100_c3_g');
+  assert.equal(v.goal?.perMonth, 80000); assert.equal(v.standAside?.drop, true); assert.match(v.message, /Drop the stand-aside/);
+  assert.equal(v.liquidity?.find((c) => c.id === 'l20_f100_c3_g')?.neighboursOk, 3);
+});
+test('verdict (iteration 16): no winner keeps iteration 15\'s pick; the stand-aside stays when its months lost', () => {
+  const v = wideVerdict(world16({ cell: (bp) => ({ netR: 0.08, inr: bp === null ? 55000 : 40000 }), ns: { sumR: -2, n: 30 } }));
+  assert.equal(v.outcome, 'not-better'); assert.equal(v.pick?.id, 'w10_f100_c3_g'); assert.match(v.message, /stays the pick.*Keep the stand-aside/);
+  assert.equal(v.standAside?.drop, false);
+});
+test('verdict (iteration 16): neighbours, the exam in rupees and training luck each block a winner', () => {
+  // its share neighbours lose on the exam, and ₹170 crore at the same share too: 0 of 3
+  const lonely = wideVerdict(world16({ cell: (bp, f, g) => ({ netR: 0.08, exam: bp === 20 && f === 100 && g, inr: bp === 20 && f === 100 && g ? 90000 : 50000 }) }));
+  assert.notEqual(lonely.pick?.id, 'l20_f100_c3_g');
+  const examRs = wideVerdict(world16({ cell: (bp, f, g) => ({ netR: 0.08, inr: bp === 20 && f === 100 && g ? 90000 : 50000, examInr: bp === 20 && f === 100 && g ? -5000 : 10000 }) }));
+  assert.notEqual(examRs.pick?.id, 'l20_f100_c3_g');
+  const luck = wideVerdict(world16({ cell: liq, narrow: [0.08, 0.09, 0.085] }));
+  assert.equal(luck.checks.beatsNoise, false); assert.match(luck.message, /do not move Algo Live/);
+  const thin = wideVerdict(world16({ cell: liq, pools: { 100: 30, 170: 20 } }));
+  assert.equal(thin.pick, null);
 });
 
 test('ETFs are left out: by instrument type, by fund name, by symbol', () => {

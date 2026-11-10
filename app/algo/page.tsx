@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
 import { WideRunCard } from '@/components/algo/WideRunCard';
-import type { WideBlock, WideCell } from '@/lib/ml/wide';
+import type { WideBlock, WideCell, WideLiquid } from '@/lib/ml/wide';
 import { exportFileName, mlToMarkdown, type ExportMl } from '@/lib/ml/exportMd';
 import { relabelSized } from '@/lib/ml/sized';
 
@@ -23,6 +23,8 @@ interface WideResult {
   pools?: Record<string, number>;
   goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; stopPct: number; position?: number } | null;
   blocks?: WideBlock[];
+  liquidity?: WideLiquid[];
+  standAside?: { twin: string; drop: boolean; message: string } | null;
 }
 interface S { n: number; hit: number; netR: number; gross: number; sumR: number; inr: number; t: number }
 interface P extends S { monthsGreen: number; monthsTraded: number; monthsTotal: number }
@@ -683,6 +685,28 @@ function GridTable({ cells, size, pools, pick }: { cells: WideCell[]; size: numb
   );
 }
 
+/** iteration 16 on: the fixed ₹10 lakh references and the liquidity-sized versions, rupees from their own positions */
+function LiquidityTable({ cells, pick }: { cells: WideLiquid[]; pick?: string }) {
+  const rs = (x: number | null) => (x == null ? '–' : `₹${Math.round(x).toLocaleString('en-IN')}`);
+  return (
+    <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className={HEAD}>
+      <th className="px-2 py-1.5 text-left">Position</th><th className={TH}>Floor</th><th className={TH}>Gate</th><th className={TH}>R a trade</th><th className={TH}>t</th>
+      <th className={TH}>Exam</th><th className={TH}>Draws</th><th className={TH}>₹ a month</th><th className={TH}>Exam ₹/mo</th><th className={TH}>Avg position</th><th className={TH}>Neighbours</th>
+    </tr></thead><tbody>
+      {cells.map((c) => (
+        <tr key={c.id} className={`border-b border-line/60 font-mono tabular-nums ${c.solid ? 'bg-data-green/10' : ''} ${pick === c.id ? 'outline outline-2 outline-brand-accent' : ''}`}>
+          <td className="px-2 py-1.5 font-sans">{c.bp == null ? '₹10 lakh fixed' : `${(c.bp / 100).toFixed(2)}% of turnover`}{c.winner ? ' · winner' : ''}</td>
+          <td className={TH}>₹{c.floor} cr+</td><td className={TH}>{c.gate ? 'yes' : 'no'}</td>
+          <td className={`${TH} font-bold ${tone(c.netR, c.n > 0)}`}>{c.n ? rr(c.netR) : '–'}</td><td className={TH}>{fx(c.t)}</td>
+          <td className={TH}>{c.exam ? 'Pass' : 'Fail'}</td><td className={TH}>{c.drawMean == null ? '–' : rr(c.drawMean)}</td>
+          <td className={`${TH} ${tone(c.inrPerMonth)}`}>{rs(c.inrPerMonth)}</td><td className={`${TH} ${tone(c.inrExamPerMonth)}`}>{rs(c.inrExamPerMonth)}</td>
+          <td className={TH}>{c.avgPosition == null ? '–' : `₹${(c.avgPosition / 1e5).toFixed(1)} lakh`}</td><td className={TH}>{c.bp == null ? '–' : `${c.neighboursOk}/3`}</td>
+        </tr>
+      ))}
+    </tbody></table></div>
+  );
+}
+
 /** iteration 15 on: each block (6 cells at one size) against the rule */
 function BlockTable({ blocks }: { blocks: WideBlock[] }) {
   return (
@@ -713,7 +737,7 @@ function WideCard({ ml }: { ml: Ml }) {
       <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className={HEAD}>
         <th className="px-2 py-1.5 text-left">Version</th><th className={TH}>Trades / month</th><th className={TH}>R / trade</th><th className={TH}>t</th><th className={TH}>Months green</th><th className={TH}>₹ / month</th><th className={TH}>5 draws</th><th className={TH}>Untouched</th><th className={TH}>Exam</th>
       </tr></thead><tbody>
-        {ml.strategies.filter((s) => s.id !== 'placebo' && !(w.grid?.length && CELL_ID.test(s.id))).map((s) => {
+        {ml.strategies.filter((s) => s.id !== 'placebo' && !(w.grid?.length && CELL_ID.test(s.id)) && !(w.liquidity?.length && (/_ns$/.test(s.id) || w.liquidity.some((c) => c.id === s.id)))).map((s) => {
           const nz = ml.noiseAll?.find((x) => x.strategy === s.id), u = un.find((x) => x.id === s.id);
           return (
             <tr key={s.id} className={`border-b border-line/60 font-mono tabular-nums ${w.pick?.id === s.id ? 'bg-data-green/10' : ''}`}>
@@ -726,6 +750,8 @@ function WideCard({ ml }: { ml: Ml }) {
           );
         })}
       </tbody></table></div>
+      {w.standAside ? <p className="mt-3 text-xs text-ink-2"><span className="font-black text-ink-1">Standing aside: </span>{w.standAside.message}</p> : null}
+      {w.liquidity?.length ? <LiquidityTable cells={w.liquidity} pick={w.pick?.id} /> : null}
       {!!w.grid?.length && (
         <>
           {w.blocks?.length ? <BlockTable blocks={w.blocks} /> : null}

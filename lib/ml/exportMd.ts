@@ -27,6 +27,9 @@ interface Strat {
   /** (iteration 15) decide-month R by the third of the market's 20-day move; days that lost 2R / 3R+ */
   regime?: { cuts?: number[] | null; low?: { n: number; netR: number | null }; mid?: { n: number; netR: number | null }; high?: { n: number; netR: number | null }; examHotShare?: number | null } | null;
   badDays?: { days: number; le2: number; le3: number } | null;
+  /** (iteration 16) rupees from its own positions */
+  inr?: { perMonth: number; examPerMonth: number; avgPosition: number | null; avgRisk: number | null; capital: number } | null;
+  nsCheck?: { base: string; decide: { months: number; n: number; sumR: number; rupees: number }; exam: { months: number; n: number; sumR: number; rupees: number } } | null;
 }
 interface Untouched { id: string; name?: string; from?: string; to?: string; overall?: P }
 interface Noise { strategy: string; devMin: number; devMax: number; devMean: number; draws?: { draw: string; devNetR: number; devT: number }[] }
@@ -44,6 +47,8 @@ export interface ExportMl {
     narrowDraws?: { shard: string; netR: number }[]; wideDraws?: { shard: string; netR: number }[]; wideMean?: number | null;
     goal?: { perMonth: number; positionForGoal: number | null; positionForHigh?: number | null; riskPerTrade?: number; tradesPerMonth: number; position?: number } | null;
     grid?: Cell[]; pools?: Record<string, number>; blocks?: Block[];
+    liquidity?: { id: string; bp: number | null; floor: number; gate: boolean; n: number; netR: number; t: number; exam: boolean; pool: number | null; inrPerMonth: number; inrExamPerMonth: number; avgPosition: number | null; avgRisk: number | null; capital: number; drawMean: number | null; solid: boolean; neighboursOk: number; winner: boolean }[];
+    standAside?: { twin: string; drop: boolean; message: string } | null;
   };
 }
 
@@ -89,6 +94,17 @@ export function mlToMarkdown(raw: ExportMl): string {
     if (w.goal) lines.push(`- Goal: ${inr(w.goal.perMonth)} a month at ₹${(w.goal.position ?? 1e6) / 1e5} lakh positions (~${inr(w.goal.riskPerTrade)} risk a trade, ${w.goal.tradesPerMonth} trades a month) · ₹1 lakh a month needs ~${w.goal.positionForGoal ? `₹${(w.goal.positionForGoal / 1e5).toFixed(1)} lakh` : '–'} positions, ₹1.5 lakh ~${w.goal.positionForHigh ? `₹${(w.goal.positionForHigh / 1e5).toFixed(1)} lakh` : '–'}`);
     if (w.pools) lines.push(`- Stocks clearing each turnover floor on a typical day: ${Object.entries(w.pools).map(([k, v]) => `₹${k} cr+: ${v}`).join(' · ')}`);
     out.push(lines.join('\n'));
+  }
+
+  if (w?.standAside) out.push(`## Standing aside\n- ${w.standAside.message} (twin: ${w.standAside.twin})`);
+
+  if (w?.liquidity?.length) {
+    const lakh = (x: number | null) => (x == null ? '–' : `₹${(x / 1e5).toFixed(1)} lakh`);
+    out.push('## Liquidity sizing (3 a day; ₹ from each version\'s own positions)\nW = winner by the rule, S = solid on its own, * = the pick.\n\n' + table(
+      ['Version', 'Position', 'Floor', 'Gate', 'R a trade', 't', 'Trades', 'Exam', 'Draw avg', '₹ a month', 'Exam ₹ a month', 'Avg position', 'Avg risk', 'Capital (busiest day)', 'Neighbours ok'],
+      w.liquidity.map((c) => [c.id, c.bp == null ? '₹10 lakh fixed' : `${(c.bp / 100).toFixed(2)}% of turnover`, `₹${c.floor} cr+`, c.gate ? 'yes' : 'no', r(c.netR), f(c.t, 1), c.n,
+        c.exam ? 'Pass' : 'Fail', r(c.drawMean), `${inr(c.inrPerMonth)}${c.winner ? ' W' : c.solid ? ' S' : ''}${w.pick?.id === c.id ? ' *' : ''}`, inr(c.inrExamPerMonth), lakh(c.avgPosition), inr(c.avgRisk), inr(c.capital), c.bp == null ? '–' : `${c.neighboursOk}/3`]),
+    ));
   }
 
   if (w?.blocks?.length) {
@@ -139,6 +155,8 @@ export function mlToMarkdown(raw: ExportMl): string {
       s.daily ? `- Days: ${s.daily.daysWithTrades}/${s.daily.tradingDays} with a trade · ${f(s.daily.perTradedDay)} avg, ${s.daily.maxPerDay} max a day · fired at 09:35 ${pct(s.daily.at0935)} · green days ${pct(s.daily.greenDays)} · worst day ${f(s.daily.worstDayR)}R · best ${f(s.daily.bestDayR)}R · worst week ${f(s.daily.worstWeekR)}R · green weeks ${pct(s.daily.greenWeeks)}` : '',
       s.shadow?.n ? `- Shadow months: ${s.shadow.n} trades · ${r(s.shadow.netR)} · green ${green(s.shadow)}` : '',
       s.regime ? `- By the market's 20-day move (decide months, thirds${s.regime.cuts ? ` split at ${s.regime.cuts.map((x) => `${x}%`).join(' / ')}` : ''}): low ${r(s.regime.low?.netR)} (${s.regime.low?.n ?? 0}) · mid ${r(s.regime.mid?.netR)} (${s.regime.mid?.n ?? 0}) · high ${r(s.regime.high?.netR)} (${s.regime.high?.n ?? 0}) · exam days in the gate's top third ${pct(s.regime.examHotShare)}` : '',
+      s.inr ? `- Rupees from its own positions: ${inr(s.inr.perMonth)} a month on the decide months, ${inr(s.inr.examPerMonth)} on the exam · average position ${s.inr.avgPosition == null ? '–' : inr(s.inr.avgPosition)}, risk ${s.inr.avgRisk == null ? '–' : inr(s.inr.avgRisk)} a trade · capital for the busiest day ${inr(s.inr.capital)} (5x intraday margin)` : '',
+      s.nsCheck ? `- The months ${s.nsCheck.base} stood aside, traded: decide ${s.nsCheck.decide.months} months, ${s.nsCheck.decide.n} trades, ${s.nsCheck.decide.sumR >= 0 ? '+' : ''}${s.nsCheck.decide.sumR}R (${inr(s.nsCheck.decide.rupees)}) · exam ${s.nsCheck.exam.months} months, ${s.nsCheck.exam.n} trades, ${s.nsCheck.exam.sumR >= 0 ? '+' : ''}${s.nsCheck.exam.sumR}R` : '',
       s.badDays ? `- Decide days that lost 2R or more: ${s.badDays.le2} · 3R or more: ${s.badDays.le3} (of ${s.badDays.days} days with a trade)` : '',
     ].filter(Boolean).join('\n'));
     if (s.months?.length) sec.push('Month by month (traded blind)\n\n' + table(['Month', 'Trades', 'Hit', 'Before costs', 'R/trade', 'Total R', 'Signal', 'Note'],

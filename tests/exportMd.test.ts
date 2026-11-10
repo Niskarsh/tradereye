@@ -141,3 +141,20 @@ test('from iteration 15 the placebo is priced at the size in its name', () => {
   assert.match(md, /\| As priced \(₹10 lakh positions\) \| 100 \|/);
   assert.match(mlToMarkdown(sizedMl()), /### placebo — Placebo, ₹300 risk, all stocks/, 'iterations 12-14 unchanged');
 });
+
+test('iteration 16: liquidity table, stand-aside verdict, rupees from own positions', () => {
+  const st = { ...strat('l20_f100_c3_g', 0.08), inr: { perMonth: 80000, examPerMonth: 12000, avgPosition: 1_420_000, avgRisk: 32600, capital: 852000 } };
+  const ns = { ...strat('l20_f100_c3_g_ns', 0.08), nsCheck: { base: 'l20_f100_c3_g', decide: { months: 3, n: 41, sumR: 3.2, rupees: 104320 }, exam: { months: 2, n: 18, sumR: -0.4, rupees: -13000 } } };
+  const md = mlToMarkdown({
+    ...ml, iteration: 16, strategies: [st, ns],
+    wide: {
+      outcome: 'better', message: 'm', pick: { id: 'l20_f100_c3_g', name: 'n' },
+      standAside: { twin: 'l20_f100_c3_g_ns', drop: true, message: 'Trading the 3 decide months the pick stood aside made +3.2R: drop the stand-aside.' },
+      liquidity: [{ id: 'l20_f100_c3_g', bp: 20, floor: 100, gate: true, n: 900, netR: 0.08, t: 3.4, exam: true, pool: 70, inrPerMonth: 80000, inrExamPerMonth: 12000, avgPosition: 1_420_000, avgRisk: 32600, capital: 852000, drawMean: 0.06, solid: true, neighboursOk: 3, winner: true }],
+    },
+  });
+  assert.match(md, /## Standing aside\n- Trading the 3 decide months .* \(twin: l20_f100_c3_g_ns\)/);
+  assert.match(md, /\| l20_f100_c3_g \| 0\.20% of turnover \| ₹100 cr\+ \| yes \| \+0\.08R \| 3\.4 \| 900 \| Pass \| \+0\.06R \| ₹80,000 W \* \| ₹12,000 \| ₹14\.2 lakh \| ₹32,600 \| ₹8,52,000 \| 3\/3 \|/);
+  assert.match(md, /Rupees from its own positions: ₹80,000 a month on the decide months, ₹12,000 on the exam · average position ₹14,20,000, risk ₹32,600 a trade · capital for the busiest day ₹8,52,000/);
+  assert.match(md, /The months l20_f100_c3_g stood aside, traded: decide 3 months, 41 trades, \+3\.2R \(₹1,04,320\) · exam 2 months, 18 trades, -0\.4R/);
+});
