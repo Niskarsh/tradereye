@@ -116,3 +116,25 @@ test('verdict: the rule fixed before the run', () => {
   assert.equal(leak.outcome, 'not-better'); assert.match(leak.message, /leaks/);
   assert.equal(wideVerdict(world({ wide: [0.1, 0.1] })).outcome, 'incomplete', 'too few draws');
 });
+
+test('override: keeps going in market hours, slowed, and rides out Dhan\'s rate limit', async () => {
+  const { runWideGrid, LiveWindowError } = await import('../lib/ml/wideJob');
+  const { DhanError } = await import('../lib/dhan');
+  const files = new Map<string, Uint8Array>();
+  const store = { get: async (k: string) => files.get(k), put: async (k: string, b: Uint8Array) => { files.set(k, b); } };
+  const tuesday0930 = Date.parse('2026-11-10T09:30:00+05:30');
+  const make = (override: boolean, failFirst: number) => {
+    let calls = 0;
+    const dhan = {
+      intraday: async () => { throw new Error('not reached'); },
+      daily: async () => { calls++; if (calls <= failFirst) throw new DhanError(429, 'DH-904', 'Too many requests'); return { t: [], o: [], h: [], l: [], c: [], v: [] }; },
+    };
+    let t = tuesday0930;
+    const now = () => (t += 1); // a clock that barely moves keeps the run inside the window
+    return { calls: () => calls, run: () => runWideGrid('r', t, { store, dhan, fetchText: async () => '', gridDir: mkdtempSync(join(tmpdir(), 'wide-')), now, override, minGapMs: 0 }) };
+  };
+  await assert.rejects(make(false, 0).run(), LiveWindowError, 'no override: stops');
+  const o = make(true, 2);
+  await assert.rejects(o.run(), /no Nifty 500 daily candles/, 'override: went past the window check to the (empty) Dhan reply');
+  assert.equal(o.calls(), 3, 'two rate-limited replies retried');
+});

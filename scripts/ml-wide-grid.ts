@@ -28,7 +28,7 @@ async function main() {
   if (want && clientIdFromToken(token) !== want) throw new Error('The Dhan token belongs to a different Dhan account than DHAN_CLIENT_ID.');
   const prev = await getJson<RunStatus>(store, WIDE_STATUS_KEY);
   const startedAt = prev?.runId === runId ? prev.startedAt : Date.now();
-  const r = await runWideGrid(runId, startedAt, { store, dhan: new DhanClient({ token }), fetchText, gridDir: process.env.ML_DIR ?? 'ml-data', log: (m) => console.log(m) });
+  const r = await runWideGrid(runId, startedAt, { store, dhan: new DhanClient({ token }), fetchText, gridDir: process.env.ML_DIR ?? 'ml-data', override: process.env.OVERRIDE === 'true', log: (m) => console.log(m) });
   console.log(`done: ${r.rows} rows, ${r.stocks} stocks, ${r.stockDays} stock-days`);
 }
 

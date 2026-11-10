@@ -111,5 +111,6 @@ written.
      150+ trades; its average over the 5 training draws beats the control's best draw; more R in total; the placebo shows no edge.
    - **Kept apart from Algo Live:** `ml_walkforward.py` is not edited (`ml_wide.py` sets this iteration's values in its own
      process); the dataset is the artifact `grid-wide`, not `grid`; the results go only to the ledger, not the run index; no
-     strategy is called `fCap2`. The job stops itself 08:40–11:15 on weekdays and will not start during a backtest, because all
-     of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.
+     strategy is called `fCap2`. The job stops itself 08:40–11:15 on weekdays unless "Run during market hours" is ticked (then it
+     keeps going at 1 Dhan request a second in that window, leaving Algo Live the other 4, and backs off on Dhan's rate-limit
+     reply), and will not start during a backtest, because all of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.

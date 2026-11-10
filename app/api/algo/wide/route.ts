@@ -31,13 +31,14 @@ export async function POST(req: Request) {
   const g = guard(req);
   if (!g.ok) return g.res;
   try {
-    if (inLiveWindow(Date.now())) return NextResponse.json({ error: 'LIVE_WINDOW', message: 'Not between 08:40 and 11:15 on a weekday: Algo Live needs Dhan\'s request limit then.' }, { status: 409 });
+    const override = ((await req.json().catch(() => ({}))) as { override?: unknown }).override === true;
+    if (inLiveWindow(Date.now()) && !override) return NextResponse.json({ error: 'LIVE_WINDOW', message: 'Between 08:40 and 11:15 on a weekday Algo Live needs Dhan\'s request limit. Tick "Run during market hours" to start anyway.' }, { status: 409 });
     const [cur, bt] = await Promise.all([getJson<RunStatus>(store, WIDE_STATUS_KEY), getJson<RunStatus>(store, STATUS_KEY)]);
     if (isActive(cur)) return NextResponse.json({ error: 'RUNNING', message: 'This run is already going.', status: cur }, { status: 409 });
     if (isActive(bt)) return NextResponse.json({ error: 'BACKTEST_RUNNING', message: 'The backtest is running and shares Dhan\'s request limit: start this once it is done.' }, { status: 409 });
     const runId = `${istDateTime(Date.now()).replace(/[: ]/g, '-').slice(0, 16)}-${Math.random().toString(36).slice(2, 6)}`;
     await putJson(store, pendingKey(runId), { token: g.token, at: Date.now() });
-    try { await dispatchWorkflow(WORKFLOW, { run_id: runId }, 'the wide-universe run'); }
+    try { await dispatchWorkflow(WORKFLOW, { run_id: runId, override: override ? 'true' : 'false' }, 'the wide-universe run'); }
     catch (e) {
       await putJson(store, pendingKey(runId), { used: true, at: Date.now() }).catch(() => {});
       if (e instanceof DispatchError) return NextResponse.json({ error: e.code, message: e.message }, { status: e.code === 'FAILED' ? 502 : 400 });

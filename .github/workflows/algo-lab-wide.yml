@@ -13,6 +13,11 @@ on:
         description: Run id (set by tradereye's Run button)
         required: true
         type: string
+      override:
+        description: Keep running 08:40-11:15 on weekdays (slowed to 1 Dhan request a second there)
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: algo-lab-wide
@@ -36,6 +41,7 @@ jobs:
         run: npx --yes tsx@4 scripts/ml-wide-grid.ts
         env:
           RUN_ID: ${{ inputs.run_id }}
+          OVERRIDE: ${{ inputs.override }}
           DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

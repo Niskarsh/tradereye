@@ -39,7 +39,12 @@ export interface WideDeps {
   concurrency?: number;
   onlySymbols?: string[];
   from?: string;
+  /** keep going between 08:40 and 11:15, at 1 request a second there so Algo Live keeps most of Dhan's limit */
+  override?: boolean;
 }
+
+/** gap between Dhan requests inside 08:40-11:15 when overridden: Dhan allows 5 a second, this leaves Algo Live 4 */
+export const LIVE_WINDOW_GAP_MS = 1000;
 
 async function pool<T>(items: T[], n: number, fn: (x: T, i: number) => Promise<void>) {
   let i = 0;
@@ -53,11 +58,19 @@ export async function runWideGrid(runId: string, startedAt: number, deps: WideDe
   const gap = deps.minGapMs ?? 250;
   let next = 0, lastStatus = 0;
   const dhanCall = async <T>(fn: () => Promise<T>): Promise<T> => {
-    if (inLiveWindow(now())) throw new LiveWindowError();
-    const t = now(), at = Math.max(t, next);
-    next = at + gap;
-    if (at > t) await new Promise((r) => setTimeout(r, at - t));
-    return fn();
+    for (let attempt = 0; ; attempt++) {
+      const live = inLiveWindow(now());
+      if (live && !deps.override) throw new LiveWindowError();
+      const t = now(), at = Math.max(t, next);
+      next = at + (live ? LIVE_WINDOW_GAP_MS : gap);
+      if (at > t) await new Promise((r) => setTimeout(r, at - t));
+      try { return await fn(); }
+      catch (e) {
+        // Dhan's limit hit (Algo Live may be fetching too): back off, never take a stock out of the run for it
+        if (!(e instanceof DhanError && e.isRateLimited) || attempt >= 4) throw e;
+        next = now() + 2000 * (attempt + 1);
+      }
+    }
   };
   const status = async (phase: string, done?: number, total?: number, force = false) => {
     if (!force && now() - lastStatus < 5000) return;
