@@ -7,7 +7,7 @@ import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
 import { gridDay, liqBand, ML_COLS, ML_WIDTH, WIDE_LAST_SLOT, wideVol } from '../lib/ml/grid';
 import { GridWriter } from '../lib/ml/writer';
-import { etfSymbols, inLiveWindow, wideDays, wideVerdict, type WideShard } from '../lib/ml/wide';
+import { etfSymbols, inLiveWindow, WIDE_ITERATION, wideDays, wideVerdict, type WideShard } from '../lib/ml/wide';
 import { screenerDays, SCREENER } from '../lib/setups/universe';
 
 const IST = 19800;
@@ -206,4 +206,9 @@ test('a "no data plan" reply on one stock skips it when the profile says the pla
   assert.equal(ok.r, 'ok', ok.r); assert.ok(ok.logs.some((l) => /BBB daily: Dhan replied HTTP 400 DH-902/.test(l)), ok.logs.join('|'));
   const lapsed = await go('Inactive');
   assert.match(lapsed.r, /profile says the data plan is "Inactive"/);
+});
+
+test('the Run card names the iteration the models script actually runs', () => {
+  const py = readFileSync(join(__dirname, '..', 'scripts', 'ml_wide.py'), 'utf8');
+  assert.equal(Number(/^ITERATION = (\d+)/m.exec(py)?.[1]), WIDE_ITERATION);
 });
