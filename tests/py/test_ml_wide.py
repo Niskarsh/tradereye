@@ -1,5 +1,5 @@
 """
-Iteration 12 on a small made-up world (the world and the planted short edge of test_ml_walkforward.py):
+Iteration 13 on a small made-up world (the world and the planted short edge of test_ml_walkforward.py):
   * the pipeline runs for both universes; 'narrow' sees only its own stock-days and ranks among them alone;
   * no strategy is called fCap2 (the pages that follow the live strategy look for that id);
   * ml_walkforward's own settings are what the normal Re-run and the Algo Live model use, in a fresh process.
@@ -35,23 +35,38 @@ head['cols'] = head['cols'] + ['inNarrow']
 head['width'] += 1
 json.dump(head, open(os.path.join(d, 'grid.json'), 'w'))
 
-# the narrowOnly filter
-ml_wide.configure('wide', 'main')
+# the stress columns: an extra % of the price, in R of a stop at half the usual daily range
 import pandas as pd  # noqa: E402
-part = pd.DataFrame({'inNarrow': [1, 0, 1], 'slot': [30, 30, 30], 'avgVol': [1e7, 1e7, 1e7]})
-st = next(s for s in ml_wide.WIDE if s['id'] == 'wIn340')
-_, ps = ml.allowed(part, np.full(3, -np.inf), np.array([0.5, 0.5, 0.5]), st)
-assert ps[1] == -np.inf and ps[0] == 0.5 and ps[2] == 0.5, ps
+t = ml_wide.add_stress(pd.DataFrame({'nbSx': [0.5, 0.5, 0.5], 'adrPct': [4.0, 2.0, np.nan], 'avgVol': [1e6, 5e6, 5e6]}))
+assert np.allclose(t['nbSx_s1'], [0.5 - 0.1 / 2, 0.5 - 0.1 / 1, 0.5 - 0.1 / 1.5]), t['nbSx_s1'].tolist()  # nan range: the median stop
+assert np.allclose(t['nbSx_s2'], [0.5 - 0.2 / 2, 0.5 - 0.2 / 1, 0.5 - 0.2 / 1.5])
+assert np.allclose(t['nbSx_thin'], [0.5 - 0.2 / 2, 0.5, 0.5]), 'only stocks under ₹100 crore a day'
 
-for universe, ids in (('narrow', ['nF']), ('wide', ['wAll', 'w3m', 'w5m', 'w7m', 'w10m', 'wIn340', 'placebo'])):
+# the 2-a-day check fails the job
+try:
+    ml_wide.check_cap({'strategies': [{'id': 'x', 'trades': [['2025-01-02', 'A'], ['2025-01-02', 'B'], ['2025-01-02', 'C']]}]})
+    raise AssertionError('3 trades a day passed the check')
+except SystemExit as e:
+    assert 'more than 2' in str(e)
+
+allowed_syms = {head['symbols'][i] for i in range(len(head['symbols'])) if i % 2 == 0}
+for universe, ids in (('narrow', ['nF']), ('wide', ['wAll', 'wS1', 'wS2', 'wThin', 'placebo'])):
     ml_wide.main(d, universe, 'main')
     res = json.load(open(os.path.join(d, f'wide-{universe}-main.json')))
-    assert res['iteration'] == 12 and [s['id'] for s in res['strategies']] == ids, [s['id'] for s in res['strategies']]
-    allowed_syms = {head['symbols'][i] for i in range(len(head['symbols'])) if i % 2 == 0}
+    assert res['iteration'] == 13 and [s['id'] for s in res['strategies']] == ids, [s['id'] for s in res['strategies']]
+    assert res['setup']['maxPerDay'] == 2 and res['setup']['maxPerSide'] == 2
     for s in res['strategies']:
-        if universe == 'narrow' or s['id'] == 'wIn340':
-            assert {t[1] for t in s['trades']} <= allowed_syms, s['id']
+        per = {}
+        for tr in s['trades']:
+            per[tr[0]] = per.get(tr[0], 0) + 1
+        assert max(per.values(), default=0) <= 2, s['id']
+        if universe == 'narrow':
+            assert {tr[1] for tr in s['trades']} <= allowed_syms, s['id']
+    if universe == 'narrow':
+        assert res['stocks'] == len(allowed_syms), (res['stocks'], len(allowed_syms))
     print(universe, [(s['id'], s['dev']['n'], s['dev']['netR']) for s in res['strategies']])
+dev = {s['id']: s['dev'] for s in res['strategies']}
+assert dev['wS2']['netR'] <= dev['wAll']['netR'] + 1e-9 or dev['wS2']['n'] < dev['wAll']['n'], 'worse fills cannot make it better on the same trades'
 ml_wide.main(d, 'wide', 'seed2')
 assert 'placebo' not in [s['id'] for s in json.load(open(os.path.join(d, 'wide-wide-seed2.json')))['strategies']]
 

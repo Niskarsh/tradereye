@@ -7,7 +7,7 @@ import type { Candles } from '../lib/dhan';
 import { toSessions, type Bar } from '../lib/live/enrich';
 import { gridDay, liqBand, ML_COLS, ML_WIDTH, WIDE_LAST_SLOT, wideVol } from '../lib/ml/grid';
 import { GridWriter } from '../lib/ml/writer';
-import { inLiveWindow, wideDays, wideVerdict, type WideShard } from '../lib/ml/wide';
+import { etfSymbols, inLiveWindow, wideDays, wideVerdict, type WideShard } from '../lib/ml/wide';
 import { screenerDays, SCREENER } from '../lib/setups/universe';
 
 const IST = 19800;
@@ -95,28 +95,46 @@ test('the run never competes with Algo Live for Dhan requests', () => {
 });
 
 const dev = (netR: number, t = 3, n = 500, sumR = netR * n) => ({ n, netR, t, sumR });
-function world(o: { narrow?: number[]; wide?: number[]; placebo?: ReturnType<typeof dev>; wideT?: number; wideN?: number }): WideShard[] {
+const examOk = { n: 60, netR: 0.05, t: 1 }, examBad = { n: 60, netR: -0.05, t: -1 };
+function world(o: { narrow?: number[]; wide?: number[]; placebo?: ReturnType<typeof dev>; wideT?: number; wideN?: number; exam?: typeof examOk }): WideShard[] {
   const narrow = o.narrow ?? [0.04, 0.05, 0.06], wide = o.wide ?? [0.09, 0.1, 0.11];
   const seed = (i: number) => (i ? `seed${i + 1}` : 'main');
   return [
     ...narrow.map((netR, i): WideShard => ({ universe: 'narrow', shard: seed(i), strategies: [{ id: 'nF', name: 'control', dev: dev(netR) }] })),
     ...wide.map((netR, i): WideShard => ({ universe: 'wide', shard: seed(i), strategies: [
-      { id: 'w3m', name: 'floor', dev: dev(netR, o.wideT ?? 3, o.wideN ?? 500) }, { id: 'wAll', name: 'all', dev: dev(netR - 0.05, 1) },
+      { id: 'wAll', name: 'all', dev: dev(netR + 0.04) },
+      { id: 'wS1', name: 'stress', dev: dev(netR, o.wideT ?? 3, o.wideN ?? 500), exam: o.exam ?? examOk },
       ...(i ? [] : [{ id: 'placebo', name: 'p', dev: o.placebo ?? dev(0, 0.2) }]),
     ] })),
   ];
 }
-test('verdict: the rule fixed before the run', () => {
+test('verdict (iteration 13): the stressed version must clear every check', () => {
   const ok = wideVerdict(world({}));
-  assert.equal(ok.outcome, 'better'); assert.equal(ok.pick?.id, 'w3m'); assert.equal(ok.wideMean, 0.1);
+  assert.equal(ok.outcome, 'better'); assert.equal(ok.pick?.id, 'wS1'); assert.equal(ok.wideMean, 0.1); assert.equal(ok.checkList?.length, 5);
   assert.equal(wideVerdict(world({ wide: [0.05, 0.05, 0.055] })).checks.beatsNoise, false, 'inside the control\'s training noise');
-  assert.equal(wideVerdict(world({ wide: [0.05, 0.05, 0.055] })).outcome, 'not-better');
-  assert.equal(wideVerdict(world({ wideT: 1.5 })).outcome, 'not-better', 'no floor clears the bar');
-  assert.equal(wideVerdict(world({ wideN: 200 })).checks.moreTotalR, false, 'a better average on far fewer trades');
-  assert.equal(wideVerdict(world({ wideN: 200 })).outcome, 'not-better');
+  assert.equal(wideVerdict(world({ wideT: 1.5 })).outcome, 'not-better', 'the stressed edge is not sure enough');
+  assert.equal(wideVerdict(world({ wideN: 100 })).outcome, 'not-better', 'too few trades');
+  const exam = wideVerdict(world({ exam: examBad }));
+  assert.equal(exam.outcome, 'not-better'); assert.equal(exam.checks.examPass, false); assert.match(exam.message, /exam/);
   const leak = wideVerdict(world({ placebo: dev(0.1, 3) }));
   assert.equal(leak.outcome, 'not-better'); assert.match(leak.message, /leaks/);
   assert.equal(wideVerdict(world({ wide: [0.1, 0.1] })).outcome, 'incomplete', 'too few draws');
+});
+
+test('ETFs are left out: by instrument type, by fund name, by symbol', () => {
+  const csv = [
+    'SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_TRADING_SYMBOL,SEM_EXCH_INSTRUMENT_TYPE,SEM_SERIES,SM_SYMBOL_NAME',
+    'NSE,E,1,EQUITY,CUPID,ES,EQ,CUPID LIMITED',
+    'NSE,E,2,EQUITY,MONQ50,ES,EQ,"MOTILAL OSWAL NASDAQ 100 ETF"',
+    'NSE,E,3,EQUITY,GOLDBEES,ES,EQ,NIPPON INDIA GOLD',
+    'NSE,E,4,EQUITY,ABCFUND,ETF,EQ,SOMETHING',
+    'NSE,E,5,EQUITY,HDFCNIF,ES,EQ,HDFC NIFTY 50 INDEX FUND',
+    'NSE,E,6,EQUITY,TATACHEM,ES,EQ,TATA CHEMICALS LTD',
+    'BSE,E,7,EQUITY,OTHERETF,ES,A,BSE ONE',
+  ].join('\n');
+  const e = etfSymbols(csv);
+  for (const s of ['MONQ50', 'GOLDBEES', 'ABCFUND', 'HDFCNIF', 'NIFTYBEES']) assert.ok(e.has(s), s);
+  for (const s of ['CUPID', 'TATACHEM', 'OTHERETF']) assert.ok(!e.has(s), s);
 });
 
 test('override: keeps going in market hours, slowed, and rides out Dhan\'s rate limit', async () => {

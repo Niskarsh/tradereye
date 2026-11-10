@@ -49,16 +49,62 @@ export function inLiveWindow(ms: number): boolean {
   return day >= 1 && day <= 5 && min >= 8 * 60 + 40 && min < 11 * 60 + 15 && !NSE_HOLIDAYS.has(istDate(ms));
 }
 
+/* ---- ETFs are not stocks ------------------------------------------------------------------------------------- */
+
+/** Funds Dhan lists as NSE equity that the results showed being traded (iteration 12); caught by name too, this is a backstop. */
+const ETF_SYMBOLS = new Set(['MON100', 'MONQ50', 'MAFANG', 'MASPTOP50', 'MAHKTECH', 'NIFTYBEES', 'NIFTYIETF', 'NIFTYETF', 'NIFTYBETA', 'SBINIFTY50', 'SETFNIF50']);
+const ETF_NAME = /\bETF\b|\bBEES\b|EXCHANGE TRADED|INDEX FUND|\bFOF\b/i;
+const ETF_SYMBOL = /(BEES|ETF|IETF)$/i;
+
+/**
+ * NSE "equity" symbols in Dhan's instrument list that are really exchange-traded funds: by Dhan's instrument type, the
+ * fund's name, the symbol, or the backstop list. Iteration 13 on leaves them out of the wide universe: an ETF that
+ * tracks the US market (MONQ50, MON100) moves on its premium in the Indian morning, not on the facts the model reads.
+ */
+export function etfSymbols(csv: string): Set<string> {
+  const lines = csv.split(/\r?\n/).filter((l) => l.trim());
+  const out = new Set<string>(ETF_SYMBOLS);
+  if (lines.length < 2) return out;
+  const split = (line: string) => {
+    const f: string[] = []; let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === ',') { f.push(cur); cur = ''; } else cur += ch;
+    }
+    f.push(cur); return f;
+  };
+  const head = split(lines[0]).map((h) => h.trim().replace(/^\uFEFF/, ''));
+  const col = (...n: string[]) => n.map((x) => head.indexOf(x)).find((i) => i >= 0) ?? -1;
+  const iExch = col('SEM_EXM_EXCH_ID', 'EXCH_ID'), iSeg = col('SEM_SEGMENT', 'SEGMENT'), iSym = col('SEM_TRADING_SYMBOL', 'UNDERLYING_SYMBOL', 'SYMBOL_NAME');
+  const iType = col('SEM_EXCH_INSTRUMENT_TYPE', 'INSTRUMENT_TYPE'), iNames = [col('SM_SYMBOL_NAME', 'DISPLAY_NAME'), col('SEM_CUSTOM_SYMBOL')].filter((i) => i >= 0);
+  for (const line of lines.slice(1)) {
+    const f = split(line);
+    if (iExch >= 0 && f[iExch] !== 'NSE') continue;
+    if (iSeg >= 0 && f[iSeg] !== 'E') continue;
+    const sym = (f[iSym] ?? '').trim().toUpperCase();
+    if (!sym) continue;
+    if ((iType >= 0 && /ETF/i.test(f[iType] ?? '')) || iNames.some((i) => ETF_NAME.test(f[i] ?? '')) || ETF_SYMBOL.test(sym)) out.add(sym);
+  }
+  return out;
+}
+
 /* ---- the verdict, by a rule fixed before the run ------------------------------------------------------------ */
 
+/**
+ * Iteration 13: is iteration 12's edge (₹250-1000, all) still there when every fill is worse than modelled? The test
+ * version is 'wS1' (an extra 0.1% of the price on every trade, about twice what a ₹500 stock's spread costs).
+ */
 export const WIDE_RULE = { netR: 0.04, t: 2, n: 150 };
-export const WIDE_ORDER = ['w10m', 'w7m', 'w5m', 'w3m', 'wAll'];
+export const WIDE_PICK = 'wS1';
+export const WIDE_BASE = 'wAll';
 export const WIDE_CONTROL = 'nF';
 /** fewer training draws than this on either side and the comparison says nothing */
 export const WIDE_MIN_DRAWS = 3;
 
 interface Dev { n: number; netR: number; t: number; sumR: number }
-export interface WideShard { universe: 'narrow' | 'wide'; shard: string; strategies: { id: string; name: string; dev: Dev }[] }
+type Exam = { n?: number; netR?: number; t?: number; pass?: boolean | null } | null | undefined;
+export interface WideShard { universe: 'narrow' | 'wide'; shard: string; strategies: { id: string; name: string; dev: Dev; exam?: Exam }[] }
 export interface WideDraw { shard: string; netR: number }
 export interface WideVerdict {
   outcome: 'better' | 'not-better' | 'incomplete';
@@ -67,7 +113,9 @@ export interface WideVerdict {
   pick: { id: string; name: string; netR: number; t: number; n: number; sumR: number } | null;
   control: { id: string; name: string; netR: number; t: number; n: number; sumR: number } | null;
   narrowDraws: WideDraw[]; wideDraws: WideDraw[]; wideMean: number | null;
-  checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean };
+  checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean; examPass?: boolean };
+  /** (iteration 13 on) the rule as shown on the page, check by check */
+  checkList?: { label: string; ok: boolean }[];
 }
 
 const draws = (shards: WideShard[], universe: WideShard['universe'], id: string | undefined): WideDraw[] =>
@@ -76,38 +124,47 @@ const draws = (shards: WideShard[], universe: WideShard['universe'], id: string 
     return st && st.dev.n ? [{ shard: s.shard, netR: st.dev.netR }] : [];
   });
 
+/** the exam months (from May 26) as Algo Lab marks them: profitable after costs */
+export const examPasses = (e: Exam) => !!e && (e.pass !== undefined && e.pass !== null ? e.pass : (e.n ?? 0) >= 30 && (e.netR ?? 0) > 0);
+
 /**
- * Decide months only, real fills on both sides. The wide universe wins only if ALL of these hold:
- *  1. a version clears iteration 11's own bar (the highest liquidity floor with +0.04R a trade, t 2+, 150+ trades);
- *  2. its average over the training draws beats the BEST draw of the ₹250-340 control, so it is more than training luck;
- *  3. it makes more R in total (the point is more money, not a nicer average on fewer trades);
- *  4. the placebo shows no edge.
+ * Decide months only, at the worse fills. The wide universe counts as robust only if ALL of these hold:
+ *  1. with an extra 0.1% a trade it still makes +0.04R a trade, t 2+, 150+ trades;
+ *  2. its average over the training draws beats the BEST draw of the ₹250-340 control (more than training luck);
+ *  3. it still makes more R in total than the control;
+ *  4. it is profitable on the exam months too (iteration 12's ₹340 cr+ pick failed them);
+ *  5. the placebo shows no edge.
  */
 export function wideVerdict(shards: WideShard[]): WideVerdict {
   const main = (u: WideShard['universe']) => shards.find((s) => s.universe === u && s.shard === 'main');
   const wide = main('wide'), narrow = main('narrow');
   const brief = (x: { id: string; name: string; dev: Dev } | undefined) => (x ? { id: x.id, name: x.name, netR: x.dev.netR, t: x.dev.t, n: x.dev.n, sumR: x.dev.sumR } : null);
-  const passes = (d: Dev) => d.n >= WIDE_RULE.n && d.netR >= WIDE_RULE.netR && d.t >= WIDE_RULE.t;
-  const pick = WIDE_ORDER.map((id) => wide?.strategies.find((x) => x.id === id)).find((x) => x && passes(x.dev));
+  const pick = wide?.strategies.find((x) => x.id === WIDE_PICK);
   const control = narrow?.strategies.find((x) => x.id === WIDE_CONTROL);
   const placebo = wide?.strategies.find((x) => x.id === 'placebo');
-  const narrowDraws = draws(shards, 'narrow', WIDE_CONTROL);
-  // with no version clearing the bar, the broadest one is still shown against the control
-  const wideDraws = draws(shards, 'wide', pick?.id ?? 'wAll');
+  const narrowDraws = draws(shards, 'narrow', WIDE_CONTROL), wideDraws = draws(shards, 'wide', WIDE_PICK);
   const wideMean = wideDraws.length ? Math.round((wideDraws.reduce((a, d) => a + d.netR, 0) / wideDraws.length) * 1000) / 1000 : null;
+  const d = pick?.dev;
   const checks = {
-    floor: !!pick,
-    beatsNoise: wideMean !== null && narrowDraws.length > 0 && wideMean > Math.max(...narrowDraws.map((d) => d.netR)),
-    moreTotalR: !!pick && !!control && pick.dev.sumR > control.dev.sumR,
+    floor: !!d && d.n >= WIDE_RULE.n && d.netR >= WIDE_RULE.netR && d.t >= WIDE_RULE.t,
+    beatsNoise: wideMean !== null && narrowDraws.length > 0 && wideMean > Math.max(...narrowDraws.map((x) => x.netR)),
+    moreTotalR: !!d && !!control && d.sumR > control.dev.sumR,
+    examPass: examPasses(pick?.exam),
     placeboClean: !!placebo && !(placebo.dev.n >= 100 && placebo.dev.t >= 2 && placebo.dev.netR > 0),
   };
-  const base = { rule: WIDE_RULE, pick: brief(pick), control: brief(control), narrowDraws, wideDraws, wideMean, checks };
-  if (!wide || !narrow || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS || wideDraws.length < WIDE_MIN_DRAWS) {
+  const checkList = [
+    { label: `with 0.1% worse fills: +${WIDE_RULE.netR}R a trade, t ${WIDE_RULE.t}+, ${WIDE_RULE.n}+ trades`, ok: checks.floor },
+    { label: "its average over the draws beats the ₹250–340 control's best draw", ok: checks.beatsNoise },
+    { label: 'more R in total than the control', ok: checks.moreTotalR },
+    { label: 'profitable on the exam months', ok: checks.examPass },
+    { label: 'the placebo shows no edge', ok: checks.placeboClean },
+  ];
+  const base = { rule: WIDE_RULE, pick: brief(pick), control: brief(control), narrowDraws, wideDraws, wideMean, checks, checkList };
+  if (!wide || !narrow || !pick || !control || !placebo || narrowDraws.length < WIDE_MIN_DRAWS || wideDraws.length < WIDE_MIN_DRAWS) {
     return { ...base, outcome: 'incomplete', message: `Not enough finished training jobs to compare (₹250–340: ${narrowDraws.length} draws, wide: ${wideDraws.length}; ${WIDE_MIN_DRAWS} each needed). See the GitHub run.` };
   }
   if (!checks.placeboClean) return { ...base, outcome: 'not-better', message: 'The placebo shows an edge: something leaks. Do not trust this run.' };
-  if (!checks.floor) return { ...base, outcome: 'not-better', message: 'No wide version clears the bar at real fills. The wider universe does not help.' };
-  if (!checks.beatsNoise) return { ...base, outcome: 'not-better', message: `${pick!.name} does not beat ₹250–340 by more than training luck. The wider universe does not help.` };
-  if (!checks.moreTotalR) return { ...base, outcome: 'not-better', message: `${pick!.name} has the better average but makes less in total than ₹250–340.` };
-  return { ...base, outcome: 'better', message: `${pick!.name} beats ₹250–340 by more than training luck and makes more in total.` };
+  const failed = checkList.filter((c) => !c.ok).map((c) => c.label);
+  if (failed.length) return { ...base, outcome: 'not-better', message: `Not robust: the wide edge fails "${failed[0]}"${failed.length > 1 ? ` (and ${failed.length - 1} more)` : ''}. Do not move Algo Live to it.` };
+  return { ...base, outcome: 'better', message: 'Robust: ₹250–1000 keeps its edge with 0.1% worse fills, beats ₹250–340 by more than training luck and passes the exam. A candidate for Algo Live.' };
 }

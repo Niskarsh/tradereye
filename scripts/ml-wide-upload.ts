@@ -50,8 +50,8 @@ async function main() {
     strategies: [...narrow.strategies, ...wide.strategies],
     untouched: [...((narrow as unknown as { untouched?: unknown[] }).untouched ?? []), ...((wide as unknown as { untouched?: unknown[] }).untouched ?? [])],
     noiseAll: [noiseOf(narrows, 'nF'), ...wide.strategies.filter((s) => s.id !== 'placebo').map((s) => noiseOf(wides, s.id))].filter((x) => x.draws.length > 1),
-    narrowStocks: (narrow as unknown as { stocks?: number }).stocks,
     best: verdict.pick?.id ?? 'nF',
+    narrowStocks: (narrow as unknown as { stocks?: number }).stocks,
     wide: verdict,
   };
   delete (ml as { noise?: unknown }).noise; // noiseAll has it, per version
@@ -61,6 +61,6 @@ async function main() {
     ledger.push(ledgerEntry(ml as unknown as MlResult));
     await putJson(store, ML_LEDGER_KEY, ledger.sort((a, b) => a.iteration - b.iteration || a.createdAt - b.createdAt));
   }
-  await finish(runId, 'done', `Iteration 12: ${verdict.message}`);
+  await finish(runId, 'done', `Iteration ${ml.iteration}: ${verdict.message}`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -15,6 +15,7 @@ interface WideResult {
   outcome: 'better' | 'not-better' | 'incomplete'; message: string; rule: { netR: number; t: number; n: number };
   pick: WideLine | null; control: WideLine | null; narrowDraws: { shard: string; netR: number }[]; wideDraws: { shard: string; netR: number }[]; wideMean: number | null;
   checks: { floor: boolean; beatsNoise: boolean; moreTotalR: boolean; placeboClean: boolean };
+  checkList?: { label: string; ok: boolean }[];
 }
 interface S { n: number; hit: number; netR: number; gross: number; sumR: number; inr: number; t: number }
 interface P extends S { monthsGreen: number; monthsTraded: number; monthsTotal: number }
@@ -655,15 +656,17 @@ function WideCard({ ml }: { ml: Ml }) {
               <td className="px-2 py-1.5 font-sans">{s.name}</td><td className={TH}>{s.money ? s.money.tradesPerMonth : '–'}</td>
               <td className={`${TH} font-bold ${tone(s.dev.netR, s.dev.n > 0)}`}>{s.dev.n ? rr(s.dev.netR) : '–'}</td><td className={TH}>{fx(s.dev.t)}</td><td className={TH}>{s.dev.monthsGreen}/{s.dev.monthsTraded}</td>
               <td className={`${TH} ${tone(s.money?.perMonth ?? 0)}`}>{s.money ? `₹${s.money.perMonth.toLocaleString('en-IN')}` : '–'}</td>
-              <td className={TH}>{nz ? `${rr(nz.devMin)} to ${rr(nz.devMax)}` : '–'}</td>
+              <td className={TH}>{nz ? `${rr(nz.devMin)} to ${rr(nz.devMax)} (avg ${rr(nz.devMean)})` : '–'}</td>
               <td className={TH}>{u && u.overall.n ? `${rr(u.overall.netR)} (t ${fx(u.overall.t)})` : '–'}</td><td className={TH}>{passText(examPass(s.exam))}</td>
             </tr>
           );
         })}
       </tbody></table></div>
-      <p className="mt-2 text-[11px] text-ink-2">
+      {w.checkList ? (
+        <p className="mt-2 text-[11px] text-ink-2">Rule fixed before the run: {w.checkList.map((c) => `${yes(c.ok)} ${c.label}`).join(' · ')}.</p>
+      ) : <p className="mt-2 text-[11px] text-ink-2">
         Rule fixed before the run: {yes(w.checks.floor)} a version clears {rr(w.rule.netR)} a trade, t {w.rule.t}+, {w.rule.n}+ trades · {yes(w.checks.beatsNoise)} its average over the draws beats the control&apos;s best draw · {yes(w.checks.moreTotalR)} more R in total · {yes(w.checks.placeboClean)} the placebo shows no edge.
-      </p>
+      </p>}
       <p className="mt-1 font-mono text-[11px] text-ink-3">₹250–340 draws: {draws(w.narrowDraws)}<br />Wide draws: {draws(w.wideDraws)}{w.wideMean !== null ? ` (average ${rr(w.wideMean)})` : ''}</p>
     </Card>
   );

@@ -115,3 +115,13 @@ written.
      keeps going at 1 Dhan request a second in that window, leaving Algo Live the other 4, and backs off on Dhan's rate-limit
      reply). NSE holidays (`NSE_HOLIDAYS`, add each year's list in December) run at full speed with no override; with the override on, a
      holiday missing from the list is caught from 09:20 by one Nifty 500 request (no candles today). It will not start during a backtest, because all of them share Dhan's request limit. Stopped or timed out, it carries on from the saved candles when pressed again.
+13. **Does iteration 12's edge survive worse fills?** (same workflow and Run button; iteration 12 stays under its git tag)
+   Iteration 12: ₹250–1000 all +0.12R (t 4.7, exam Pass) against the ₹250–340 control's −0.01R, but every liquidity floor
+   halved it, so the edge sits in the thinnest stocks (₹17–100 crore a day), where modelled fills are least trustworthy.
+   - Same model (trained once), only the cost of each trade changes and the bar is set again on it: +0.1% of the price per
+     trade (`wS1`, the test), +0.2% (`wS2`), +0.2% only under ₹100 crore a day (`wThin`). In R: the % ÷ half the usual
+     daily range (`add_stress`).
+   - ETFs left out of the dataset (`etfSymbols`: Dhan's instrument type, the fund name, the symbol; the run log lists them).
+   - 2 a day and 2 a side set globally and checked on every trade after the run (`check_cap`; the job fails otherwise).
+   - Rule fixed before the run (`wideVerdict`): `wS1` makes +0.04R, t ≥ 2, 150+ trades; its draw average beats the
+     control's best draw; more R in total; exam profitable; placebo clean. All five, or not a candidate for Algo Live.
