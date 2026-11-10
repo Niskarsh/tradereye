@@ -42,6 +42,12 @@ export interface ExportMl {
   };
 }
 
+/**
+ * How many rows of each long list go into the file. Infinity = everything the page has (the default: every iteration's
+ * results have been read in full so far). Lower one only if a file gets too big to attach.
+ */
+export const EXPORT_LIMITS = { recentTrades: Infinity, importance: Infinity, liked: Infinity };
+
 const f = (x: Num, d = 2) => (x == null || !Number.isFinite(x) ? '–' : x.toFixed(d));
 const r = (x: Num) => (x == null || !Number.isFinite(x) ? '–' : `${x >= 0 ? '+' : ''}${x.toFixed(2)}R`);
 const pct = (x: Num) => (x == null || !Number.isFinite(x) ? '–' : `${Math.round(x * 100)}%`);
@@ -126,9 +132,9 @@ export function mlToMarkdown(ml: ExportMl): string {
     const parts = [...(s.bySide ? (['long', 'short'] as const).map((k) => [k, s.bySide?.[k]] as const) : []), ...(s.byHour ?? []).map((h) => [`from ${h.hour}`, h] as const)];
     if (parts.length) sec.push('By side and time\n\n' + table(['', 'Trades', 'Before costs', 'After costs', 't'], parts.map(([k, v]) => [k, v?.n ?? 0, r(v?.gross), r(v?.netR), f(v?.t, 1)])));
     if (s.bands?.length) sec.push('By liquidity band\n\n' + table(['Band', 'Trades', 'R/trade', 't'], s.bands.map((b) => [b.band, b.n, r(b.netR), f(b.t, 1)])));
-    if (s.importance?.length) sec.push('What the model leans on: ' + s.importance.slice(0, 10).map((x) => `${x.label} ${pct(x.share)}`).join(' · '));
-    if (s.liked?.length) sec.push('Its trades vs all moments (z, its median, all median): ' + s.liked.slice(0, 12).map((x) => `${x.side} ${x.label} ${f(x.z)} (${x.taken} vs ${x.all})`).join(' · '));
-    if (s.recent?.length) sec.push('Latest trades\n\n' + table(['Day', 'Time', 'Stock', 'Side', 'Predicted', 'Result'], s.recent.slice(0, 20).map((t) => [t.day, t.time, t.sym, t.side, r(t.pred), r(t.net)])));
+    if (s.importance?.length) sec.push('What the model leans on: ' + s.importance.slice(0, EXPORT_LIMITS.importance).map((x) => `${x.label} ${pct(x.share)}`).join(' · '));
+    if (s.liked?.length) sec.push('Its trades vs all moments (z, its median, all median): ' + s.liked.slice(0, EXPORT_LIMITS.liked).map((x) => `${x.side} ${x.label} ${f(x.z)} (${x.taken} vs ${x.all})`).join(' · '));
+    if (s.recent?.length) sec.push('Latest trades\n\n' + table(['Day', 'Time', 'Stock', 'Side', 'Predicted', 'Result'], s.recent.slice(0, EXPORT_LIMITS.recentTrades).map((t) => [t.day, t.time, t.sym, t.side, r(t.pred), r(t.net)])));
     out.push(sec.join('\n\n'));
   }
   return out.join('\n\n') + '\n';

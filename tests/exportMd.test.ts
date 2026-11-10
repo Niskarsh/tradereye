@@ -49,3 +49,11 @@ test('an older iteration without the wide fields still exports', () => {
   const md = mlToMarkdown({ iteration: 9, runId: 'r', createdAt: 0, strategies: [{ id: 'fNear', name: 'F' }] });
   assert.match(md, /\| fNear \| F \|/); assert.doesNotMatch(md, /## Verdict/);
 });
+
+test('no list is cut: every trade, fact and pattern row the page has goes in', () => {
+  const many = Array.from({ length: 45 }, (_, i) => ({ day: `2026-10-${String((i % 28) + 1).padStart(2, '0')}`, sym: `S${i}`, time: '09:35', side: 'SHORT', pred: 0.1, net: 0.5 }));
+  const facts = Array.from({ length: 30 }, (_, i) => ({ label: `fact${i}`, share: 0.01 }));
+  const liked = Array.from({ length: 25 }, (_, i) => ({ side: 'short', label: `like${i}`, z: 0.1, taken: 1, all: 1 }));
+  const md = mlToMarkdown({ iteration: 14, runId: 'r', createdAt: 0, strategies: [{ id: 'x', name: 'x', recent: many, importance: facts, liked }] });
+  assert.match(md, /\| S44 \|/); assert.match(md, /fact29/); assert.match(md, /like24/);
+});
