@@ -119,3 +119,25 @@ test('iteration 15: blocks, gated rows, rupees at size, the market and the bad d
   assert.match(md, /lost 2R or more: 31 · 3R or more: 9 \(of 500 days with a trade\)/);
   assert.match(md, /Money at ₹12 lakh positions/);
 });
+
+/* ---- relabelling is applied once, however many times it is called ---- */
+test('the page relabels on load and the export relabels again: money is scaled once', async () => {
+  const { relabelSized } = await import('../lib/ml/sized');
+  const once = mlToMarkdown(sizedMl()), twice = mlToMarkdown(relabelSized(sizedMl()));
+  assert.equal(twice, once);
+  assert.match(twice, /Money at ₹10 lakh positions \(~₹23,200 risk a trade\): stop ~2\.32% · -₹1,392 a trade · 14\.2 trades a month · -₹19,875 a month/);
+  const r = relabelSized(relabelSized(sizedMl()));
+  assert.equal(r.strategies.find((s) => s.id === 'nT10')?.money?.perTrade, -1392);
+});
+test('from iteration 15 the placebo is priced at the size in its name', () => {
+  const base = sizedMl();
+  const ml: ExportMl = { ...base, strategies: [...base.strategies.filter((s) => s.id !== 'placebo'),
+    { id: 'placebo', name: 'Placebo, ₹10 lakh · ₹100 cr+ · 4 a day (shuffled outcomes)',
+      money: { stopPct: 2.32, maxPerDay: 4, perTrade: -3, tradesPerMonth: 20, perMonth: -60, capital: 1, pct: 1, worstMonth: -900, bestMonth: 300, maxDrawdownR: 10 },
+      costs: [{ name: 'Market orders, ₹300 risk', dev: { n: 100, netR: -0.01 } }] }] };
+  const md = mlToMarkdown(ml);
+  assert.match(md, /### placebo — Placebo, ₹10 lakh · ₹100 cr\+ · 4 a day \(shuffled outcomes\)/, 'its own name is kept');
+  assert.match(md, /Money at ₹10 lakh positions \(~₹23,200 risk a trade\): stop ~2\.32% · -₹232 a trade/);
+  assert.match(md, /\| As priced \(₹10 lakh positions\) \| 100 \|/);
+  assert.match(mlToMarkdown(sizedMl()), /### placebo — Placebo, ₹300 risk, all stocks/, 'iterations 12-14 unchanged');
+});

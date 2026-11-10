@@ -20,7 +20,13 @@ interface MoneyIn {
   /** set here: the risk a trade the rupees are at, and which size */ riskInr?: number; sizeLabel?: string;
 }
 interface StratIn { id: string; name: string; money?: MoneyIn | null; costs?: { name: string }[] | null; months?: { n?: number; note?: string }[] }
-interface MlIn { wide?: unknown; strategies: StratIn[] }
+interface MlIn { wide?: unknown; strategies: StratIn[]; /** set by relabelSized: already corrected, never scale again */ sized?: boolean }
+
+/** iteration 15 on: the placebo runs at a size and says so in its name ("Placebo, ₹10 lakh · ₹100 cr+ · 4 a day") */
+export function placeboLakh(name: string): number | null {
+  const m = /^Placebo, ₹(\d+) lakh/.exec(name);
+  return m ? Number(m[1]) : null;
+}
 
 /**
  * Money at the version's own size: the same R a trade, the rupees at its own risk (position x stop %), and the capital that
@@ -38,17 +44,22 @@ export function sizedMoney<M extends MoneyIn>(m: M, lakh: number): M {
   };
 }
 
-/** a copy of a loaded iteration with the size labels corrected (no-op before iteration 12 or for ₹300-risk versions) */
+/**
+ * A copy of a loaded iteration with the size labels corrected (no-op before iteration 12 or for ₹300-risk versions).
+ * Idempotent: the result is marked `sized`, and a marked iteration comes back unchanged. The page relabels on load and the
+ * Markdown export relabels what it is given, so without the mark the money was scaled twice (~77x at ₹10 lakh).
+ */
 export function relabelSized<T extends MlIn>(ml: T): T {
-  if (!ml.wide) return ml;
+  if (!ml.wide || ml.sized) return ml;
   return {
     ...ml,
+    sized: true,
     strategies: ml.strategies.map((s) => {
-      const lakh = sizeLakh(s.id);
+      const lakh = s.id === 'placebo' ? placeboLakh(s.name) : sizeLakh(s.id);
       const months = s.months?.map((m) => (!m.n && !m.note ? { ...m, note: NO_TRADE_NOTE } : m));
       const out = { ...s, months };
       // iterations 12-14 priced the placebo at ₹300 risk on all stocks under a plain name; from 15 its name says its own settings
-      if (s.id === 'placebo') return s.name === 'Placebo (shuffled outcomes)' ? { ...out, name: PLACEBO_NAME } : out;
+      if (s.id === 'placebo' && s.name === 'Placebo (shuffled outcomes)') return { ...out, name: PLACEBO_NAME };
       if (lakh == null) return out;
       return {
         ...out,
