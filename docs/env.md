@@ -78,6 +78,17 @@ Set inside the workflows, not secrets: `RUN_ID` (from the Re-run button), `ML_DI
 `backend.hcl` (local): the private state bucket. Terraform's own AWS key lives only in `~/.aws/credentials`
 (profile `tradereye-tf`), never in Vercel, GitHub or the repo.
 
+### Trade Assistant machine (EC2, trading-scaler's own environment)
+Only the values tradereye depends on; the rest are in trading-scaler's `BOT.md`. After a change: `pm2 restart` the app
+(or `npm run deploy`).
+
+| Variable | Secret | What it is |
+|---|---|---|
+| `TE_SHARED_SECRET` | yes | must equal Vercel's (see Shared values) |
+| `BOT_MAX_PER_DAY` | no | the most bot orders a day (default 2). Iteration 15 (Algo Live's wide model) takes up to 3: set `3` before switching to it. Leaving it at 3 on the narrow model is safe (that model never sends more than 2) |
+| `BOT_MAX_NOTIONAL` | no | the biggest position the bot may open, in rupees, checked as qty x stop price (default 75000). The wide model is sized by position (Algo Live page, "Position a trade"): set it about 6% above that size (₹1.5 lakh positions → `160000`). Raise it together with the page's position size |
+| `BOT_FROM`, `BOT_TO` | no | the bot's hours (default 09:30-11:05 IST); both models trade 09:35-10:55 |
+
 ### Lambda environments (set by Terraform, never by hand)
 | Lambda | Variables |
 |---|---|
