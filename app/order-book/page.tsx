@@ -628,7 +628,9 @@ function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwit
 
   return (
     <section ref={card} id={`chart-${cfg.id}`} className={`scroll-mt-4 border border-line bg-brand-card p-3 space-y-2 ${full ? 'overflow-auto rounded-none' : 'rounded-2xl'}`}>
-      <div ref={headRef} className="flex flex-wrap items-center gap-2">
+      {/* the expand and close buttons sit on the right of the first line, always; everything else wraps beside them */}
+      <div ref={headRef} className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         <input list="ob-symbols" value={cfg.symbol} onChange={(e) => onChange({ id: cfg.id, date: cfg.date, symbol: e.target.value.toUpperCase() })}
           className="h-8 w-36 rounded-lg border border-line bg-brand-bg px-2 text-sm font-black outline-none focus:border-brand-accent" />
         <datalist id="ob-symbols">{list.map((x) => <option key={x.securityId} value={x.symbol} />)}</datalist>
@@ -679,10 +681,13 @@ function ChartCard({ cfg, list, rec, recording, api, algo, position, pos, onSwit
               className="flex h-8 items-center gap-1 rounded-lg border border-brand-accent/60 px-2.5 text-[11px] font-black text-brand-accent hover:bg-brand-accent/10 disabled:opacity-50"><Sparkles className="h-3 w-3" />Check feed</button>
           </span>
         )}
-        <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className={`${(full && pos.n > 1) || (liveNow && listed) ? '' : 'ml-auto '}rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink`}>
-          {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </button>
-        {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
+        </div>
+        <div className="flex h-8 shrink-0 items-center gap-2">
+          <button onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink">
+            {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+          {!full && <button onClick={onClose} aria-label="Close chart" className="rounded-lg border border-line p-1.5 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>}
+        </div>
       </div>
       {w && model && <BookChart model={model} live={liveNow} height={full ? fullH : 560} fit={full} topSlot={slot} onAsk={ask} focus={cfg.focus} focusLabel="Alert" alertMark={cfg.alert} position={isLive ? position : undefined} />}
       {w && !model && loading && (
