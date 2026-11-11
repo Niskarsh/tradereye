@@ -10,7 +10,7 @@ Open trades are shown on the Live page only. They are kept in the `live-trades` 
 ## Sheet changes (all automatic)
 - Monthly tabs keep their 17 columns; extra columns are appended on the right the first time they are needed (`Source`, `InitialStop`, `RiskInr`, `ExitType`, `Nifty500First5Pct`, `RvolAtEntry`, `MfeR`, `Setup` ...).
 - New tabs: `order-state`, `order-events`, `live-trades`.
-- The manual "Fetch Today's Trades" flow is unchanged. If a trade is already in the sheet (by hand or automatic) it is not written again.
+- "Fetch Today's Trades" is one press of the same engine (`POST /api/live/sync`): it fetches the day's executions and orders, pairs them into trades with their stops, targets and charges, and saves every completed trade. No ticking or LONG/SHORT toggle; use it when Live was not running. If a trade is already in the sheet (by hand or automatic) it is not written again.
 
 ## Backfill
 **Backfill** page: check, then start. It fills market columns for trades already in the sheet in small batches and can be stopped and resumed. It needs the Dhan Data API plan only while it runs. The `Setup` column is never touched.

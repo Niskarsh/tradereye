@@ -61,7 +61,8 @@ const SAVE_LABEL: Record<string, { text: string; cls: string }> = {
   OPEN: { text: 'Open', cls: 'text-brand-accent' },
 };
 
-export function ClosedTable({ rows }: { rows: LiveGroupView[] }) {
+/** pending: what the Sheet column says for a completed trade not in the sheet yet (Live retries on its own; a one-off fetch does not) */
+export function ClosedTable({ rows, pending }: { rows: LiveGroupView[]; pending?: string }) {
   if (!rows.length) return <p className="text-sm text-zinc-500">No completed trades yet today.</p>;
   return (
     <div className="bg-brand-section rounded-3xl border border-zinc-900 overflow-x-auto">
@@ -73,7 +74,7 @@ export function ClosedTable({ rows }: { rows: LiveGroupView[] }) {
         </thead>
         <tbody>
           {[...rows].reverse().map((t) => {
-            const s = SAVE_LABEL[t.saved] ?? SAVE_LABEL.CLOSED;
+            const s = t.saved === 'CLOSED' && pending ? { text: pending, cls: 'text-data-red' } : SAVE_LABEL[t.saved] ?? SAVE_LABEL.CLOSED;
             return (
               <tr key={t.id} className="border-t border-zinc-900/60">
                 <td className="px-4 py-3 font-mono text-zinc-500">{t.entryTime.slice(0, 5)}</td>

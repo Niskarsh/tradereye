@@ -1,232 +1,108 @@
 "use client";
-import React, { useState, useEffect } from 'react';
-import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Save, RefreshCcw, Send, AlertTriangle, Database, Loader2, CheckCircle2, XCircle } from "lucide-react";
-import TradeAnalytics from '@/components/TradeAnalytics';
+import React, { useEffect, useState } from 'react';
+import { CheckCircle2, Loader2, RefreshCcw, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { TokenBar } from '@/components/auth/TokenBar';
+import { postWithToken } from '@/components/live/useLiveSession';
+import { ClosedTable, OpenTradeCard } from '@/components/live/TradeCards';
+import { inr, tone } from '@/components/live/format';
+import type { SyncResult } from '@/lib/live/sync';
+import { summarizeDay } from '@/lib/live/daySummary';
 
-export default function TraderEye() {
+const Big = ({ label, value, cls = '', sub }: { label: string; value: string; cls?: string; sub?: string }) => (
+  <div className="bg-brand-card rounded-3xl border border-zinc-800 p-5 space-y-1">
+    <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">{label}</p>
+    <p className={`text-3xl font-black tracking-tight ${cls}`}>{value}</p>
+    {sub && <p className="text-[11px] text-zinc-500">{sub}</p>}
+  </div>
+);
+
+/**
+ * One press: today's executions and orders from Dhan, paired into trades exactly as the Live tab pairs them (direction from
+ * the first fill, adds and partial exits kept in one trade, stops and targets from the order book), priced after charges,
+ * and every completed trade saved to its monthly sheet once. Same engine as Live (POST /api/live/sync), so a trade Live
+ * already saved, or one you logged by hand, is recognised and not written again.
+ */
+export default function FetchTodaysTrades() {
   const { token } = useAuth();
-  // Fix: Explicitly typing the state to avoid 'never[]' build errors
-  const [trades, setTrades] = useState<any[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [direction, setDirection] = useState<'LONG' | 'SHORT'>('SHORT');
-  const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [status, setStatus] = useState<{ type: 'success' | 'error' | null, msg: string }>({ type: null, msg: '' });
+  const [busy, setBusy] = useState(false);
+  const [data, setData] = useState<SyncResult | null>(null);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
+  useEffect(() => { document.documentElement.classList.add('dark'); }, []);
 
-  const showStatus = (type: 'success' | 'error', msg: string) => {
-    setStatus({ type, msg });
-    setTimeout(() => setStatus({ type: null, msg: '' }), 4000);
+  const run = async () => {
+    if (!token) { setError('Log in to Dhan first.'); return; }
+    setBusy(true); setError('');
+    try { setData(await postWithToken<SyncResult>('/api/live/sync', token)); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   };
 
-  const fetchTrades = async () => {
-    if (!token) return showStatus('error', "AUTH REQUIRED");
-    setLoading(true);
-    try {
-      const res = await fetch('/api/trades', { headers: { 'x-dhan-token': token } });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setTrades(data);
-        setSelectedIds(data.map((t: any) => t.exchangeTradeId));
-        showStatus('success', `FETCHED ${data.length} EXECUTIONS`);
-      }
-    } catch (e) { showStatus('error', "API LINK FAILED"); }
-    finally { setLoading(false); }
-  };
-
-  const calculateDetailedPnL = () => {
-    const selected = trades.filter((t: any) => selectedIds.includes(t.exchangeTradeId));
-    let bVal = 0, sVal = 0, bQty = 0, sQty = 0, fTime = Infinity, lTime = 0;
-
-    selected.forEach((t: any) => {
-      const val = Number((t.tradedPrice * t.tradedQuantity).toFixed(2));
-      const time = new Date(t.createTime).getTime();
-      if (t.transactionType === 'BUY') { bVal += val; bQty += t.tradedQuantity; }
-      else { sVal += val; sQty += t.tradedQuantity; }
-      if (time < fTime) fTime = time;
-      if (time > lTime) lTime = time;
-    });
-
-    const turnover = Number((bVal + sVal).toFixed(2));
-    const grossPnL = Number((sVal - bVal).toFixed(2));
-    const brokerage = Number((Math.min(bVal * 0.0003, 20) + Math.min(sVal * 0.0003, 20)).toFixed(2));
-    const exchTxn = Number((turnover * 0.00003071).toFixed(2));
-    const stt = Number((sVal * 0.00025).toFixed(2));
-    const sebi = Number((turnover * 0.000001).toFixed(2));
-    const stamp = Number((bVal * 0.00003).toFixed(2));
-    const gst = Number(((brokerage + exchTxn + sebi) * 0.18).toFixed(2));
-    const totalCharges = Number((brokerage + exchTxn + sebi + stt + stamp + gst).toFixed(2));
-    const netPnL = Number((grossPnL - totalCharges).toFixed(2));
-
-    // Duration Logic for Sheets (Raw Seconds) and UI (Human Readable)
-    const durationSec = Math.max(0, Math.round((lTime - fTime) / 1000));
-    const displayDuration = durationSec > 60
-      ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
-      : `${durationSec}s`;
-
-    return {
-      grossPnL, netPnL, totalCharges, durationSec,
-      status: netPnL >= 0 ? "WIN" : "LOSS",
-      isConsistent: bQty === sQty && bQty > 0,
-      buyQty: bQty, sellQty: sQty,
-      durationStr: displayDuration
-    };
-  };
-
-  const pnl = calculateDetailedPnL();
-
-  const handleSync = async (type: 'INIT_HEADERS' | 'SYNC_DATA') => {
-    setSyncing(true);
-    try {
-      const payload = type === 'INIT_HEADERS' ? { type } : { trades: trades.filter((t: any) => selectedIds.includes(t.exchangeTradeId)), direction, pnl };
-      const res = await fetch('/api/sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.success) showStatus('success', type === 'INIT_HEADERS' ? "IST SCHEMA APPLIED" : `LOGGED ${pnl.status}`);
-      else showStatus('error', data.duplicate ? "ALREADY LOGGED" : "DB WRITE FAILED");
-    } catch (e) { showStatus('error', "LINK TIMEOUT"); }
-    finally { setSyncing(false); }
-  };
+  const open = data?.groups.filter((g) => g.status === 'OPEN') ?? [];
+  const closed = data?.groups.filter((g) => g.status === 'CLOSED') ?? [];
+  const sum = data ? summarizeDay(data) : null;
 
   return (
-    <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-24 pt-0">
-
-      {/* Toast Alert */}
-      {status.type && (
-        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-sm p-4 rounded-2xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl ${status.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'}`}>
-          {status.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
-          <span className="text-[11px] font-black uppercase tracking-wider">{status.msg}</span>
-        </div>
-      )}
-
-      <div className="page-shell pt-6 space-y-8">
-
-      
-
-        {/* Navigation / Meta */}
-        <header className="flex justify-between items-center border-b border-zinc-900 pb-6">
-          <div className="space-y-0.5">
-            <h1 className="text-2xl font-black tracking-tighter">Fetch Today's Trades</h1>
-            <p className="text-[9px] font-bold text-brand-text uppercase tracking-[0.2em]">Syncing Interface • NSE</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => handleSync('INIT_HEADERS')} className="h-10 border-none bg-brand-accent/80 hover:bg-brand-accent/90 font-bold uppercase tracking-tighter hover:shadow-lg">
-            <Database className="w-3 h-3 mr-2" /> RE-INIT SCHEMA (IST)
-          </Button>
+    <div className="min-h-screen bg-brand-bg text-zinc-100 font-sans pb-24">
+      <div className="page-shell pt-6 space-y-6">
+        <header className="border-b border-zinc-900 pb-6 space-y-1">
+          <h1 className="text-2xl font-black tracking-tighter">Fetch Today&apos;s Trades</h1>
+          <p className="text-[11px] text-zinc-500">
+            One press fetches every execution and order from Dhan, pairs them into trades (entries, adds, exits, stops and targets),
+            works out profit or loss after charges, and saves each completed trade to this month&apos;s sheet. Pressing again is safe:
+            nothing is written twice, and trades the Live tab or you already saved are left alone.
+          </p>
         </header>
 
         <TokenBar />
 
-        {/* PnL Terminal Board */}
-        <div className="bg-brand-card rounded-[2rem] p-8 border border-zinc-800 shadow-2xl space-y-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-            <div className="space-y-1">
-              <div className="flex items-center gap-3">
-                <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Net P&L (Realized)</p>
-                <Badge variant="outline" className={`h-5 text-[9px] font-black uppercase tracking-tighter border-zinc-800 ${pnl.status === 'WIN' ? 'text-data-green' : 'text-data-red'}`}>
-                  {pnl.status}
-                </Badge>
-              </div>
-              <div className={`text-6xl md:text-7xl font-black tracking-tighter ${pnl.netPnL >= 0 ? 'text-data-green' : 'text-data-red'}`}>
-                ₹{pnl.netPnL.toFixed(2)}
-              </div>
-            </div>
-            <div className="flex items-center gap-4 bg-zinc-900/80 p-3 px-5 rounded-2xl border border-zinc-800 shadow-inner">
-              <span className={`text-[10px] font-black tracking-widest ${direction === 'LONG' ? 'text-data-green' : 'text-data-red'}`}>LONG</span>
-              <Switch checked={direction === 'SHORT'} onCheckedChange={(s) => setDirection(s ? 'SHORT' : 'LONG')} />
-              <span className={`text-[10px] font-black tracking-widest ${direction === 'SHORT' ? 'text-data-red' : 'text-data-green'}`}>SHORT</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6 pt-8 border-t border-zinc-900">
-            <div className="space-y-1">
-              <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Gross Profit</p>
-              <p className="text-xl font-black text-emerald-500/80">₹{pnl.grossPnL.toFixed(2)}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Total Charges</p>
-              <p className="text-xl font-black text-rose-500/60">₹{pnl.totalCharges.toFixed(2)}</p>
-            </div>
-            <div className="space-y-1 hidden md:block">
-              <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Hold Time</p>
-              <p className="text-xl font-black text-zinc-400 font-mono italic">{pnl.durationStr}</p>
-            </div>
-          </div>
-
-          {!pnl.isConsistent && (pnl.buyQty > 0 || pnl.sellQty > 0) && (
-            <div className="p-4 bg-rose-500/5 border border-rose-500/10 rounded-2xl flex items-center gap-4 text-xs font-black text-rose-500 uppercase tracking-tight">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              Qty Mismatch (IST): {pnl.buyQty} Buy vs {pnl.sellQty} Sell
-            </div>
-          )}
-        </div>
-
-        {/* Data Fetch Action */}
-        <Button size="lg" className="w-full h-16 bg-zinc-100 text-black hover:bg-zinc-300 font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-xl transition-all" onClick={fetchTrades} disabled={loading}>
-          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-3" />}
-          {loading ? "SCANNING EXCHANGE LEDGER..." : "FETCH TODAY'S SESSION"}
+        <Button size="lg" onClick={run} disabled={busy || !token}
+          className="w-full h-16 bg-zinc-100 text-black hover:bg-zinc-300 font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-xl">
+          {busy ? <Loader2 className="w-5 h-5 mr-3 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-3" />}
+          {busy ? 'Fetching, pairing and saving…' : data ? 'Fetch & save again' : "Fetch & save today's trades"}
         </Button>
 
-        {/* Execution Ledger Table */}
-        {trades.length > 0 && (
-          <div className="bg-brand-section rounded-3xl border border-zinc-900 shadow-2xl overflow-hidden pb-4">
-            <Table>
-              <TableHeader className="bg-zinc-900/30">
-                <TableRow className="border-zinc-900 hover:bg-transparent">
-                  <TableHead className="w-16 text-center text-[9px] font-black text-zinc-600 uppercase tracking-widest">INC.</TableHead>
-                  <TableHead className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">SYMBOL</TableHead>
-                  <TableHead className="text-right text-[9px] font-black text-zinc-600 uppercase tracking-widest">QTY</TableHead>
-                  <TableHead className="text-right pr-8 text-[9px] font-black text-zinc-600 uppercase tracking-widest">PRICE (IST)</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trades.map((trade: any) => (
-                  <TableRow key={trade.exchangeTradeId} className="border-zinc-900/50 hover:bg-zinc-900/20 transition-colors">
-                    <TableCell className="text-center">
-                      <input
-                        type="checkbox" className="w-5 h-5 accent-indigo-600 rounded-lg bg-black border-zinc-800"
-                        checked={selectedIds.includes(trade.exchangeTradeId)}
-                        onChange={() => setSelectedIds(prev => prev.includes(trade.exchangeTradeId) ? prev.filter(i => i !== trade.exchangeTradeId) : [...prev, trade.exchangeTradeId])}
-                      />
-                    </TableCell>
-                    <TableCell className="py-5">
-                      <div className="flex flex-col">
-                        <span className="font-black text-sm text-zinc-200">{trade.tradingSymbol}</span>
-                        <span className="text-[9px] font-mono text-zinc-700 font-bold">{trade.createTime.split(' ')[1].slice(0, 5)} IST</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className={`text-right font-black text-sm ${trade.transactionType === 'BUY' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {trade.tradedQuantity}
-                    </TableCell>
-                    <TableCell className="text-right font-mono font-black pr-8 text-zinc-500">₹{trade.tradedPrice}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+        {error && (
+          <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-2xl flex items-center gap-3 text-sm text-rose-400">
+            <AlertTriangle className="w-4 h-4 shrink-0" />{error}
           </div>
         )}
-      </div>
 
-      {/* Persistent Sync Action */}
-      {trades.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-6 bg-black/80 backdrop-blur-2xl border-t border-zinc-900 md:relative md:bg-transparent md:border-none md:max-w-7xl md:mx-auto md:px-6 md:py-0">
-          <Button onClick={() => handleSync('SYNC_DATA')} disabled={syncing || selectedIds.length === 0} className="w-full h-16 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-[0_0_50px_rgba(29,201,149,0.2)]">
-            {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 mr-3" />}
-            {syncing ? "JOURNALING SESSION..." : `SYNC ${selectedIds.length} EXECUTIONS`}
-          </Button>
-        </div>
-      )}
+        {data && sum && (
+          <>
+            <div className={`p-4 rounded-2xl border flex items-center gap-3 text-sm ${sum.notSaved ? 'border-rose-500/20 bg-rose-500/5 text-rose-300' : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'}`}>
+              {sum.notSaved ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <CheckCircle2 className="w-4 h-4 shrink-0" />}
+              <span>{sum.line}<span className="text-zinc-500"> · as of {data.asOf.split(' ')[1]?.slice(0, 5) ?? data.asOf} IST</span></span>
+            </div>
+
+            {data.warnings.length > 0 && (
+              <ul className="text-[12px] text-rose-300 space-y-1 list-disc pl-5">{data.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Big label="Net today (after charges)" value={inr(data.totals.closedNet, 2)} cls={tone(data.totals.closedNet)}
+                sub={`${data.totals.closedCount} completed • charges ${inr(data.totals.charges, 2)}`} />
+              <Big label="Gross today" value={inr(data.totals.closedGross, 2)} cls={tone(data.totals.closedGross)} sub="before charges" />
+              <Big label="Open now" value={inr(data.totals.openUnrealized, 2)} cls={tone(data.totals.openUnrealized)}
+                sub={`${data.totals.openCount} open • saved once flat`} />
+            </div>
+
+            {open.length > 0 && (
+              <section className="space-y-4">
+                <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Still open (not saved yet)</h2>
+                {open.map((t) => <OpenTradeCard key={t.id} t={t} now={Date.now()} />)}
+              </section>
+            )}
+
+            <section className="space-y-4">
+              <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Completed today</h2>
+              <ClosedTable rows={closed} pending="Not saved (press again)" />
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 }

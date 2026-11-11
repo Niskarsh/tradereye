@@ -3,8 +3,8 @@ import type { Pnl, TradeGroup } from './types';
 const r2 = (n: number) => Number(n.toFixed(2));
 
 /**
- * Same charge model as app/sync-trades/page.tsx (kept identical on purpose so auto-logged trades
- * and manually-logged trades are comparable in Stats).
+ * The charge model of every trade in the sheet: the same one the old manual Fetch Today's Trades page used, so trades
+ * logged by hand before and trades saved by Live / Fetch Today's Trades now are comparable in Stats.
  */
 export function computeCharges(buyVal: number, sellVal: number) {
   const turnover = r2(buyVal + sellVal);
