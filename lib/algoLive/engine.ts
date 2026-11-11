@@ -1,11 +1,14 @@
 import { DhanClient, DhanError, parseScripMaster, SCRIP_MASTER_URL, type Candles } from '../dhan';
+import { etfSymbols, WIDE_PRICE_MAX, WIDE_PRICE_MIN, WIDE_VOL_MIN } from '../ml/wide';
+import { wideVol } from '../ml/grid';
 import { toSessions, type Bar, type Session } from '../live/enrich';
 import { getJson, putJson, type Store } from '../setups/store';
 import { SCREENER } from '../setups/universe';
 import { sizeFor } from '../setups/costs';
 import { onTick, TICK } from '../study/mine';
 import { dailyBefore, factsAt, hasMinute } from './features';
-import { addRanks, MODEL_KEY, predictVector, vectorOf, type LiveModel } from './model';
+import { addRanks, modelKey, predictVector, vectorOf, versionOf, type LiveModel, type Version } from './model';
+import { avgVolOf, gateToday, ret20dOf, turnoverOf, type GateToday } from './wide';
 import type { ScalerOrder, ScalerStatus } from './scaler';
 
 /**
@@ -19,6 +22,10 @@ import type { ScalerOrder, ScalerStatus } from './scaler';
  *  3. at each 10-minute close (09:25 for the shortlist, 09:35-10:55 to trade): today's 1-minute candles of every stock,
  *     the facts by the backtest's own code, the ranks across the list, the model's prediction; at 09:35-10:55 the
  *     first two that clear the bar (stronger first within a close) are shorted, unless vetoed.
+ *
+ * Which model it trades is the page's choice (Settings.version): 'narrow', iteration 10 (₹250-340, 2 a day, ₹300 risk), or
+ * 'wide', iteration 15's pick (₹250-1000 without ETFs, only stocks trading ₹100 crore+ a day, 3 a day, the market gate,
+ * a fixed position size). The day list is made for one of them and remembers which (DayState.version).
  */
 
 export const NIFTY = { securityId: '19', segment: 'IDX_I', instrument: 'INDEX' };
@@ -36,9 +43,13 @@ export const MAX_LATE_MIN = 4;
 /** the order-book recorder watches at most this many stocks */
 export const RECORD_MAX = 50;
 
-export interface ListItem { symbol: string; securityId: string; prevClose: number; avgVol: number }
+export interface ListItem { symbol: string; securityId: string; prevClose: number; avgVol: number; ret20d?: number }
 export interface StockPrep { symbol: string; securityId: string; daily: Candles; history: Candles }
-export interface Scored { symbol: string; pred: number | null; price?: number; adr?: number; above: boolean; note?: string }
+export interface Scored {
+  symbol: string; pred: number | null; price?: number; adr?: number; above: boolean; note?: string;
+  /** (wide model) average daily turnover (₹) and whether it is under the model's floor (scored, ranked, never traded) */
+  turnover?: number; thin?: boolean;
+}
 export interface OrderRec {
   /** the risk this order was sized for (₹) */
   risk?: number;
@@ -49,7 +60,11 @@ export interface TickLog { slot: number; at: number; scored: Scored[]; picked: s
 export interface DayState {
   v: 1; date: string; list: ListItem[]; listAt?: number; candidates?: number; prepared: string[];
   vetoes: string[]; armed: boolean; ticks: Record<string, TickLog>; orders: OrderRec[]; log: { at: number; msg: string }[];
-  model?: { month: string; threshold: number | null; standAside: boolean; createdAt: number };
+  model?: { month: string; threshold: number | null; standAside: boolean; createdAt: number; version?: Version; iteration?: number };
+  /** which model the day list was made for (missing = narrow: lists before Dec 2026) */
+  version?: Version;
+  /** (wide model) today's market gate, worked out when the day list is done */
+  gate?: GateToday;
 }
 
 const stateKey = (date: string) => `setups/live/${date}/state.json`;
@@ -64,25 +79,38 @@ export async function saveState(store: Store, s: DayState): Promise<void> {
 }
 export const note = (s: DayState, msg: string) => { s.log.push({ at: Date.now(), msg }); };
 
-/** settings that last from day to day (the page sets them) */
-export interface Settings { riskInr: number }
+/**
+ * settings that last from day to day (the page sets them): the risk a trade of the narrow model, which model to trade,
+ * and the wide model's position size (rupees of stock a trade; it was judged at ₹10 lakh, it starts small)
+ */
+export interface Settings { riskInr: number; version: Version; positionInr: number }
 export const RISK_MIN = 50, RISK_MAX = 5000, RISK_DEFAULT = 300;
+export const POSITION_MIN = 25_000, POSITION_MAX = 1_000_000, POSITION_DEFAULT = 150_000;
 const SETTINGS_KEY = 'setups/live/settings.json';
 export async function loadSettings(store: Store): Promise<Settings> {
   const s = await getJson<Partial<Settings>>(store, SETTINGS_KEY);
-  const r = Number(s?.riskInr);
-  return { riskInr: Number.isFinite(r) && r >= RISK_MIN && r <= RISK_MAX ? r : RISK_DEFAULT };
+  const r = Number(s?.riskInr), p = Number(s?.positionInr);
+  return {
+    riskInr: Number.isFinite(r) && r >= RISK_MIN && r <= RISK_MAX ? r : RISK_DEFAULT,
+    version: s?.version === 'wide' ? 'wide' : 'narrow',
+    positionInr: Number.isFinite(p) && p >= POSITION_MIN && p <= POSITION_MAX ? p : POSITION_DEFAULT,
+  };
 }
 export async function saveSettings(store: Store, s: Settings): Promise<void> { await putJson(store, SETTINGS_KEY, s); }
 
-let modelCache: { at: number; m: LiveModel } | null = null;
-/** the live model, kept 10 minutes; `fresh` (or a kept model for another month) reads it again, so a new month's model
+const modelCache = new Map<string, { at: number; m: LiveModel }>();
+/** a model by version, kept 10 minutes; `fresh` (or a kept model for another month) reads it again, so a new month's model
  * shows the moment it is saved */
-export async function loadModel(store: Store, fresh = false): Promise<LiveModel | undefined> {
-  if (!fresh && modelCache && Date.now() - modelCache.at < 10 * 60_000 && modelCache.m.month === istNow().date.slice(0, 7)) return modelCache.m;
-  const m = await getJson<LiveModel>(store, MODEL_KEY);
-  if (m) modelCache = { at: Date.now(), m };
+export async function loadModelOf(store: Store, version: Version, fresh = false): Promise<LiveModel | undefined> {
+  const key = modelKey(version), c = modelCache.get(key);
+  if (!fresh && c && Date.now() - c.at < 10 * 60_000 && c.m.month === istNow().date.slice(0, 7)) return c.m;
+  const m = await getJson<LiveModel>(store, key);
+  if (m) modelCache.set(key, { at: Date.now(), m });
   return m;
+}
+/** the model Algo Live trades: the one the page is switched to (Settings.version) */
+export async function loadModel(store: Store, fresh = false): Promise<LiveModel | undefined> {
+  return loadModelOf(store, (await loadSettings(store)).version, fresh);
 }
 
 class Gate { private next = 0; constructor(private gap: number) {} async wait() { const now = Date.now(), at = Math.max(now, this.next); this.next = at + this.gap; if (at > now) await new Promise((r) => setTimeout(r, at - now)); } }
@@ -95,13 +123,21 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 
 /* ---- 1. the day list -------------------------------------------------------------------------------------- */
 
-/** every NSE equity whose quote is anywhere near the price range (the daily candles decide in `screen`) */
-export async function candidates(dhan: DhanClient, clientId: string, fetchText: (u: string) => Promise<string> = async (u) => (await fetch(u)).text()): Promise<{ symbol: string; securityId: string }[]> {
-  const master = parseScripMaster(await fetchText(SCRIP_MASTER_URL));
-  const byId = new Map([...master.entries()].map(([s, id]) => [id, s]));
+/** the day list's screener per model: the narrow backtest's (lib/setups/universe.ts) or the wide dataset's (lib/ml/wide.ts) */
+export interface LiveUniverse { priceMin: number; priceMax: number; volMin: number; wide: boolean }
+export const universeOf = (v: Version): LiveUniverse => v === 'wide'
+  ? { priceMin: WIDE_PRICE_MIN, priceMax: WIDE_PRICE_MAX, volMin: WIDE_VOL_MIN, wide: true }
+  : { priceMin: SCREENER.priceMin, priceMax: SCREENER.priceMax, volMin: SCREENER.avgVolMin, wide: false };
+
+/** every NSE equity whose quote is anywhere near the price range (the daily candles decide in `screen`); the wide list
+ * leaves ETFs out, as its dataset did */
+export async function candidates(dhan: DhanClient, clientId: string, fetchText: (u: string) => Promise<string> = async (u) => (await fetch(u)).text(), u = universeOf('narrow')): Promise<{ symbol: string; securityId: string }[]> {
+  const csv = await fetchText(SCRIP_MASTER_URL);
+  const master = parseScripMaster(csv), etfs = u.wide ? etfSymbols(csv) : new Set<string>();
+  const byId = new Map([...master.entries()].filter(([s]) => !etfs.has(s.toUpperCase())).map(([s, id]) => [id, s]));
   const ids = [...byId.keys()].filter(Boolean);
   const out: { symbol: string; securityId: string }[] = [];
-  const lo = SCREENER.priceMin * 0.9, hi = SCREENER.priceMax * 1.1;
+  const lo = u.priceMin * 0.9, hi = u.priceMax * 1.1;
   for (let i = 0; i < ids.length; i += 1000) {
     if (i) await sleep(1100); // the quote API allows one call a second
     const q = await dhan.ohlc(clientId, 'NSE_EQ', ids.slice(i, i + 1000));
@@ -110,25 +146,30 @@ export async function candidates(dhan: DhanClient, clientId: string, fetchText: 
   return out.sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
-/** the backtest's screener for `date` on daily candles that end before it */
-export function passes(daily: Candles, date: string): { prevClose: number; avgVol: number } | undefined {
+/** the screener for `date` on daily candles that end before it (avgVol: 10-day average shares; the wide screener
+ * compares it scaled to a ₹340 stock, as lib/ml/wide.ts wideDays, and keeps the 20-day move for the market gate) */
+export function passes(daily: Candles, date: string, u = universeOf('narrow')): { prevClose: number; avgVol: number; ret20d?: number } | undefined {
   const d = dailyBefore(daily, date), n = d.c.length;
   if (n < 10) return undefined;
   const pc = d.c[n - 1];
   let v = 0;
   for (let j = n - 10; j < n; j++) v += d.v[j];
-  return pc >= SCREENER.priceMin && pc <= SCREENER.priceMax && v / 10 > SCREENER.avgVolMin ? { prevClose: pc, avgVol: Math.round(v / 10) } : undefined;
+  const vol = u.wide ? wideVol(v / 10, pc) : v / 10;
+  if (!(pc >= u.priceMin && pc <= u.priceMax && vol > u.volMin)) return undefined;
+  if (!u.wide) return { prevClose: pc, avgVol: Math.round(v / 10) };
+  const r = ret20dOf(d);
+  return { prevClose: pc, avgVol: Math.round(v / 10), ...(Number.isFinite(r) ? { ret20d: r } : {}) };
 }
 
 /** daily candles of some candidates; those that pass go on the list and their history is saved for the day */
-export async function screen(dhan: DhanClient, store: Store, date: string, items: { symbol: string; securityId: string }[]): Promise<{ passed: ListItem[]; failed: string[] }> {
+export async function screen(dhan: DhanClient, store: Store, date: string, items: { symbol: string; securityId: string }[], uni = universeOf('narrow')): Promise<{ passed: ListItem[]; failed: string[] }> {
   const gate = new Gate(260);
   const passed: ListItem[] = [], failed: string[] = [];
   await pool(items, 3, async (u) => {
     try {
       await gate.wait();
       const daily = await dhan.daily({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: DAILY_FROM, to: date });
-      const p = passes(daily, date);
+      const p = passes(daily, date, uni);
       if (!p) return;
       await gate.wait();
       const hist = await dhan.intraday({ securityId: u.securityId, segment: 'NSE_EQ', instrument: 'EQUITY', from: addDays(date, -45), to: addDays(date, -1), interval: 1 });
@@ -199,11 +240,20 @@ export async function scoreAt(dhan: DhanClient, store: Store, model: LiveModel, 
   const syms = [...facts.keys()];
   const rows = syms.map((s) => ({ ...facts.get(s)! }));
   addRanks(rows, model.ranked);
+  const floor = model.rules.minTurnoverRs, wide = versionOf(model) === 'wide';
   const scored: Scored[] = rows.map((x, i) => {
     const pred = predictVector(model, vectorOf(model, x));
     const daily = preps.get(syms[i])!.daily, n = daily.c.length;
     const adr = daily.h.slice(-10).reduce((a, h, j) => a + h - daily.l[n - 10 + j], 0) / 10;
-    return { symbol: syms[i], pred: Math.round(pred * 10000) / 10000, price: x.priceRs, adr: r2(adr), above: model.threshold !== null && pred > model.threshold };
+    const out: Scored = { symbol: syms[i], pred: Math.round(pred * 10000) / 10000, price: x.priceRs, adr: r2(adr), above: model.threshold !== null && pred > model.threshold };
+    if (floor) {
+      // the dataset's turnover: avgVol (scaled to a ₹340 stock above it) x the price at this close, capped at ₹340
+      const t = turnoverOf(avgVolOf(daily, wide), x.priceRs, model.rules.refPrice ?? 340);
+      out.turnover = Math.round(t);
+      out.thin = !(t >= floor);
+      if (out.thin) { out.above = false; out.note = `under ₹${Math.round(floor / 1e7)} crore a day`; }
+    }
+    return out;
   });
   for (const s of list.map((x) => x.symbol)) if (!facts.has(s)) scored.push({ symbol: s, pred: null, above: false, note: preps.has(s) ? 'no facts at this close' : 'not prepared' });
   scored.sort((a, b) => (b.pred ?? -9) - (a.pred ?? -9));
@@ -219,6 +269,7 @@ export const counts = (o: OrderRec) => !['REJECTED', 'ERROR', 'CANCELLED', 'NOT_
  */
 export function pick(model: LiveModel, state: DayState, scored: Scored[], k: number): Scored[] {
   if (model.standAside || model.threshold === null) return [];
+  if (gateBlocks(model, state)) return [];
   if (k < model.rules.firstSlot || k > model.rules.lastSlot) return [];
   const used = new Set(state.orders.filter(counts).map((o) => o.symbol));
   const tried = new Set(state.orders.map((o) => o.symbol));
@@ -228,12 +279,35 @@ export function pick(model: LiveModel, state: DayState, scored: Scored[], k: num
   return scored.filter((x) => x.above && x.pred !== null && !veto.has(x.symbol) && !tried.has(x.symbol)).sort((a, b) => b.pred! - a.pred!).slice(0, free);
 }
 
-/** the short as the backtest takes it: stop ½ the usual daily range above the close, target ½ below, ₹300 risk */
-export function orderFor(model: LiveModel, x: Scored, date: string, k: number, securityId: string, riskInr = model.rules.riskInr): Omit<OrderRec, 'sentAt' | 'status'> {
+/**
+ * The wide model trades nothing on a day its market gate says hot, and nothing when the gate is unknown (a list made
+ * before this check, or no 20-day moves): only on a day it can show is not hot.
+ */
+export function gateBlocks(model: LiveModel, state: DayState): string | null {
+  if (!model.gate) return null;
+  if (!state.gate || state.gate.move === null) return 'the market gate is unknown today: make the day list again';
+  if (state.gate.hot) return `market gate: the market's 20-day move (${state.gate.move.toFixed(2)}%) is in the top third of its last 250 days (above ${state.gate.bar?.toFixed(2)}%): no trades today`;
+  return null;
+}
+
+/** today's gate from the finished day list (wide model only): the 20-day moves of every stock on it, the model's history and
+ * the days saved since its data ends */
+export function gateFor(model: LiveModel, list: ListItem[], date: string, saved: Record<string, number>): GateToday | undefined {
+  if (!model.gate) return undefined;
+  return gateToday(model, saved, date, list.map((x) => x.ret20d ?? NaN));
+}
+/** the market's 20-day move of each day Algo Live made a wide list, kept for the gate after the model's data ends */
+export const MARKET_MOVE_KEY = 'setups/live/market-move.json';
+
+/**
+ * The short as the backtest takes it: stop ½ the usual daily range above the close, target ½ below. Sized at `riskInr`
+ * (the narrow model, ₹300 risk), or, for the wide model, as a position of `positionInr` rupees of stock.
+ */
+export function orderFor(model: LiveModel, x: Scored, date: string, k: number, securityId: string, riskInr = model.rules.riskInr, positionInr?: number): Omit<OrderRec, 'sentAt' | 'status'> {
   const price = x.price!, adr = x.adr!;
   const stop = onTick(price + model.rules.stopAdr * adr, 1), target = onTick(price - model.rules.targetAdr * adr, -1);
   const entry = price - TICK; // a market order fills about a tick worse than the close
-  const qty = sizeFor(riskInr, stop - entry);
+  const qty = positionInr ? Math.max(1, Math.floor(positionInr / price)) : sizeFor(riskInr, stop - entry);
   const correlationId = `te-${date.replace(/-/g, '')}-${x.symbol.replace(/[^A-Za-z0-9]/g, '')}`.slice(0, 30);
   return { symbol: x.symbol, securityId, slot: k, pred: x.pred!, price, adr, qty, stop, target, correlationId };
 }

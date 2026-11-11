@@ -3,7 +3,7 @@ import { ML_FEATURES } from '../ml/grid';
 import { getJson, putJson, type Store } from '../setups/store';
 import { activeOf } from './active';
 import { istNow, scoreAt, slotTime, type DayState, type OrderRec } from './engine';
-import { addRanks, MODEL_KEY, predictVector, vectorOf, type LiveModel } from './model';
+import { addRanks, modelKey, MODELS_PREFIX, predictVector, vectorOf, type LiveModel, type Version } from './model';
 
 /**
  * Why Algo Live took a trade, for the journal's review (read only: nothing here places, changes or cancels anything).
@@ -98,12 +98,13 @@ export interface WhyDeps {
   now?: () => number;
 }
 
-/** the model that traded that day: the saved model when it is that one, otherwise the kept copy for that month */
-export async function modelFor(d: WhyDeps, date: string, createdAt?: number): Promise<LiveModel | undefined> {
+/** the model that traded that day (narrow or wide, as the day's list was made for): the saved model when it is that one,
+ * otherwise the kept copy for that month */
+export async function modelFor(d: WhyDeps, date: string, createdAt?: number, version: Version = 'narrow'): Promise<LiveModel | undefined> {
   const month = date.slice(0, 7);
-  const current = await getJson<LiveModel>(d.store, MODEL_KEY);
+  const current = await getJson<LiveModel>(d.store, modelKey(version));
   if (current?.month === month && (createdAt === undefined || current.createdAt === createdAt)) return current;
-  const keys = (await d.listKeys?.('setups/live/models/').catch(() => [])) ?? [];
+  const keys = (await d.listKeys?.(MODELS_PREFIX[version]).catch(() => [])) ?? [];
   const mine = keys.filter((k) => k.includes(`/${month}-`)).sort((a, b) => Number(b.match(/-(\d+)\.json\.gz$/)?.[1] ?? 0) - Number(a.match(/-(\d+)\.json\.gz$/)?.[1] ?? 0));
   let newest: LiveModel | undefined;
   for (const k of mine) {
@@ -134,7 +135,7 @@ async function rebuildFacts(d: WhyDeps, model: LiveModel, state: DayState, o: Or
 /** everything known about why this order was picked; a missing part comes back as a plain-words note */
 export async function whyPicked(d: WhyDeps, state: DayState, o: OrderRec): Promise<{ why: WhyPicked; notes: string[] }> {
   const why = scoreSide(state, o), notes: string[] = [];
-  const model = await modelFor(d, state.date, state.model?.createdAt).catch(() => undefined);
+  const model = await modelFor(d, state.date, state.model?.createdAt, state.version ?? state.model?.version ?? 'narrow').catch(() => undefined);
   if (!model) { notes.push(`The model for ${state.date.slice(0, 7)} could not be read, so only the score is explained.`); return { why, notes }; }
   const a = activeOf(model);
   why.model = {

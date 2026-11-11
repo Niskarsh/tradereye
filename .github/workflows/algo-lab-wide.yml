@@ -53,7 +53,7 @@ jobs:
         with:
           name: grid-wide
           path: ml-data/grid.*
-          retention-days: 2
+          retention-days: 7  # Algo Live's wide model learns from it too (algo-live-model-wide.yml)
           compression-level: 1
 
   models:

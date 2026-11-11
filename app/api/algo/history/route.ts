@@ -4,6 +4,7 @@ import { getChunk, listKeys, putChunk } from '@/lib/book/s3';
 import { getJson } from '@/lib/setups/store';
 import { newestWithStrategy } from '@/lib/ml/find';
 import { loadModel } from '@/lib/algoLive/engine';
+import { MODELS_PREFIX, versionOf } from '@/lib/algoLive/model';
 import { liveStore } from '@/lib/algoLive/store';
 import { activeOf } from '@/lib/algoLive/active';
 import type { LiveModel } from '@/lib/algoLive/model';
@@ -45,7 +46,8 @@ export async function GET(req: Request) {
     // every live model kept (one per month: the newest)
     let live: AnyMl[] = [], liveError: string | null = null;
     try {
-      const keys = (await listKeys('setups/live/models/')).filter((k) => /\/\d{4}-\d{2}-\d+\.json\.gz$/.test(k));
+      // the models of the version Algo Live trades now (narrow and wide are kept apart)
+      const keys = (await listKeys(MODELS_PREFIX[current ? versionOf(current) : 'narrow'])).filter((k) => /\/\d{4}-\d{2}-\d+\.json\.gz$/.test(k));
       const newest = new Map<string, { key: string; run: number }>();
       for (const k of keys) {
         const [, month, run] = k.match(/\/(\d{4}-\d{2})-(\d+)\.json\.gz$/)!;
