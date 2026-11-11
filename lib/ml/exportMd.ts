@@ -16,7 +16,7 @@ interface Strat {
   overall?: P; dev?: P; exam?: P; shadow?: P | null;
   ic?: { mean?: Num; positive?: number; months?: number };
   daily?: { tradingDays?: number; daysWithTrades?: number; perTradedDay?: number; maxPerDay?: number; at0935?: number; greenDays?: number; worstDayR?: number; bestDayR?: number; worstWeekR?: number; greenWeeks?: number } | null;
-  money?: { riskInr?: number; sizeLabel?: string; stopPct?: number; position?: number; maxPerDay?: number; margin?: number; tradesPerMonth?: number; perTrade?: number; perMonth?: number; capital?: number; pct?: number; worstMonth?: number; bestMonth?: number; maxDrawdownR?: number } | null;
+  money?: { basis?: 'size' | 'own'; riskInr?: number; sizeLabel?: string; stopPct?: number; position?: number; maxPerDay?: number; margin?: number; tradesPerMonth?: number; perTrade?: number; perMonth?: number; capital?: number; pct?: number; worstMonth?: number; bestMonth?: number; maxDrawdownR?: number } | null;
   costs?: { name: string; dev?: S; devMonths?: [number, number]; exam?: S }[] | null;
   bySide?: { long?: S; short?: S }; byHour?: (S & { hour: string })[];
   months?: (S & { month: string; ic?: Num; note?: string; exam?: boolean })[];
@@ -77,7 +77,7 @@ export function mlToMarkdown(raw: ExportMl): string {
 
   out.push(`# Algo Lab iteration ${ml.iteration} — run ${ml.runId}`);
   out.push([
-    `- Run: ${when} UTC · code ${ml.code ?? '–'}${ml.locked && !ml.wide ? ` · locked version: ${ml.locked}` : ''}${ml.best ? ` · page's pick: ${ml.best}` : ''}`,
+    `- Run: ${when} UTC · code ${ml.code ?? '–'}${ml.locked && !ml.wide ? ` · locked version: ${ml.locked}` : ''}${ml.wide ? ` · page's pick: ${ml.wide.pick ? ml.wide.pick.id : `none (Algo Live unchanged: ${ml.best ?? 'nF'})`}` : ml.best ? ` · page's pick: ${ml.best}` : ''}`,
     `- Data: ${ml.period ? `${ml.period.from} to ${ml.period.to}` : '–'} · ${ml.stocks ?? '–'} stocks${ml.narrowStocks ? ` (${ml.narrowStocks} in ₹250–340)` : ''} · ${ml.rows?.toLocaleString('en-IN') ?? '–'} moments · exam months from ${ml.examFrom ?? '–'}${ml.shadowFrom ? ` · shadow from ${ml.shadowFrom}` : ''}`,
     `- Setup: at most ${ml.setup?.maxPerDay ?? '–'} a day, ${ml.setup?.maxPerSide ?? '–'} a side (each version may cap lower) · ₹${ml.setup?.riskInr ?? 300} risk unless the version says a position size`,
     '- All numbers are decide months (before the exam months) after costs unless marked. R = one unit of risk.',
@@ -139,7 +139,7 @@ export function mlToMarkdown(raw: ExportMl): string {
         u?.overall?.n ? `${r(u.overall.netR)} t ${f(u.overall.t, 1)} (${u.overall.n})` : '–',
         nz ? `${r(nz.devMin)} to ${r(nz.devMax)} (${r(nz.devMean)})` : '–',
         s.shadow?.n ? `${r(s.shadow.netR)} (${s.shadow.n})` : '–',
-        s.money ? `${inr(s.money.perMonth)} (${s.money.sizeLabel ?? '₹300 risk'})` : '–', s.daily ? `${f(s.daily.worstDayR)}R` : '–', s.money?.maxDrawdownR != null ? `-${f(s.money.maxDrawdownR, 1)}R` : '–',
+        s.inr ? `${inr(s.inr.perMonth)} (own positions)` : s.money ? `${inr(s.money.perMonth)} (${s.money.sizeLabel ?? '₹300 risk'})` : '–', s.daily ? `${f(s.daily.worstDayR)}R` : '–', s.money?.maxDrawdownR != null ? `-${f(s.money.maxDrawdownR, 1)}R` : '–',
         s.ic?.mean != null ? `${f(s.ic.mean, 3)} (${s.ic.positive}/${s.ic.months})` : '–'];
     }),
   ));
@@ -151,7 +151,9 @@ export function mlToMarkdown(raw: ExportMl): string {
     sec.push([
       `- Decide months: ${s.dev?.n ?? 0} trades · ${r(s.dev?.netR)} a trade (${r(s.dev?.gross)} before costs) · t ${f(s.dev?.t, 1)} · hit ${pct(s.dev?.hit)} · total ${f(s.dev?.sumR, 1)}R · months green ${green(s.dev)} · exam ${examText(s.exam)}`,
       s.baseline ? `- Taking every moment blindly: ${r(s.baseline.long)} long / ${r(s.baseline.short)} short after costs (${r(s.baseline.longGross)} / ${r(s.baseline.shortGross)} before)` : '',
-      s.money ? `- Money at ${s.money.sizeLabel ? `${s.money.sizeLabel} (~${inr(s.money.riskInr)} risk a trade)` : '₹300 risk'}: stop ~${f(s.money.stopPct)}% · ${inr(s.money.perTrade)} a trade · ${f(s.money.tradesPerMonth, 1)} trades a month · ${inr(s.money.perMonth)} a month on ${inr(s.money.capital)} (${f(s.money.pct, 1)}%) · worst month ${inr(s.money.worstMonth)} · best ${inr(s.money.bestMonth)} · deepest run of losses ${f(s.money.maxDrawdownR, 1)}R` : '',
+      s.money?.basis === 'own'
+        ? `- Money from ${s.money.sizeLabel} (~${inr(s.money.riskInr)} risk a trade, each trade's stop = half that stock's usual daily range; same basis as the liquidity table): ${inr(s.money.perTrade)} a trade · ${f(s.money.tradesPerMonth, 1)} trades a month · ${inr(s.money.perMonth)} a month · capital the busiest day needed ${inr(s.money.capital)} (${f(s.money.pct, 1)}%) · worst month ${inr(s.money.worstMonth)} · best ${inr(s.money.bestMonth)} (at the average risk) · deepest run of losses ${f(s.money.maxDrawdownR, 1)}R`
+        : s.money ? `- Money at ${s.money.sizeLabel ? `${s.money.sizeLabel} (~${inr(s.money.riskInr)} risk a trade)` : '₹300 risk'}: stop ~${f(s.money.stopPct)}% · ${inr(s.money.perTrade)} a trade · ${f(s.money.tradesPerMonth, 1)} trades a month · ${inr(s.money.perMonth)} a month on ${inr(s.money.capital)} (${f(s.money.pct, 1)}%) · worst month ${inr(s.money.worstMonth)} · best ${inr(s.money.bestMonth)} · deepest run of losses ${f(s.money.maxDrawdownR, 1)}R` : '',
       s.daily ? `- Days: ${s.daily.daysWithTrades}/${s.daily.tradingDays} with a trade · ${f(s.daily.perTradedDay)} avg, ${s.daily.maxPerDay} max a day · fired at 09:35 ${pct(s.daily.at0935)} · green days ${pct(s.daily.greenDays)} · worst day ${f(s.daily.worstDayR)}R · best ${f(s.daily.bestDayR)}R · worst week ${f(s.daily.worstWeekR)}R · green weeks ${pct(s.daily.greenWeeks)}` : '',
       s.shadow?.n ? `- Shadow months: ${s.shadow.n} trades · ${r(s.shadow.netR)} · green ${green(s.shadow)}` : '',
       s.regime ? `- By the market's 20-day move (decide months, thirds${s.regime.cuts ? ` split at ${s.regime.cuts.map((x) => `${x}%`).join(' / ')}` : ''}): low ${r(s.regime.low?.netR)} (${s.regime.low?.n ?? 0}) · mid ${r(s.regime.mid?.netR)} (${s.regime.mid?.n ?? 0}) · high ${r(s.regime.high?.netR)} (${s.regime.high?.n ?? 0}) · exam days in the gate's top third ${pct(s.regime.examHotShare)}` : '',

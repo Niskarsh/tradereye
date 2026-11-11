@@ -158,3 +158,40 @@ test('iteration 16: liquidity table, stand-aside verdict, rupees from own positi
   assert.match(md, /Rupees from its own positions: ₹80,000 a month on the decide months, ₹12,000 on the exam · average position ₹14,20,000, risk ₹32,600 a trade · capital for the busiest day ₹8,52,000/);
   assert.match(md, /The months l20_f100_c3_g stood aside, traded: decide 3 months, 41 trades, \+3\.2R \(₹1,04,320\) · exam 2 months, 18 trades, -0\.4R/);
 });
+
+/* ---- iteration 16: money from each version's own positions (`inr`) ---- */
+const ownMl = (pick: { id: string; name: string } | null): ExportMl => ({
+  iteration: 16, runId: 'r', createdAt: 0, best: pick?.id ?? 'nF',
+  wide: { outcome: pick ? 'better' : 'not-better', message: 'm', pick },
+  strategies: [
+    { id: 'l5_f100_c3', name: 'liquidity 5 bp', dev: { n: 300, netR: 0.06 },
+      money: { stopPct: 2.3, maxPerDay: 3, perTrade: 18, tradesPerMonth: 30, perMonth: 537, capital: 9000, pct: 6, worstMonth: -900, bestMonth: 2400, maxDrawdownR: 12 },
+      inr: { perMonth: 41_000, examPerMonth: 12_000, avgPosition: 640_000, avgRisk: 14_700, capital: 380_000 },
+      costs: [{ name: 'Market orders, ₹300 risk', dev: { n: 300, netR: 0.06 } }] },
+    { id: 'w10_f100_c3_g', name: '₹10 lakh reference', dev: { n: 300, netR: 0.07 },
+      money: { stopPct: 2.32, maxPerDay: 3, perTrade: 21, tradesPerMonth: 28, perMonth: 588, capital: 9000, pct: 6, worstMonth: -900, bestMonth: 2400, maxDrawdownR: 12 },
+      inr: { perMonth: 52_000, examPerMonth: 30_000, avgPosition: 1_000_000, avgRisk: 23_800, capital: 600_000 } },
+    { id: 'nF', name: 'control', money: { stopPct: 2.32, maxPerDay: 2, perTrade: -9, tradesPerMonth: 16.6, perMonth: -151, capital: 15565, pct: -1, worstMonth: -3441, bestMonth: 2856, maxDrawdownR: 34.9 } },
+  ],
+});
+test('1. a turnover-sized version is priced from its own positions, not ₹300 risk', () => {
+  const md = mlToMarkdown(ownMl(null));
+  assert.match(md, /Money from its own positions \(avg ₹6\.4 lakh\) \(~₹14,700 risk a trade, each trade's stop = half that stock's usual daily range; same basis as the liquidity table\): ₹1,367 a trade · 30\.0 trades a month · ₹41,000 a month · capital the busiest day needed ₹3,80,000/);
+  assert.match(md, /^\| l5_f100_c3 \| liquidity 5 bp \|.*\| ₹41,000 \(own positions\) \|/m);
+  assert.doesNotMatch(md, /₹537/, 'no R x ₹300 figure is shown as its money');
+  assert.match(md, /\| As priced \(its own positions\) \| 300 \|/);
+});
+test('2. a fixed-size reference with `inr` uses the same basis as the liquidity table', () => {
+  const md = mlToMarkdown(ownMl(null));
+  assert.match(md, /^\| w10_f100_c3_g \|.*\| ₹52,000 \(own positions\) \|/m);
+  assert.match(md, /### w10_f100_c3_g[\s\S]*Money from its own positions \(avg ₹10 lakh\) \(~₹23,800 risk a trade[^)]*\): ₹1,857 a trade · 28\.0 trades a month · ₹52,000 a month/);
+  assert.match(md, /Money at ₹300 risk: stop ~2\.32% · -₹9 a trade/, 'a ₹300-risk version without `inr` is unchanged');
+});
+test('3. no pick: the header says none, and that Algo Live is unchanged', () => {
+  assert.match(mlToMarkdown(ownMl(null)), /page's pick: none \(Algo Live unchanged: nF\)/);
+  assert.match(mlToMarkdown(ownMl({ id: 'l5_f100_c3', name: 'x' })), /page's pick: l5_f100_c3/);
+});
+test('own-positions money is applied once too', async () => {
+  const { relabelSized } = await import('../lib/ml/sized');
+  assert.equal(mlToMarkdown(relabelSized(ownMl(null))), mlToMarkdown(ownMl(null)));
+});
