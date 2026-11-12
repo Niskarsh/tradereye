@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { aggregate, Chart, intervalMinutes, isIntraday, NSE, type Annotations, type Bar, type Level, type Marker } from '@/packages/candle-chart/src';
 import { chunkDays, seriesFor, type SymbolSeries } from '@/lib/chart/series';
@@ -97,6 +97,9 @@ export function ChartPane(p: PaneProps) {
   const tokenRef = useRef(p.token);
   tokenRef.current = p.token;
   const { symbol, interval } = p.cfg;
+  // what to say while the chart has no candles (loading, waiting for an Algo close, or why it failed)
+  const [info, setInfo] = useState<{ state: string; message?: string; empty: boolean }>({ state: 'loading', empty: true });
+  const [retry, setRetry] = useState(0);
 
   // the chart itself: made once per pane
   useEffect(() => {
@@ -125,8 +128,11 @@ export function ChartPane(p: PaneProps) {
     c.setInterval(interval);
     c.setBars([]);
     const intraday = isIntraday(interval), chunk = chunkDays(intervalMinutes(interval) || 1);
+    const kind = intraday ? 'm1' : 'd';
+    const show = () => { if (alive) setInfo({ state: s.status[kind].state, message: s.status[kind].message, empty: !c.getBars().length }); };
     const render = () => {
       if (!alive) return;
+      show();
       const bars = barsFor(s, interval);
       const cur = c.getBars();
       if (!cur.length) c.setBars(bars);
@@ -137,7 +143,7 @@ export function ChartPane(p: PaneProps) {
     let retained = false;
     let loadingMore = false;
     const first = intraday ? ensureIntraday(s, chunk) : s.loadDaily(dailyYears(interval));
-    void first.then(() => { if (alive) { c.setBars(barsFor(s, interval)); s.retain(); retained = true; } });
+    void first.then(() => { if (alive) { c.setBars(barsFor(s, interval)); show(); s.retain(); retained = true; } });
     const offHist = c.on(async (e) => {
       if (e.type !== 'needHistory' || loadingMore) return;
       loadingMore = true;
@@ -155,7 +161,14 @@ export function ChartPane(p: PaneProps) {
     void getDrawings(symbol).then((list) => { if (alive) c.setDrawings(list); });
     const offDraw = onDrawings(symbol, (list, from) => { if (from !== props.current.cfg.id) c.setDrawings(list); });
     return () => { alive = false; off(); offHist(); offDraw(); if (retained) s.release(); };
-  }, [symbol, interval]);
+  }, [symbol, interval, retry]);
+
+  // a failed first load tries again by itself every 20 s (and on the Retry button)
+  useEffect(() => {
+    if (!(info.empty && info.state === 'error')) return;
+    const t = setTimeout(() => setRetry((r) => r + 1), 20_000);
+    return () => clearTimeout(t);
+  }, [info]);
 
   // Nifty 500 compare line
   useEffect(() => {
@@ -183,6 +196,18 @@ export function ChartPane(p: PaneProps) {
   return (
     <div className={`group relative h-full w-full ${p.active ? 'ring-1 ring-inset ring-brand-accent/70' : ''}`} onPointerDownCapture={() => p.onActivate()}>
       <div ref={host} className="absolute inset-0" />
+      {info.empty && info.state !== 'ok' && info.state !== 'idle' && (
+        <div className="absolute left-1/2 top-1/2 z-10 max-w-[80%] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-line-strong bg-brand-section/95 px-4 py-3 text-center text-xs text-ink-2 shadow-xl">
+          {info.state === 'error' ? (
+            <>
+              <p className="font-semibold text-data-red-text">Couldn&apos;t load {symbol} candles</p>
+              <p className="mt-1 text-ink-3">{info.message}</p>
+              <button onClick={() => setRetry((r) => r + 1)} className="mt-2 rounded-md border border-line-strong px-3 py-1 text-white hover:border-brand-accent">Retry now</button>
+              <p className="mt-1 text-[10px] text-ink-4">Retries by itself every 20 s</p>
+            </>
+          ) : <p>{info.state === 'waiting' ? info.message : `Loading ${symbol}…`}</p>}
+        </div>
+      )}
       <button onClick={p.onToggleMax} title={p.maximized ? 'Restore layout (Alt+Enter)' : 'Maximise this chart (Alt+Enter)'}
         className="absolute right-[76px] top-1.5 z-10 rounded-md border border-line-strong bg-brand-section/90 p-1 text-ink-2 opacity-0 transition-opacity hover:text-white group-hover:opacity-100">
         {p.maximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}

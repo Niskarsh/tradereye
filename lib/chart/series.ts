@@ -19,6 +19,12 @@ const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) 
 const istMinute = (ms: number) => { const t = new Date(ms + IST_MS); return t.getUTCHours() * 60 + t.getUTCMinutes(); };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+let queue: Promise<unknown> = Promise.resolve();
+/** 1-minute candles (every intraday interval) and daily candles load (and fail) separately */
+export type Kind = 'm1' | 'd';
+export interface Status { state: 'idle' | 'loading' | 'waiting' | 'ok' | 'error'; message?: string }
+const SID_KEY = (s: string) => `tradereye-chart-sid-${s}`;
+
 const toBars = (c: Candles): Bar[] => c.t.map((t, i) => ({ t, o: c.o[i], h: c.h[i], l: c.l[i], c: c.c[i], v: c.v[i] }));
 function merge(a: Bar[], b: Bar[]): Bar[] {
   const m = new Map<number, Bar>();
@@ -49,6 +55,8 @@ export class SymbolSeries {
   m1Done = false;
   dailyDone = false;
   error = '';
+  /** what the charts show while there are no candles: loading / waiting / error */
+  status: Record<Kind, Status> = { m1: { state: 'idle' }, d: { state: 'idle' } };
   private listeners = new Set<() => void>();
   private loading = new Map<string, Promise<void>>();
   private unsubFeed: (() => void) | null = null;
@@ -57,7 +65,18 @@ export class SymbolSeries {
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private users = 0;
 
-  constructor(readonly symbol: string, private token: () => string) {}
+  constructor(readonly symbol: string, private token: () => string) {
+    try { const v = localStorage.getItem(SID_KEY(symbol)); if (v && /^\d{1,10}$/.test(v)) this.securityId = v; } catch { /* private mode */ }
+    if (symbol === 'NIFTY500') { this.securityId = '19'; this.segment = 'IDX_I'; }
+  }
+
+  setSid(id: string) {
+    if (!/^\d{1,10}$/.test(id) || this.securityId === id) return;
+    this.securityId = id;
+    try { localStorage.setItem(SID_KEY(this.symbol), id); } catch { /* private mode */ }
+  }
+
+  private setStatus(kind: Kind, state: Status['state'], message?: string) { this.status[kind] = { state, message }; this.notify(true); }
 
   onChange(fn: () => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private notify(now = false) {
@@ -67,31 +86,47 @@ export class SymbolSeries {
   }
 
   private async fetchBars(kind: '1m' | '1d', from: string, to: string): Promise<BarsAnswer> {
+    // one chart request at a time per tab: several charts (and tabs) opening together must not burst Dhan
+    const turn = queue.then(() => this.fetchBarsNow(kind, from, to));
+    queue = turn.then(() => sleep(250), () => sleep(250));
+    return turn;
+  }
+
+  private async fetchBarsNow(kind: '1m' | '1d', from: string, to: string): Promise<BarsAnswer> {
+    let last = '';
     for (let attempt = 0; attempt < 6; attempt++) {
       // never compete with Algo Live for Dhan right after its closes (lib/chart/quiet.ts)
       const quiet = algoQuietMs();
-      if (quiet) await sleep(quiet + 500);
-      const r = await fetch('/api/chart/bars', {
-        method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': this.token() },
-        body: JSON.stringify({ symbol: this.symbol, kind, from, to, securityId: this.securityId }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (r.status === 429) { await sleep(1500 * (attempt + 1)); continue; }
-      if (!r.ok) throw new Error(j?.message ?? `HTTP ${r.status}`);
-      const a = j as BarsAnswer;
-      if (a.securityId) this.securityId = a.securityId;
+      if (quiet) { this.setStatus(kind === '1d' ? 'd' : 'm1', 'waiting', 'Waiting for Algo Live’s close to pass (charts stay off Dhan for 2 min)'); await sleep(quiet + 500); }
+      let r: Response, j: Record<string, unknown> = {};
+      try {
+        r = await fetch('/api/chart/bars', {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': this.token() },
+          body: JSON.stringify({ symbol: this.symbol, kind, from, to, securityId: this.securityId }),
+        });
+        j = await r.json().catch(() => ({}));
+      } catch (e) { last = `network: ${(e as Error).message}`; await sleep(1500 * (attempt + 1)); continue; }
+      // busy / timed out / server hiccup: try again, slower each time
+      if (r.status === 429 || r.status >= 500) { last = String(j?.message ?? `HTTP ${r.status}`); await sleep(1500 * (attempt + 1)); continue; }
+      if (!r.ok) throw new Error(String(j?.message ?? `HTTP ${r.status}`));
+      const a = j as unknown as BarsAnswer;
+      if (a.securityId) this.setSid(a.securityId);
       if (a.segment) this.segment = a.segment;
       if (a.partial && a.retryInMs && attempt < 5) { await sleep(a.retryInMs + 500); continue; }
       if (a.partial && a.needsDhan) this.error = 'Some candles are not saved yet: log in on the Dhan login tab to fetch them.';
       return a;
     }
-    throw new Error('Dhan is busy: try again in a moment.');
+    throw new Error(`Dhan did not answer after 6 tries (${last || 'busy'}). Retrying shortly.`);
   }
 
-  private once(key: string, job: () => Promise<void>): Promise<void> {
+  private once(key: string, kind: Kind, job: () => Promise<void>): Promise<void> {
     const cur = this.loading.get(key);
     if (cur) return cur;
-    const p = job().catch((e) => { this.error = (e as Error).message; this.notify(true); }).finally(() => this.loading.delete(key));
+    if (this.status[kind].state !== 'ok') this.setStatus(kind, 'loading');
+    const p = job()
+      .then(() => { if (this.status[kind].state !== 'ok') this.setStatus(kind, 'ok'); })
+      .catch((e) => { this.error = (e as Error).message; this.setStatus(kind, 'error', this.error); })
+      .finally(() => this.loading.delete(key));
     this.loading.set(key, p);
     return p;
   }
@@ -99,7 +134,7 @@ export class SymbolSeries {
   /** the latest `days` calendar days of 1-minute candles (first load) */
   loadIntraday(days: number): Promise<void> {
     if (this.m1From) return Promise.resolve();
-    return this.once('m1-first', async () => {
+    return this.once('m1-first', 'm1', async () => {
       const to = istToday(), from = addDays(to, -days);
       const a = await this.fetchBars('1m', from, to);
       this.m1 = merge(this.m1, toBars(a.c));
@@ -112,7 +147,7 @@ export class SymbolSeries {
   /** `days` more calendar days of 1-minute candles before what is loaded; resolves with how many bars came */
   loadIntradayBefore(days: number): Promise<void> {
     if (!this.m1From || this.m1Done) return Promise.resolve();
-    return this.once('m1-more', async () => {
+    return this.once('m1-more', 'm1', async () => {
       const to = addDays(this.m1From!, -1), from = addDays(to, -days);
       const a = await this.fetchBars('1m', from, to);
       const add = toBars(a.c);
@@ -128,7 +163,7 @@ export class SymbolSeries {
 
   loadDaily(years: number): Promise<void> {
     if (this.dailyFrom) return Promise.resolve();
-    return this.once('d-first', async () => {
+    return this.once('d-first', 'd', async () => {
       const to = istToday(), from = addDays(to, -Math.round(years * 365));
       const a = await this.fetchBars('1d', from, to);
       this.daily = merge(this.daily, toBars(a.c));
@@ -138,7 +173,7 @@ export class SymbolSeries {
   }
   loadDailyBefore(years: number): Promise<void> {
     if (!this.dailyFrom || this.dailyDone) return Promise.resolve();
-    return this.once('d-more', async () => {
+    return this.once('d-more', 'd', async () => {
       const to = addDays(this.dailyFrom!, -1), from = addDays(to, -Math.round(years * 365));
       const a = await this.fetchBars('1d', from, to);
       const add = toBars(a.c);

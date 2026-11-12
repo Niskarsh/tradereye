@@ -14,6 +14,9 @@ export default function ChartPage() {
     const q = new URLSearchParams(window.location.search);
     const symbol = q.get('symbol')?.trim().toUpperCase();
     const algo = q.get('algo') ?? undefined;
+    // the Algo Live link carries the Dhan id: the first load then skips looking it up
+    const sid = q.get('sid');
+    if (symbol && sid && /^\d{1,10}$/.test(sid)) { try { localStorage.setItem(`tradereye-chart-sid-${symbol}`, sid); } catch { /* private mode */ } }
     setParams({ symbol: symbol && /^[A-Z0-9&-]{1,30}$/.test(symbol) ? symbol : undefined, algo: algo && /^\d{4}-\d{2}-\d{2}$/.test(algo) ? algo : undefined });
     if (symbol) document.title = `${symbol} · Charts · tradereye`;
   }, []);

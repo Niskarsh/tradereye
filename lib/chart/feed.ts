@@ -104,7 +104,7 @@ class SharedFeed {
         if (m.k === 'q') this.deliver(m.q);
         else if (m.k === 'hello') this.announce();
         else if (m.k === 'status' && !this.leader) { this.status = { ...m.s, leader: false }; for (const f of this.statusFns) f(this.status); }
-        else if (m.k === 'want' && this.leader) { this.wants.set(m.tab, { items: m.items, at: Date.now() }); this.syncSubs(); }
+        else if (m.k === 'want' && this.leader) { const known = this.wants.has(m.tab); this.wants.set(m.tab, { items: m.items, at: Date.now() }); this.syncSubs(); if (!known) this.post({ k: 'status', s: this.status }); }
       };
     }
     // followers repeat what they want, so a new leader learns it and a dead tab's wants expire

@@ -201,7 +201,7 @@ export default function AlgoLivePage() {
   const tick = st?.ticks[String(shown)];
   const shortlist = st?.ticks['10'];
   // a ticker opens Charts in a new tab, with what Algo Live saw that day
-  const chartHref = (sym: string) => `/chart?symbol=${encodeURIComponent(sym)}&algo=${st?.date ?? today.date}`;
+  const chartHref = (sym: string) => { const sid = st?.list.find((x) => x.symbol === sym)?.securityId; return `/chart?symbol=${encodeURIComponent(sym)}&algo=${st?.date ?? today.date}${sid ? `&sid=${sid}` : ''}`; };
   const vetoed = new Set(st?.vetoes ?? []);
   const nextSlot = SLOTS.find((k) => today.sec < (555 + k) * 60 + AFTER);
   const recordText = (snap?.record ?? []).join(',');
