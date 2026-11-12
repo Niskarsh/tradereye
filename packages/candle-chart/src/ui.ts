@@ -312,7 +312,7 @@ export class IndicatorDialog {
 }
 
 export interface ChartSettings { type: ChartType; candles: CandleStyle; grid: boolean; sessionBreaks: boolean }
-const TYPES: [ChartType, string][] = [['candles', 'Candles'], ['hollow', 'Hollow candles'], ['heikin', 'Heikin Ashi'], ['bars', 'Bars'], ['line', 'Line'], ['area', 'Area']];
+const TYPES: [ChartType, string][] = [['candles', 'Candles'], ['volume', 'Volume candles'], ['hollow', 'Hollow candles'], ['heikin', 'Heikin Ashi'], ['bars', 'Bars'], ['line', 'Line'], ['area', 'Area']];
 
 /** Chart settings (TradingView's "Symbol" tab in small): candle bodies, outlines and wicks, grid, session breaks. */
 export class ChartSettingsDialog {
