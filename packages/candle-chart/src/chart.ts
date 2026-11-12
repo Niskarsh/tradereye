@@ -1026,6 +1026,20 @@ export class Chart {
   private drawSeries(pane: Pane, from: number, to: number) {
     const c = this.c, th = this.theme, sp = this.spacing;
     const bw = Math.max(1, Math.round(sp * 0.72) - (sp > 4 ? 1 : 0));
+    // volume candles: width = the bar's volume against the busy bars in view (the 95th percentile fills the slot, so
+    // one opening spike does not squash the rest into slivers); never under a fifth of the slot
+    let vmax = 0;
+    if (this.type === 'volume') {
+      const vs: number[] = [];
+      for (let i = from; i <= to; i++) vs.push(this.bars[i].v);
+      vs.sort((a, b) => a - b);
+      vmax = vs[Math.min(vs.length - 1, Math.floor(vs.length * 0.95))] ?? 0;
+    }
+    const widthOf = (v: number) => {
+      if (this.type !== 'volume' || !(vmax > 0)) return bw;
+      const full = Math.max(1, sp * 0.94 - (sp > 4 ? 1 : 0));
+      return Math.max(1, Math.round(full * Math.max(0.2, Math.min(1, v / vmax))));
+    };
     if (this.type === 'line' || this.type === 'area') {
       c.beginPath();
       for (let i = from; i <= to; i++) { const x = this.x(i), y = this.yOf(pane, this.bars[i].c); if (i === from) c.moveTo(x, y); else c.lineTo(x, y); }
@@ -1057,15 +1071,16 @@ export class Chart {
       c.fillStyle = up ? cs.upWick : cs.downWick;
       c.fillRect(x, Math.round(yh), 1, Math.max(1, Math.round(yl) - Math.round(yh)));
       const top = Math.round(Math.min(yo, yc)), h = Math.max(1, Math.round(Math.abs(yc - yo)));
-      const left = x - Math.floor(bw / 2);
+      const w = widthOf(b.v);
+      const left = x - Math.floor(w / 2);
       const hollow = this.type === 'hollow' && up;
       c.fillStyle = hollow ? th.bg : up ? cs.upBody : cs.downBody;
-      c.fillRect(left, top, bw, h);
+      c.fillRect(left, top, w, h);
       // the outline (always for hollow up candles); at 1-2 px wide a candle is all outline anyway
-      if ((cs.border || hollow) && bw >= 3) {
+      if ((cs.border || hollow) && w >= 3) {
         c.strokeStyle = up ? cs.upBorder : cs.downBorder; c.lineWidth = 1;
-        c.strokeRect(left + 0.5, top + 0.5, Math.max(0, bw - 1), Math.max(0, h - 1));
-      } else if (cs.border && bw < 3) { c.fillStyle = up ? cs.upBorder : cs.downBorder; c.fillRect(left, top, bw, h); }
+        c.strokeRect(left + 0.5, top + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+      } else if (cs.border && w < 3) { c.fillStyle = up ? cs.upBorder : cs.downBorder; c.fillRect(left, top, w, h); }
     }
   }
 

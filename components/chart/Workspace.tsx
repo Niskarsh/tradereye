@@ -175,6 +175,8 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
       const lay: Layout = JSON.parse(JSON.stringify(l));
       // charts saved before candle colours existed get the white / black candles
       lay.panes = lay.panes.map((p) => (p.state?.candles ? p : { ...p, state: { ...p.state, candles: { ...MONO_CANDLES } } }));
+      // once: plain candles become volume candles (a type picked after this is kept)
+      if (!lay.volumeCandles) { lay.panes = lay.panes.map((p) => (!p.state?.type || p.state.type === 'candles' ? { ...p, state: { ...p.state, type: 'volume' } } : p)); lay.volumeCandles = true; saveLayout(lay); }
       if (initialSymbol) lay.panes = lay.panes.map((p) => (lay.syncSymbol || p === lay.panes[0] ? { ...p, symbol: initialSymbol } : p));
       if (initialSymbol && algoDate) lay.showAlgo = true;
       setLayout(lay);

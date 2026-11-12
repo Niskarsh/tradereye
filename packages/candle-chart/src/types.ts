@@ -1,7 +1,8 @@
 /** One candle. `t` is the bar's open time in Unix seconds (UTC). */
 export interface Bar { t: number; o: number; h: number; l: number; c: number; v: number }
 
-export type ChartType = 'candles' | 'hollow' | 'bars' | 'line' | 'area' | 'heikin';
+/** 'volume' = TradingView's volume candles: ordinary candles whose body width follows the bar's volume */
+export type ChartType = 'candles' | 'volume' | 'hollow' | 'bars' | 'line' | 'area' | 'heikin';
 export type ScaleMode = 'linear' | 'log' | 'percent';
 
 /**
