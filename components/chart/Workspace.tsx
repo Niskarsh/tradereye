@@ -322,7 +322,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
     allOption: layout.panes.length > 1,
     onApply: (st, all) => {
       if (active) setPane(active.id, { state: activeChart.getState() });
-      if (all) for (const [id, c] of charts.current) if (id !== active?.id) { c.setState({ type: st.type, candles: st.candles, grid: st.grid, sessionBreaks: st.sessionBreaks }); setPane(id, { state: c.getState() }); }
+      if (all) for (const [id, c] of charts.current) if (id !== active?.id) { c.setState({ type: st.type, candles: st.candles, grid: st.grid, sessionBreaks: st.sessionBreaks, volCandles: st.volCandles }); setPane(id, { state: c.getState() }); }
     },
   });
   const feedDot = feed.state === 'live' ? 'bg-data-green' : feed.state === 'connecting' ? 'bg-data-caution animate-pulse' : feed.state === 'error' ? 'bg-data-red' : 'bg-ink-4';

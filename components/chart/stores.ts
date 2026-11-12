@@ -119,7 +119,7 @@ export function colsFor(preset: string, ids: string[]): Col[] {
 /** His default: left top 5m, left bottom 1D, right (big) 10m; white / black candles; volume and VWAP on the intraday charts. */
 export function defaultLayout(symbol = 'NIFTY500'): Layout {
   const ind = (id: string, defId: string, inputs: Record<string, number | string | boolean> = {}) => ({ id, defId, inputs, plots: {}, visible: true, pane: 'main' });
-  const st = (...indicators: ReturnType<typeof ind>[]): Partial<ChartState> => ({ type: 'volume', candles: { ...MONO_CANDLES }, indicators });
+  const st = (...indicators: ReturnType<typeof ind>[]): Partial<ChartState> => ({ type: 'volume', candles: { ...MONO_CANDLES }, volCandles: { base: 0.35, effect: 1 }, indicators });
   const panes: PaneCfg[] = [
     { id: paneId(), symbol, interval: '5', state: st(ind('dvol5', 'vol'), ind('dvw5', 'vwap', { source: 'hlc3', bands: 0 })) },
     { id: paneId(), symbol, interval: 'D', state: st(ind('dvold', 'vol'), ind('de200', 'ema', { length: 200, source: 'close' })) },

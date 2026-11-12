@@ -46,6 +46,8 @@ export interface IndicatorState {
 
 export interface PaneState { id: string; ratio: number }
 
+export interface VolCandleStyle { base: number; effect: number }
+
 /** How candles (and bars) are coloured: bodies, outlines and wicks, up and down. */
 export interface CandleStyle { upBody: string; downBody: string; upBorder: string; downBorder: string; upWick: string; downWick: string; border: boolean }
 
@@ -53,6 +55,9 @@ export interface CandleStyle { upBody: string; downBody: string; upBorder: strin
 export interface ChartState {
   type: ChartType; scaleMode: ScaleMode; indicators: IndicatorState[]; panes: PaneState[];
   candles?: CandleStyle; grid?: boolean; sessionBreaks?: boolean;
+  /** volume candles: `base` = every candle's minimum body (share of its slot, 0..1); `effect` = how much of the rest
+   * volume fills (0 = all candles the same, 1 = the busiest candle in view fills its slot) */
+  volCandles?: VolCandleStyle;
   /** @deprecated volume is the 'vol' indicator now; true here adds it */
   showVolume?: boolean;
 }
