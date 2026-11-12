@@ -17,7 +17,7 @@ import { LOOKBACK_CALENDAR_DAYS } from '../live/enrich';
 
 export const NIFTY_SYMBOL = 'NIFTY500';
 /** Nifty 500 on Dhan (same as NIFTY500 in live/backfill; repeated so this file does not pull in the Sheets code) */
-const NIFTY500 = { securityId: '19', segment: 'IDX_I', instrument: 'INDEX' };
+export const NIFTY500 = { securityId: '19', segment: 'IDX_I', instrument: 'INDEX' };
 const IST = 19800_000;
 const DAY = 86400_000;
 const CLOSED_MIN = 15 * 60 + 35;
@@ -110,14 +110,14 @@ export interface Counts { fromS3: number; fromDhan: number; saved: number; dhanC
 export class NeedsDhanError extends Error {
   constructor(public symbol: string, public date: string) { super(`The ${symbol} candles for ${date} are not saved yet. Log in on the Dhan login tab once to fetch them; after that they load without Dhan.`); }
 }
-interface Instrument { symbol: string; securityId?: string; segment: string; instrument: string }
+export interface Instrument { symbol: string; securityId?: string; segment: string; instrument: string }
 
 /**
  * 1-minute candles for every weekday in `days`: from S3 where saved, the rest in ONE Dhan request, then saved
  * (finished days only). `mustTrade` is a day known to have had trading (the trade's own day): it is never marked
  * empty, and an answer that has no candles at all marks nothing empty (it is more likely a Dhan hiccup).
  */
-async function minuteDays(deps: LoadDeps, ins: Instrument, days: string[], mustTrade: string | undefined, n: Counts, resolveId: () => Promise<string>): Promise<{ c: Candles; securityId?: string }> {
+export async function minuteDays(deps: LoadDeps, ins: Instrument, days: string[], mustTrade: string | undefined, n: Counts, resolveId: () => Promise<string>): Promise<{ c: Candles; securityId?: string }> {
   const now = (deps.now ?? Date.now)();
   const files = await Promise.all(days.map((d) => readFile(deps.store, minuteKey(ins.symbol, d), n)));
   const have = new Map<string, Candles>();

@@ -200,6 +200,8 @@ export default function AlgoLivePage() {
   const shown = view ?? Math.max(-1, ...Object.keys(st?.ticks ?? {}).map(Number));
   const tick = st?.ticks[String(shown)];
   const shortlist = st?.ticks['10'];
+  // a ticker opens Charts in a new tab, with what Algo Live saw that day
+  const chartHref = (sym: string) => `/chart?symbol=${encodeURIComponent(sym)}&algo=${st?.date ?? today.date}`;
   const vetoed = new Set(st?.vetoes ?? []);
   const nextSlot = SLOTS.find((k) => today.sec < (555 + k) * 60 + AFTER);
   const recordText = (snap?.record ?? []).join(',');
@@ -354,7 +356,7 @@ export default function AlgoLivePage() {
                   </tr></thead><tbody>
                     {tick.scored.filter((x, i) => x.above || i < 15 || tick.picked.includes(x.symbol)).map((x) => (
                       <tr key={x.symbol} className={`border-b border-line/60 font-mono ${tick.picked.includes(x.symbol) ? 'bg-data-green/10' : ''}`}>
-                        <td className="px-2 py-1 font-sans font-bold">{x.symbol}</td>
+                        <td className="px-2 py-1 font-sans font-bold"><a href={chartHref(x.symbol)} target="_blank" rel="noreferrer" title={`Open ${x.symbol} on Charts, with what Algo Live saw`} className="hover:text-brand-accent hover:underline">{x.symbol}</a></td>
                         <td className={`px-2 py-1 text-right ${x.above ? 'font-bold text-data-green' : ''}`}>{x.pred === null ? x.note : r4(x.pred)}{x.thin ? <span className="block font-sans text-[10px] text-ink-3">{x.turnover ? crore(x.turnover) : ''} a day: too thin to trade</span> : null}</td>
                         <td className="px-2 py-1 text-right">{x.price?.toFixed(2) ?? '–'}</td>
                         <td className="px-2 py-1 text-right">{x.adr?.toFixed(2) ?? '–'}</td>
@@ -380,7 +382,7 @@ export default function AlgoLivePage() {
                 </tr></thead><tbody>
                   {st.orders.map((o) => (
                     <tr key={o.correlationId} className="border-b border-line/60 font-mono">
-                      <td className="px-2 py-1 font-sans font-bold">{o.symbol}</td><td className="px-2 py-1">{hhmm(o.slot)}</td><td className="px-2 py-1 text-right">{o.qty}</td>
+                      <td className="px-2 py-1 font-sans font-bold"><a href={chartHref(o.symbol)} target="_blank" rel="noreferrer" className="hover:text-brand-accent hover:underline">{o.symbol}</a></td><td className="px-2 py-1">{hhmm(o.slot)}</td><td className="px-2 py-1 text-right">{o.qty}</td>
                       <td className="px-2 py-1 text-right">{o.price.toFixed(2)}</td><td className="px-2 py-1 text-right">{o.avgPrice ? o.avgPrice.toFixed(2) : '–'}</td>
                       <td className="px-2 py-1 text-right">{o.stop.toFixed(2)}</td><td className="px-2 py-1 text-right">{o.target.toFixed(2)}</td>
                       <td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.at90.toFixed(2) ?? '–'}</td><td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.moveStop.toFixed(2) ?? '–'}</td>
