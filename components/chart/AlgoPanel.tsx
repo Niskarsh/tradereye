@@ -22,10 +22,12 @@ function Push({ p, up }: { p: FactPush; up: boolean }) {
 }
 
 /** What Algo Live saw for this stock: every close, the bar, the reasons at the chosen close, its order. */
-export function AlgoPanel({ view: v, slot, onSlot, onClose, parts, onParts }: { view: AlgoView; slot: number | null; onSlot: (s: number) => void; onClose: () => void; parts: AlgoParts; onParts: (p: AlgoParts) => void }) {
+export function AlgoPanel({ view: v, slot, onSlot, onClose, parts, onParts, mobile }: { view: AlgoView; slot: number | null; onSlot: (s: number) => void; onClose: () => void; parts: AlgoParts; onParts: (p: AlgoParts) => void; mobile?: boolean }) {
   const sel = v.closes.find((c) => c.slot === slot);
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-brand-section text-xs">
+    <aside className={mobile
+      ? 'fixed inset-x-0 bottom-0 z-[75] flex max-h-[55dvh] flex-col overflow-hidden rounded-t-2xl border-t border-line-strong bg-brand-section text-xs shadow-2xl'
+      : 'flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-brand-section text-xs'}>
       <div className="flex items-start justify-between gap-2 border-b border-line px-3 py-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-widest text-brand-accent">Algo Live · {v.date}</p>
@@ -37,7 +39,7 @@ export function AlgoPanel({ view: v, slot, onSlot, onClose, parts, onParts }: { 
         </div>
         <button onClick={onClose} title="Hide Algo Live (the chart stays clean)" className="text-ink-3 hover:text-white"><X className="size-4" /></button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="cc-scroll min-h-0 flex-1 overflow-auto">
         <div className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line px-3 py-2 text-[11px]">
           <span className="text-ink-3">On the charts:</span>
           {([['dots', 'Close dots'], ['levels', 'Levels'], ['orders', 'Order lines']] as const).map(([k, l]) => (

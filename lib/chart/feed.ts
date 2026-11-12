@@ -10,7 +10,7 @@ import { disconnectCode, disconnectReason, FEED_URL } from '../book/feed';
  * The socket is only open on weekdays 09:00-15:35 IST.
  */
 
-export interface Quote { securityId: string; ltp: number; /** the day's traded volume so far (stocks only) */ volume?: number; /** when it arrived (ms) */ at: number }
+export interface Quote { securityId: string; ltp: number; /** the day's traded volume so far (stocks only) */ volume?: number; /** best bid / ask (full packets: stocks) */ bid?: number; ask?: number; /** when it arrived (ms) */ at: number }
 export interface FeedItem { securityId: string; segment: string }
 export type FeedStatus = { state: 'off' | 'connecting' | 'live' | 'closed' | 'error'; message?: string; leader: boolean };
 
@@ -24,7 +24,7 @@ type Msg =
   | { k: 'q'; q: Quote }
   | { k: 'status'; s: FeedStatus };
 
-/** Dhan's binary packets we use: ticker (2: LTP, LTT), quote (4) and full (8) (LTP + day volume). */
+/** Dhan's binary packets we use: ticker (2: LTP, LTT), quote (4: LTP + day volume) and full (8: the same + 5-level depth, so best bid / ask). */
 export function parseQuotes(buf: ArrayBuffer, at: number): Quote[] {
   const dv = new DataView(buf);
   const out: Quote[] = [];
@@ -32,7 +32,13 @@ export function parseQuotes(buf: ArrayBuffer, at: number): Quote[] {
   while (off + 8 <= buf.byteLength) {
     const code = dv.getUint8(off), len = dv.getInt16(off + 1, true), securityId = String(dv.getInt32(off + 4, true));
     if (code === 2 && off + 16 <= buf.byteLength) out.push({ securityId, ltp: dv.getFloat32(off + 8, true), at });
-    else if ((code === 4 && off + 50 <= buf.byteLength) || (code === 8 && off + 62 <= buf.byteLength)) out.push({ securityId, ltp: dv.getFloat32(off + 8, true), volume: dv.getInt32(off + 22, true), at });
+    else if (code === 4 && off + 50 <= buf.byteLength) out.push({ securityId, ltp: dv.getFloat32(off + 8, true), volume: dv.getInt32(off + 22, true), at });
+    else if (code === 8 && off + 62 <= buf.byteLength) {
+      // depth level 1 at byte 62: bid qty i32, ask qty i32, bid orders i16, ask orders i16, bid price f32, ask price f32
+      const q: Quote = { securityId, ltp: dv.getFloat32(off + 8, true), volume: dv.getInt32(off + 22, true), at };
+      if (off + 82 <= buf.byteLength) { const b = dv.getFloat32(off + 74, true), a = dv.getFloat32(off + 78, true); if (b > 0) q.bid = b; if (a > 0) q.ask = a; }
+      out.push(q);
+    }
     const fallback = code === 4 ? 50 : code === 8 ? 162 : code === 2 ? 16 : code === 6 ? 16 : code === 5 ? 12 : 8;
     off += len >= 8 ? len : fallback;
   }
@@ -147,8 +153,8 @@ class SharedFeed {
     if (this.ws.readyState !== WebSocket.OPEN) return;
     const fresh = this.union().filter((i) => !this.subscribed.has(`${i.segment}:${i.securityId}`));
     if (!fresh.length) return;
-    // indices only send ticker packets; stocks get quote packets (price + day volume)
-    for (const [code, list] of [[15, fresh.filter((i) => i.segment === 'IDX_I')], [17, fresh.filter((i) => i.segment !== 'IDX_I')]] as const) {
+    // indices only send ticker packets; stocks get full packets (price, day volume and the best bid / ask)
+    for (const [code, list] of [[15, fresh.filter((i) => i.segment === 'IDX_I')], [21, fresh.filter((i) => i.segment !== 'IDX_I')]] as const) {
       for (let k = 0; k < list.length; k += 100) {
         const part = list.slice(k, k + 100);
         if (!part.length) continue;

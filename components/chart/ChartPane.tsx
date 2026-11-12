@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2 } from 'lucide-react';
-import { aggregate, Chart, intervalMinutes, isIntraday, NSE, type Annotations, type Bar, type Level, type Marker } from '@/packages/candle-chart/src';
+import { aggregate, Chart, intervalMinutes, isIntraday, NSE, type Annotations, type Bar, type Level, type Marker, type OrderLine } from '@/packages/candle-chart/src';
 import { chunkDays, seriesFor, type SymbolSeries } from '@/lib/chart/series';
 import type { AlgoView } from '@/lib/chart/algo';
 import { ALGO_PARTS_DEFAULT, getDrawings, onDrawings, setDrawings, type AlgoParts, type PaneCfg } from './stores';
@@ -20,6 +20,13 @@ export interface PaneProps {
   algoSlot: number | null;
   algoParts?: AlgoParts;
   maximized: boolean;
+  /** live orders / position of this chart's stock (drag to move, ✕ to cancel); `linesRev` redraws them (a declined drag) */
+  orderLines?: OrderLine[];
+  linesRev?: number;
+  onOrderMove?(id: string, price: number, from: number): void;
+  onOrderCancel?(id: string): void;
+  /** phone: no maximise button (one chart shows at a time) */
+  compact?: boolean;
   onActivate(): void;
   onCfg(patch: Partial<PaneCfg>): void;
   onCrosshair(t: number | null): void;
@@ -114,6 +121,8 @@ export function ChartPane(p: PaneProps) {
       else if (e.type === 'drawingsChange') setDrawings(q.cfg.symbol, c.getDrawings(), q.cfg.id);
       else if (e.type === 'toolDone') q.onToolDone();
       else if (e.type === 'markerClick' && e.marker.id) q.onAlgoSlot(Number(e.marker.id));
+      else if (e.type === 'orderMove') q.onOrderMove?.(e.id, e.price, e.from);
+      else if (e.type === 'orderCancel') q.onOrderCancel?.(e.id);
     });
     return () => { off(); props.current.register(null); c.destroy(); chart.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,6 +142,9 @@ export function ChartPane(p: PaneProps) {
     const render = () => {
       if (!alive) return;
       show();
+      // dashed bid / ask lines while quotes are fresh (they go away a minute after the last one)
+      const ba = s.bidAsk;
+      if (Date.now() - ba.at < 60_000) c.setBidAsk(ba.bid, ba.ask); else c.setBidAsk(undefined, undefined);
       const bars = barsFor(s, interval);
       const cur = c.getBars();
       if (!cur.length) c.setBars(bars);
@@ -184,6 +196,7 @@ export function ChartPane(p: PaneProps) {
   }, [p.compareNifty, symbol, interval]);
 
   useEffect(() => { chart.current?.setCrosshairTime(p.extCross); }, [p.extCross]);
+  useEffect(() => { chart.current?.setOrderLines(p.orderLines ?? []); }, [p.orderLines, p.linesRev]);
   useEffect(() => { chart.current?.setMagnet(p.magnet); }, [p.magnet]);
   useEffect(() => { chart.current?.setDrawingsHidden(p.drawingsHidden); }, [p.drawingsHidden]);
   useEffect(() => { if (p.active) chart.current?.setTool(p.tool); else chart.current?.setTool(null); }, [p.tool, p.active]);
@@ -208,10 +221,10 @@ export function ChartPane(p: PaneProps) {
           ) : <p>{info.state === 'waiting' ? info.message : `Loading ${symbol}…`}</p>}
         </div>
       )}
-      <button onClick={p.onToggleMax} title={p.maximized ? 'Restore layout (Alt+Enter)' : 'Maximise this chart (Alt+Enter)'}
+      {!p.compact && <button onClick={p.onToggleMax} title={p.maximized ? 'Restore layout (Alt+Enter)' : 'Maximise this chart (Alt+Enter)'}
         className="absolute right-[76px] top-1.5 z-10 rounded-md border border-line-strong bg-brand-section/90 p-1 text-ink-2 opacity-0 transition-opacity hover:text-white group-hover:opacity-100">
         {p.maximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-      </button>
+      </button>}
     </div>
   );
 }

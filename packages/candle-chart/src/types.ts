@@ -62,6 +62,9 @@ export interface Level { price: number; color: string; label?: string; dash?: 's
 export interface Zone { from: number; to: number; top: number; bottom: number; color: string; label?: string }
 export interface Annotations { markers?: Marker[]; levels?: Level[]; zones?: Zone[] }
 
+/** A live order or position drawn as a line you can drag (to move it) or close (✕), as on TradingView. */
+export interface OrderLine { id: string; price: number; color: string; label: string; qty?: number; extra?: string; draggable?: boolean; cancellable?: boolean }
+
 export interface CompareSeries { id: string; label: string; bars: Bar[]; color: string }
 
 export type ChartEvent =
@@ -72,4 +75,8 @@ export type ChartEvent =
   | { type: 'toolDone' }
   | { type: 'select'; drawing: Drawing | null }
   | { type: 'focus' }
-  | { type: 'markerClick'; marker: Marker };
+  | { type: 'markerClick'; marker: Marker }
+  /** an order line was dragged to a new price (rounded to the tick); the line stays there until setOrderLines */
+  | { type: 'orderMove'; id: string; price: number; from: number }
+  /** the ✕ on an order line */
+  | { type: 'orderCancel'; id: string };

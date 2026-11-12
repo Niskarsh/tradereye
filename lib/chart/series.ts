@@ -203,8 +203,12 @@ export class SymbolSeries {
     this.reconcileTimer = null;
   }
 
+  /** best bid / ask from the live feed (stocks), with when they came */
+  bidAsk: { bid?: number; ask?: number; at: number } = { at: 0 };
+
   private onQuote(q: Quote) {
     if (!(q.ltp > 0)) return;
+    if (q.bid !== undefined || q.ask !== undefined) this.bidAsk = { bid: q.bid, ask: q.ask, at: q.at };
     const min = istMinute(q.at);
     if (min < 555 || min >= 930) return;
     const t = Math.floor(q.at / 60_000) * 60;
