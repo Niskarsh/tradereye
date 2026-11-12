@@ -1,7 +1,7 @@
 import type { ToolDef } from './drawings/tools';
 import type { IndicatorDef } from './indicators/registry';
 import { CANDLE_PRESETS, PALETTE } from './theme';
-import type { CandleStyle, ChartType, Drawing, DrawingStyle, IndicatorState, Theme } from './types';
+import type { CandleStyle, ChartType, Drawing, DrawingStyle, IndicatorState, Theme, VolCandleStyle } from './types';
 
 /** Tiny DOM helper: el('div', { class: 'x', style: '...' }, ['text', child]) */
 export function el(tag: string, attrs: Record<string, string> = {}, children: (Node | string)[] = []): HTMLElement {
@@ -311,21 +311,22 @@ export class IndicatorDialog {
   }
 }
 
-export interface ChartSettings { type: ChartType; candles: CandleStyle; grid: boolean; sessionBreaks: boolean }
+export interface ChartSettings { type: ChartType; candles: CandleStyle; grid: boolean; sessionBreaks: boolean; volCandles: VolCandleStyle }
 const TYPES: [ChartType, string][] = [['candles', 'Candles'], ['volume', 'Volume candles'], ['hollow', 'Hollow candles'], ['heikin', 'Heikin Ashi'], ['bars', 'Bars'], ['line', 'Line'], ['area', 'Area']];
 
 /** Chart settings (TradingView's "Symbol" tab in small): candle bodies, outlines and wicks, grid, session breaks. */
 export class ChartSettingsDialog {
   private box: HTMLDivElement;
   private v: ChartSettings;
-  private all = true;
-  constructor(host: HTMLElement, private th: Theme, v: ChartSettings, private allOption: boolean, private onApply: (v: ChartSettings, all: boolean) => void, private onClose: () => void) {
+  private applied = false;
+  constructor(host: HTMLElement, private th: Theme, v: ChartSettings, private allOption: boolean | string, private onApply: (v: ChartSettings, all: boolean) => void, private onClose: () => void,
+    private onPreview?: (v: ChartSettings) => void, private onCancel?: () => void) {
     this.v = JSON.parse(JSON.stringify(v));
     this.box = dialogScrim(th, () => this.close());
     void host;
     this.draw();
   }
-  close() { this.box.remove(); window.removeEventListener('keydown', this.esc, true); this.onClose(); }
+  close() { this.box.remove(); window.removeEventListener('keydown', this.esc, true); if (!this.applied) this.onCancel?.(); this.onClose(); }
   private esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.cc-float')) { e.stopPropagation(); this.close(); } };
   private draw() {
     window.removeEventListener('keydown', this.esc, true);
@@ -333,17 +334,34 @@ export class ChartSettingsDialog {
     const th = this.th, v = this.v;
     this.box.innerHTML = '';
     const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(380px,94vw);max-height:calc(100dvh - 24px);overflow:auto;color:${th.text};font:${th.font};font-size:12.5px;box-shadow:0 20px 50px rgba(0,0,0,.5)`, class: 'cc-scroll cc-float-dialog' });
-    card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, ['Chart settings']));
+    card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, [
+      'Chart settings', ...(typeof this.allOption === 'string' ? [el('span', { style: `color:${th.textMuted};font-weight:400;margin-left:6px` }, [`· ${this.allOption}`])] : [])]));
     const body = el('div', { style: 'padding:10px 14px;display:grid;grid-template-columns:1fr auto auto;gap:8px 12px;align-items:center' });
     const head = (t: string) => body.appendChild(el('div', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-top:4px` }, [t]));
     head('Chart type');
     const types = el('div', { style: 'grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap' });
     for (const [t, label] of TYPES) {
       const b = el('button', { style: `background:${v.type === t ? th.panelBorder : th.bg};border:1px solid ${v.type === t ? th.accent : th.panelBorder};color:${th.text};border-radius:6px;padding:4px 8px;cursor:pointer` }, [label]);
-      b.addEventListener('click', () => { v.type = t; this.draw(); });
+      b.addEventListener('click', () => { v.type = t; this.onPreview?.(this.v); this.draw(); });
       types.appendChild(b);
     }
     body.appendChild(types);
+    if (v.type === 'volume') {
+      head('Volume candles');
+      // two sliders, previewed on the chart as they move
+      const slider = (label: string, hint: string, key: keyof VolCandleStyle, min: number, max: number) => {
+        const wrap = el('div', { style: 'grid-column:1/-1;display:flex;flex-direction:column;gap:2px' });
+        const top = el('div', { style: 'display:flex;justify-content:space-between' }, [el('span', {}, [label])]);
+        const val = el('span', { style: `color:${th.accent};font-weight:600` }, [`${Math.round(v.volCandles[key] * 100)}%`]);
+        top.appendChild(val);
+        const r = el('input', { type: 'range', min: String(min), max: String(max), step: '1', value: String(Math.round(v.volCandles[key] * 100)), style: 'width:100%' }) as HTMLInputElement;
+        r.addEventListener('input', () => { v.volCandles = { ...v.volCandles, [key]: Number(r.value) / 100 }; val.textContent = `${r.value}%`; this.onPreview?.(this.v); });
+        wrap.append(top, r, el('span', { style: `color:${th.textMuted};font-size:11px` }, [hint]));
+        body.appendChild(wrap);
+      };
+      slider('Base thickness', 'Every candle\'s body before volume: share of its slot', 'base', 5, 100);
+      slider('Volume effect', 'How much volume widens a candle: 0% = all the same, 100% = the busiest in view fills its slot', 'effect', 0, 100);
+    }
     head('Candle colours');
     const presets = el('div', { style: 'grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap' });
     for (const p of CANDLE_PRESETS) {
@@ -374,14 +392,22 @@ export class ChartSettingsDialog {
     };
     check('Grid lines', () => v.grid, (b) => { v.grid = b; });
     check('Session breaks (a line between days)', () => v.sessionBreaks, (b) => { v.sessionBreaks = b; });
-    if (this.allOption) check('Apply to every chart in the layout', () => this.all, (b) => { this.all = b; });
     card.appendChild(body);
-    const foot = el('div', { style: `display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;border-top:1px solid ${th.panelBorder}` });
+    // OK = this chart only (the one you clicked last); "Apply to all charts" = every chart in the layout
+    const foot = el('div', { style: `display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid ${th.panelBorder}` });
+    const left = el('div');
+    if (this.allOption) {
+      const allBtn = el('button', { title: 'Apply these settings to every chart in the layout', style: `${btnCss(th)};border:1px solid ${th.panelBorder}` }, ['Apply to all charts']);
+      allBtn.addEventListener('click', () => { this.applied = true; this.onApply(this.v, true); this.close(); });
+      left.appendChild(allBtn);
+    }
+    const right = el('div', { style: 'display:flex;gap:8px' });
     const cancel = el('button', { style: btnCss(th) }, ['Cancel']);
     cancel.addEventListener('click', () => this.close());
-    const ok = el('button', { style: `${btnCss(th)};background:${th.accent};color:#0A1118;font-weight:600;padding:5px 14px` }, ['OK']);
-    ok.addEventListener('click', () => { this.onApply(this.v, this.allOption && this.all); this.close(); });
-    foot.append(cancel, ok);
+    const ok = el('button', { title: 'Apply to this chart only', style: `${btnCss(th)};background:${th.accent};color:#0A1118;font-weight:600;padding:5px 14px` }, ['OK']);
+    ok.addEventListener('click', () => { this.applied = true; this.onApply(this.v, false); this.close(); });
+    right.append(cancel, ok);
+    foot.append(left, right);
     card.appendChild(foot);
     this.box.appendChild(card);
   }

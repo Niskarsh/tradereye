@@ -4,7 +4,7 @@ import { getIndicator, type IndicatorDef } from './indicators/registry';
 import { getTool, stroke, tag, type DrawEnv, type Pt } from './drawings/tools';
 import { classicCandles, DARK, NSE } from './theme';
 import type {
-  Anchor, Annotations, Bar, CandleStyle, ChartEvent, OrderLine, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
+  Anchor, Annotations, Bar, CandleStyle, ChartEvent, OrderLine, VolCandleStyle, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
   ScaleMode, Theme, TimeOpts,
 } from './types';
 import { ChartSettingsDialog, DrawingBar, IndicatorDialog, el, icon, popupMenu } from './ui';
@@ -33,6 +33,15 @@ type Drag =
 
 const AXIS_W = 70, TIME_H = 26, MIN_SPACING = 1.2, MAX_SPACING = 80, RIGHT_GAP = 6;
 let uid = 0;
+/** dark or light text, whichever reads on this colour */
+function inkOn(color: string): string {
+  let r = 200, g = 200, b = 200;
+  const hex = /^#([0-9a-f]{6})/i.exec(color), rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color);
+  if (hex) { const n = parseInt(hex[1], 16); r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255; }
+  else if (rgb) { r = +rgb[1]; g = +rgb[2]; b = +rgb[3]; }
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#0A1118' : '#FFFFFF';
+}
+const clamp01 = (x: number) => (Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0);
 const newId = (p: string) => `${p}${Date.now().toString(36)}${(uid++).toString(36)}`;
 
 function niceStep(range: number, target: number): number {
@@ -60,6 +69,7 @@ export class Chart {
   private type: ChartType = 'candles';
   private scaleMode: ScaleMode = 'linear';
   private candles: CandleStyle;
+  private volCandles: VolCandleStyle = { base: 0.35, effect: 1 };
   private grid = true;
   private sessionBreaks = true;
   private legendCollapsed = false;
@@ -216,20 +226,32 @@ export class Chart {
   setCandleStyle(c: CandleStyle) { this.candles = { ...c }; this.emit({ type: 'stateChange' }); this.invalidate(); }
   getCandleStyle(): CandleStyle { return { ...this.candles }; }
   /** Chart settings (candle colours, grid, session breaks). `onApply` also gets whether to copy it to the other charts. */
-  openSettings(opts: { allOption?: boolean; onApply?: (st: ChartState, all: boolean) => void } = {}) {
+  openSettings(opts: { allOption?: boolean; title?: string; onApply?: (st: ChartState, all: boolean) => void; onPreview?: (vc: VolCandleStyle, type: ChartType) => void } = {}) {
     this.dialog?.close();
-    this.dialog = new ChartSettingsDialog(this.root, this.theme, { type: this.type, candles: this.candles, grid: this.grid, sessionBreaks: this.sessionBreaks }, !!opts.allOption, (v, all) => {
+    const before = { type: this.type, candles: { ...this.candles }, volCandles: { ...this.volCandles } };
+    this.dialog = new ChartSettingsDialog(this.root, this.theme, { type: this.type, candles: this.candles, grid: this.grid, sessionBreaks: this.sessionBreaks, volCandles: this.volCandles }, opts.allOption ? (opts.title ?? true) : false, (v, all) => {
       if (v.type !== this.type) { this.type = v.type; this.recompute(); }
-      this.candles = v.candles; this.grid = v.grid; this.sessionBreaks = v.sessionBreaks;
+      this.candles = v.candles;
+      this.volCandles = { ...v.volCandles }; this.grid = v.grid; this.sessionBreaks = v.sessionBreaks;
       this.emit({ type: 'stateChange' });
       this.invalidate();
       opts.onApply?.(this.getState(), all);
-    }, () => { this.dialog = null; });
+    }, () => { this.dialog = null; }, (v) => {
+      // live preview while a slider moves (Cancel puts it back)
+      this.volCandles = { ...v.volCandles };
+      if (v.type !== this.type) { this.type = v.type; this.recompute(); }
+      opts.onPreview?.(v.volCandles, v.type);
+      this.invalidate();
+    }, () => {
+      this.type = before.type; this.candles = before.candles; this.volCandles = before.volCandles;
+      this.recompute(); this.invalidate();
+      opts.onPreview?.(before.volCandles, before.type);
+    });
   }
 
   getState(): ChartState {
     return {
-      type: this.type, scaleMode: this.scaleMode, candles: { ...this.candles }, grid: this.grid, sessionBreaks: this.sessionBreaks,
+      type: this.type, scaleMode: this.scaleMode, candles: { ...this.candles }, grid: this.grid, sessionBreaks: this.sessionBreaks, volCandles: { ...this.volCandles },
       indicators: this.inds.map((x) => JSON.parse(JSON.stringify(x.st))),
       panes: this.panes.map((p) => ({ id: p.id, ratio: p.ratio })),
     };
@@ -239,6 +261,7 @@ export class Chart {
     if (s.type) this.type = s.type;
     if (s.scaleMode) this.scaleMode = s.scaleMode;
     if (s.candles) this.candles = { ...s.candles };
+    if (s.volCandles) this.volCandles = { base: clamp01(s.volCandles.base), effect: clamp01(s.volCandles.effect) };
     if (s.grid !== undefined) this.grid = s.grid;
     if (s.sessionBreaks !== undefined) this.sessionBreaks = s.sessionBreaks;
     if (s.indicators) {
@@ -1032,11 +1055,11 @@ export class Chart {
     // absolute: zooming or scrolling rescales to what is on screen.
     let vmax = 0;
     if (this.type === 'volume') for (let i = from; i <= to; i++) vmax = Math.max(vmax, this.bars[i].v);
-    const VOL_BASE = 0.35;
+    const { base, effect } = this.volCandles;
     const widthOf = (v: number) => {
       if (this.type !== 'volume' || !(vmax > 0)) return bw;
       const full = Math.max(1, sp * 0.94 - (sp > 4 ? 1 : 0));
-      return Math.max(Math.min(3, full), Math.round(full * (VOL_BASE + (1 - VOL_BASE) * Math.min(1, v / vmax))));
+      return Math.max(Math.min(2, full), Math.round(full * (base + (1 - base) * effect * Math.min(1, v / vmax))));
     };
     if (this.type === 'line' || this.type === 'area') {
       c.beginPath();
@@ -1419,6 +1442,25 @@ export class Chart {
         for (const s of this.compare) {
           const b0 = this.compareBase(s), v = this.compareAt(s, this.bars.length - 1, b0);
           if (v !== undefined) this.axisTag(this.yOf(p, v), `${(((v / this.base()) - 1) * 100).toFixed(2)}%`, s.color, '#0A1118');
+        }
+        // on-price indicators (VWAP, EMAs, ...): their latest value as a tag in their colour, while shown
+        {
+          const tags: { y: number; text: string; color: string }[] = [];
+          for (const x of this.inds) {
+            if (x.st.pane !== 'main' || !x.st.visible || x.def.special) continue;
+            if (x.def.intradayOnly && !isIntraday(this.interval)) continue;
+            for (const pl of x.def.plots) {
+              const a = x.out[pl.key], ps = x.st.plots[pl.key];
+              if (!a || !ps?.visible) continue;
+              const v = a[this.bars.length - 1];
+              if (!Number.isFinite(v)) continue;
+              const y = this.yOf(p, v);
+              if (y > p.top + 6 && y < p.top + p.h - 6) tags.push({ y, text: fmtPrice(v, this.precision), color: ps.color });
+            }
+          }
+          tags.sort((a, b) => a.y - b.y);
+          for (let k = 1; k < tags.length; k++) if (tags[k].y - tags[k - 1].y < 17) tags[k].y = tags[k - 1].y + 17;
+          for (const t of tags) this.axisTag(t.y, t.text, t.color, inkOn(t.color));
         }
         for (const l of this.orders) { const v = this.orderPreview?.id === l.id ? this.orderPreview.price : l.price; const y = this.yOf(p, v); if (y > p.top && y < p.top + p.h) this.axisTag(y, fmtPrice(v, this.precision), l.color, '#0A1118'); }
         const b = this.bars[this.bars.length - 1];
