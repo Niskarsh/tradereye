@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregate, heikinAshi, intervalLabel, indexAtOrBefore } from '../packages/candle-chart/src/data';
+import { aggregate, heikinAshi, intervalLabel, indexAtOrBefore, volumeFractions } from '../packages/candle-chart/src/data';
 import { NSE } from '../packages/candle-chart/src/theme';
 import { ema, rsi, sessionVwap, sma, prevDay } from '../packages/candle-chart/src/indicators/math';
 import { getIndicator, listIndicators } from '../packages/candle-chart/src/indicators/registry';
@@ -144,4 +144,20 @@ test('Algo levels are rebuilt from the model facts (distance in 10-min ATRs)', (
   assert.equal(by.poc, 199);
   assert.equal(by.vah, undefined);
   assert.equal(levelsFrom({ priceRs: null, atrPct: 1 }).length, 0);
+});
+
+test('volume candles: a sudden spike reaches full width and does not thin the candles before it', () => {
+  const calm = Array.from({ length: 60 }, (_, i) => 1000 + (i % 5) * 100);
+  const before = volumeFractions(calm, 0.2, 1);
+  const after = volumeFractions([...calm, 50_000], 0.2, 1);
+  for (let i = 0; i < 60; i++) assert.equal(after[i], before[i]); // earlier candles keep their width
+  assert.equal(after[60], 1); // the spike fills its slot
+  assert.ok(before[59] > 0.2 && before[59] < 1);
+  // base 1 = all full; effect 0 = all at the base
+  assert.ok(volumeFractions(calm, 1, 1).every((x) => x === 1));
+  assert.ok(volumeFractions(calm, 0.3, 0).every((x) => Math.abs(x - 0.3) < 1e-12));
+  // effect above 1 adds contrast: a quiet candle gets thinner, a full one stays full
+  const q = [...calm, 300], q1 = volumeFractions(q, 0.1, 1), q3 = volumeFractions(q, 0.1, 3);
+  assert.ok(q3[60] < q1[60]);
+  assert.equal(volumeFractions([...calm, 50_000], 0.1, 3)[60], 1);
 });

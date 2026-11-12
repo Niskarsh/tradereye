@@ -100,3 +100,21 @@ export function mergeBars(a: Bar[], b: Bar[]): Bar[] {
   for (const x of b) m.set(x.t, x);
   return [...m.values()].sort((x, y) => x.t - y.t);
 }
+
+/**
+ * Volume candles: each bar's body as a share of its slot (0..1). A bar is measured against the TYPICAL volume around it
+ * (the average of the `window` bars up to it), so a sudden huge bar reaches full width without making the others
+ * thinner, and nothing changes as the chart scrolls. `full` x typical = the whole share. `effect` up to 1 scales the
+ * share; above 1 it is a contrast curve (share^effect). `base` is every bar's minimum.
+ */
+export function volumeFractions(vol: number[], base: number, effect: number, window = 50, full = 2.5): Float64Array {
+  const n = vol.length, pre = new Float64Array(n + 1), out = new Float64Array(n);
+  for (let i = 0; i < n; i++) pre[i + 1] = pre[i] + (vol[i] || 0);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - window + 1), typical = (pre[i + 1] - pre[a]) / (i + 1 - a);
+    const share0 = typical > 0 ? Math.min(1, (vol[i] || 0) / typical / full) : 0.5;
+    const share = effect <= 1 ? effect * share0 : Math.pow(share0, effect);
+    out[i] = base + (1 - base) * share;
+  }
+  return out;
+}

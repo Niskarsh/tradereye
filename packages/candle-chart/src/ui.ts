@@ -372,7 +372,7 @@ export class ChartSettingsDialog {
     if (v.type === 'volume') {
       head('Volume candles');
       // two sliders, previewed on the chart as they move
-      const slider = (label: string, hint: string, key: keyof VolCandleStyle, min: number, max: number) => {
+      const slider = (label: string, hint: string, key: 'base' | 'effect', min: number, max: number) => {
         const wrap = el('div', { style: 'grid-column:1/-1;display:flex;flex-direction:column;gap:2px' });
         const top = el('div', { style: 'display:flex;justify-content:space-between' }, [el('span', {}, [label])]);
         const val = el('span', { style: `color:${th.accent};font-weight:600` }, [`${Math.round(v.volCandles[key] * 100)}%`]);
@@ -384,7 +384,15 @@ export class ChartSettingsDialog {
       };
       slider('Base thickness', 'Every candle\'s body before volume: share of its slot', 'base', 5, 100);
       slider('Volume effect', '0% = all the same width · 100% = width follows volume · above 100% = more contrast (quiet candles thinner)', 'effect', 0, 300);
-      body.appendChild(el('span', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px` }, ['A candle can be at most as wide as its slot: zoom in (mouse wheel / pinch) for bigger differences.']));
+      body.appendChild(el('span', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px` }, ['Each candle is measured against the typical volume of the 50 candles before it: a sudden spike just reaches full width and nothing else gets thinner.']));
+      // Equivolume: the slot grows instead of the body
+      const wcb = el('input', { type: 'checkbox' }) as HTMLInputElement;
+      wcb.checked = !!v.volCandles.widen;
+      wcb.addEventListener('change', () => { v.volCandles = { ...v.volCandles, widen: wcb.checked }; this.onPreview?.(this.v); });
+      body.appendChild(el('label', { style: 'grid-column:1/-1;display:flex;align-items:flex-start;gap:6px' }, [wcb, el('span', {}, [
+        'Widen slots with volume',
+        el('span', { style: `display:block;color:${th.textMuted};font-size:11px` }, ['Busy candles take more room and push their neighbours apart (Equivolume). Each candle is still its full interval; only the spacing on screen changes, so the time labels are no longer evenly spaced.']),
+      ])]));
     }
     head('Candle colours');
     const presets = el('div', { style: 'grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap' });

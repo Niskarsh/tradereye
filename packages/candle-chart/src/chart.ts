@@ -1,4 +1,4 @@
-import { heikinAshi, indexAtOrBefore, intervalLabel, intervalMinutes, intervalSeconds, isIntraday, localDayStart, localParts } from './data';
+import { heikinAshi, indexAtOrBefore, volumeFractions, intervalLabel, intervalMinutes, intervalSeconds, isIntraday, localDayStart, localParts } from './data';
 import { axisLabel, fmtCountdown, fmtPrice, fmtTime, fmtValue, fmtVolume } from './format';
 import { getIndicator, type IndicatorDef } from './indicators/registry';
 import { getTool, stroke, tag, type DrawEnv, type Pt } from './drawings/tools';
@@ -70,6 +70,10 @@ export class Chart {
   private scaleMode: ScaleMode = 'linear';
   private candles: CandleStyle;
   private volCandles: VolCandleStyle = { base: 0.35, effect: 1 };
+  /** volume candles: each bar's body as a share of its slot (0..1), and with `widen` each bar's slot weight and centre */
+  private volFrac: Float64Array = new Float64Array(0);
+  private slotW: Float64Array | null = null;
+  private centers: Float64Array | null = null;
   private grid = true;
   private sessionBreaks = true;
   private legendCollapsed = false;
@@ -233,13 +237,14 @@ export class Chart {
       if (v.type !== this.type) { this.type = v.type; this.recompute(); }
       this.candles = v.candles;
       this.volCandles = { ...v.volCandles }; this.grid = v.grid; this.sessionBreaks = v.sessionBreaks;
+      this.volLayout();
       this.emit({ type: 'stateChange' });
       this.invalidate();
       opts.onApply?.(this.getState(), all);
     }, () => { this.dialog = null; }, (v) => {
       // live preview while a slider moves (Cancel puts it back)
       this.volCandles = { ...v.volCandles };
-      if (v.type !== this.type) { this.type = v.type; this.recompute(); }
+      if (v.type !== this.type) { this.type = v.type; this.recompute(); } else this.volLayout();
       opts.onPreview?.(v.volCandles, v.type);
       this.invalidate();
     }, () => {
@@ -261,7 +266,7 @@ export class Chart {
     if (s.type) this.type = s.type;
     if (s.scaleMode) this.scaleMode = s.scaleMode;
     if (s.candles) this.candles = { ...s.candles };
-    if (s.volCandles) this.volCandles = { base: clamp01(s.volCandles.base), effect: Number.isFinite(s.volCandles.effect) ? Math.max(0, Math.min(3, s.volCandles.effect)) : 1 };
+    if (s.volCandles) this.volCandles = { base: clamp01(s.volCandles.base), effect: Number.isFinite(s.volCandles.effect) ? Math.max(0, Math.min(3, s.volCandles.effect)) : 1, widen: !!s.volCandles.widen };
     if (s.grid !== undefined) this.grid = s.grid;
     if (s.sessionBreaks !== undefined) this.sessionBreaks = s.sessionBreaks;
     if (s.indicators) {
@@ -440,8 +445,55 @@ export class Chart {
       try { x.out = x.def.intradayOnly && !intraday ? {} : x.def.compute(this.raw, x.st.inputs, ctx); }
       catch { x.out = {}; }
     }
+    this.volLayout();
     this.renderLegendStructure();
   }
+
+  /**
+   * Volume candles. Each candle is measured against the TYPICAL volume around it (the average of the 50 candles up to
+   * it), not the biggest on screen: a sudden huge candle just reaches full width and nothing else gets thinner, and
+   * widths do not change as you scroll. 2.5x the typical volume = a full share. `effect` scales it (above 1: a
+   * contrast curve), `base` is every candle's minimum. With `widen` the share sets the slot's width instead (Equivolume).
+   */
+  private volLayout() {
+    const n = this.bars.length;
+    this.slotW = null; this.centers = null;
+    if (this.type !== 'volume' || !n) { this.volFrac = new Float64Array(0); return; }
+    const { base, effect, widen } = this.volCandles;
+    const frac = volumeFractions(this.bars.map((b) => b.v || 0), base, effect);
+    this.volFrac = frac;
+    if (!widen) return;
+    // slots: at least 15% of an average slot; scaled so the average slot is 1 (zoom keeps its meaning)
+    const w = new Float64Array(n);
+    let sum = 0;
+    for (let i = 0; i < n; i++) { w[i] = Math.max(0.15, frac[i]); sum += w[i]; }
+    const k = n / sum, centers = new Float64Array(n);
+    let acc = 0;
+    for (let i = 0; i < n; i++) { w[i] *= k; centers[i] = acc + w[i] / 2; acc += w[i]; }
+    this.slotW = w; this.centers = centers;
+  }
+  /** bar index (may be fractional or beyond the data) -> position in slot units; plain i when slots are equal */
+  private u(i: number): number {
+    const c = this.centers;
+    if (!c || !c.length) return i;
+    const n = c.length;
+    if (i <= 0) return c[0] + i;
+    if (i >= n - 1) return c[n - 1] + (i - (n - 1));
+    const k = Math.floor(i);
+    return c[k] + (c[k + 1] - c[k]) * (i - k);
+  }
+  private uInv(u: number): number {
+    const c = this.centers;
+    if (!c || !c.length) return u;
+    const n = c.length;
+    if (u <= c[0]) return u - c[0];
+    if (u >= c[n - 1]) return n - 1 + (u - c[n - 1]);
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] <= u) lo = m; else hi = m; }
+    return lo + (u - c[lo]) / (c[hi] - c[lo]);
+  }
+  /** a bar's slot width in px */
+  private slot(i: number): number { return (this.slotW?.[i] ?? 1) * this.spacing; }
 
   private pushUndo() { this.undoStack.push(JSON.stringify(this.drawings)); if (this.undoStack.length > 100) this.undoStack.shift(); this.redoStack = []; }
   private emitDrawings() { this.emit({ type: 'drawingsChange' }); }
@@ -468,8 +520,8 @@ export class Chart {
 
   /* ======================= coordinates ======================= */
 
-  private x(i: number) { return this.plotW - (this.right - i) * this.spacing; }
-  private idx(x: number) { return this.right - (this.plotW - x) / this.spacing; }
+  private x(i: number) { return this.plotW - (this.u(this.right) - this.u(i)) * this.spacing; }
+  private idx(x: number) { return this.uInv(this.u(this.right) - (this.plotW - x) / this.spacing); }
 
   /** a time -> a (possibly fractional, possibly beyond the data) bar index */
   private tIdx(t: number): number {
@@ -577,7 +629,7 @@ export class Chart {
         const [a, b] = [...this.touches.values()];
         if (a && b) {
           this.spacing = Math.max(MIN_SPACING, Math.min(MAX_SPACING, dr.spacing * (Math.max(10, Math.abs(a.x - b.x)) / dr.d0)));
-          this.right = dr.i0 + (this.plotW - dr.x0) / this.spacing;
+          this.right = this.uInv(this.u(dr.i0) + (this.plotW - dr.x0) / this.spacing);
           this.clampRight();
           this.invalidate();
         }
@@ -612,10 +664,10 @@ export class Chart {
         if (pane) { const k = Math.exp(e.deltaY * 0.002), mid = (pane.max + pane.min) / 2, half = ((pane.max - pane.min) / 2) * k; pane.auto = false; pane.min = mid - half; pane.max = mid + half; this.invalidate(); }
         return;
       }
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { this.right += (e.shiftKey ? e.deltaY : e.deltaX) / this.spacing; this.clampRight(); this.invalidate(); return; }
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { this.right = this.uInv(this.u(this.right) + (e.shiftKey ? e.deltaY : e.deltaX) / this.spacing); this.clampRight(); this.invalidate(); return; }
       const i0 = this.idx(x);
       this.spacing = Math.max(MIN_SPACING, Math.min(MAX_SPACING, this.spacing * Math.exp(-e.deltaY * 0.0015)));
-      this.right = i0 + (this.plotW - x) / this.spacing;
+      this.right = this.uInv(this.u(i0) + (this.plotW - x) / this.spacing);
       this.clampRight();
       this.invalidate();
     }, { passive: false });
@@ -627,7 +679,7 @@ export class Chart {
       if (k === 'delete' || k === 'backspace') { if (this.selected) { e.preventDefault(); this.deleteSelected(); } return; }
       if (k === 'escape') { if (this.creating || this.tool) { this.creating = null; this.setTool(null); this.emit({ type: 'toolDone' }); } else if (this.selected) { this.selected = null; this.drawingBar.hide(); this.emit({ type: 'select', drawing: null }); this.invalidate(); } return; }
       if (e.altKey && k === 'r') { e.preventDefault(); this.resetScales(); }
-      if (k === 'arrowleft' || k === 'arrowright') { e.preventDefault(); this.right += (k === 'arrowleft' ? -1 : 1) * Math.max(1, 40 / this.spacing); this.clampRight(); this.invalidate(); }
+      if (k === 'arrowleft' || k === 'arrowright') { e.preventDefault(); this.right = this.uInv(this.u(this.right) + (k === 'arrowleft' ? -1 : 1) * Math.max(1, 40 / this.spacing)); this.clampRight(); this.invalidate(); }
     });
   }
 
@@ -749,7 +801,7 @@ export class Chart {
     if (dr) {
       switch (dr.kind) {
         case 'pan': {
-          this.right = dr.right - (x - dr.x) / this.spacing;
+          this.right = this.uInv(this.u(dr.right) - (x - dr.x) / this.spacing);
           this.clampRight();
           if (!dr.pane.auto) { const dv = ((y - dr.y) / dr.pane.h) * (dr.max - dr.min); dr.pane.min = dr.min + dv; dr.pane.max = dr.max + dv; }
           this.root.style.cursor = 'grabbing';
@@ -1050,20 +1102,13 @@ export class Chart {
   private drawSeries(pane: Pane, from: number, to: number) {
     const c = this.c, th = this.theme, sp = this.spacing;
     const bw = Math.max(1, Math.round(sp * 0.72) - (sp > 4 ? 1 : 0));
-    // volume candles (TradingView's): every candle gets a base body (a third of its slot, so it still reads as a candle),
-    // and the rest of the slot fills in proportion to its volume against the biggest volume in view. Relative, not
-    // absolute: zooming or scrolling rescales to what is on screen.
-    let vmax = 0;
-    if (this.type === 'volume') for (let i = from; i <= to; i++) vmax = Math.max(vmax, this.bars[i].v);
-    const { base, effect } = this.volCandles;
-    const widthOf = (v: number) => {
-      if (this.type !== 'volume' || !(vmax > 0)) return bw;
+    // volume candles: equal slots -> the body takes its share of the slot; widened slots -> the body fills its slot
+    const widen = !!this.slotW;
+    const widthOf = (i: number) => {
+      if (this.type !== 'volume' || !this.volFrac.length) return bw;
+      if (widen) { const sl = this.slot(i); return Math.max(1, Math.round(sl * 0.88 - (sl > 4 ? 1 : 0))); }
       const full = Math.max(1, sp * 0.94 - (sp > 4 ? 1 : 0));
-      // effect up to 1: volume fills that much of the rest of the slot; above 1: a contrast curve (quiet candles get
-      // thinner, the busiest still fill their slot)
-      const ratio = Math.min(1, v / vmax);
-      const share = effect <= 1 ? effect * ratio : Math.pow(ratio, effect);
-      return Math.max(Math.min(2, full), Math.round(full * (base + (1 - base) * share)));
+      return Math.max(Math.min(2, full), Math.round(full * (this.volFrac[i] ?? 1)));
     };
     if (this.type === 'line' || this.type === 'area') {
       c.beginPath();
@@ -1096,7 +1141,7 @@ export class Chart {
       c.fillStyle = up ? cs.upWick : cs.downWick;
       c.fillRect(x, Math.round(yh), 1, Math.max(1, Math.round(yl) - Math.round(yh)));
       const top = Math.round(Math.min(yo, yc)), h = Math.max(1, Math.round(Math.abs(yc - yo)));
-      const w = widthOf(b.v);
+      const w = widthOf(i);
       const left = x - Math.floor(w / 2);
       const hollow = this.type === 'hollow' && up;
       c.fillStyle = hollow ? th.bg : up ? cs.upBody : cs.downBody;
@@ -1122,8 +1167,9 @@ export class Chart {
       const up = b.c >= b.o, p = up ? ps.up : ps.down;
       if (!p?.visible) continue;
       const vh = (b.v / max) * h;
+      const cw = this.slotW ? Math.max(1, Math.round(this.slot(i) * 0.88 - 1)) : bw;
       c.fillStyle = p.color;
-      c.fillRect(Math.round(this.x(i)) - Math.floor(bw / 2), base - vh, bw, vh);
+      c.fillRect(Math.round(this.x(i)) - Math.floor(cw / 2), base - vh, cw, vh);
     }
     const ma = x.out.ma;
     if (ma && ps.ma?.visible) {
