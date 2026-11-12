@@ -1026,19 +1026,14 @@ export class Chart {
   private drawSeries(pane: Pane, from: number, to: number) {
     const c = this.c, th = this.theme, sp = this.spacing;
     const bw = Math.max(1, Math.round(sp * 0.72) - (sp > 4 ? 1 : 0));
-    // volume candles: width = the bar's volume against the busy bars in view (the 95th percentile fills the slot, so
-    // one opening spike does not squash the rest into slivers); never under a fifth of the slot
+    // volume candles (TradingView's): each candle's width is its volume relative to the biggest volume in view; the
+    // busiest candle fills its slot, a quiet one is thin (never under 2 px, so it can still be seen)
     let vmax = 0;
-    if (this.type === 'volume') {
-      const vs: number[] = [];
-      for (let i = from; i <= to; i++) vs.push(this.bars[i].v);
-      vs.sort((a, b) => a - b);
-      vmax = vs[Math.min(vs.length - 1, Math.floor(vs.length * 0.95))] ?? 0;
-    }
+    if (this.type === 'volume') for (let i = from; i <= to; i++) vmax = Math.max(vmax, this.bars[i].v);
     const widthOf = (v: number) => {
       if (this.type !== 'volume' || !(vmax > 0)) return bw;
       const full = Math.max(1, sp * 0.94 - (sp > 4 ? 1 : 0));
-      return Math.max(1, Math.round(full * Math.max(0.2, Math.min(1, v / vmax))));
+      return Math.max(Math.min(2, full), Math.round(full * (v / vmax)));
     };
     if (this.type === 'line' || this.type === 'area') {
       c.beginPath();
