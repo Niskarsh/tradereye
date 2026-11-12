@@ -296,7 +296,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   const pane = (cfg: PaneCfg) => (
     <ChartPane key={cfg.id} cfg={cfg} active={cfg.id === active?.id} token={token}
       extCross={layout.syncCrosshair && cross.from !== cfg.id ? cross.t : null}
-      compareNifty={layout.compareNifty} magnet={layout.magnet} tool={tool} drawingsHidden={hidden}
+      compareNifty={cfg.compareNifty ?? false} magnet={layout.magnet} tool={tool} drawingsHidden={hidden}
       algo={algoRelevant ? algo : null} showAlgo={layout.showAlgo} algoSlot={algoSlot} algoParts={layout.algoParts ?? ALGO_PARTS_DEFAULT}
       maximized={maxId === cfg.id} compact={mobile}
       orderLines={cfg.symbol === symbol ? trade.lines : []} linesRev={trade.rev} positionQty={cfg.symbol === symbol ? trade.book?.position?.netQty : undefined}
@@ -320,6 +320,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   };
   const settings = () => activeChart?.openSettings({
     allOption: layout.panes.length > 1,
+    title: active ? `${active.symbol} ${intervalLabel(active.interval)}` : undefined,
     onApply: (st, all) => {
       if (active) setPane(active.id, { state: activeChart.getState() });
       if (all) for (const [id, c] of charts.current) if (id !== active?.id) { c.setState({ type: st.type, candles: st.candles, grid: st.grid, sessionBreaks: st.sessionBreaks, volCandles: st.volCandles }); setPane(id, { state: c.getState() }); }
@@ -348,7 +349,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
         ))}</Menu>
         <span className="tb-sep" />
         <button className="tb" onClick={() => setPicker(true)} title="Indicators (volume too)">ƒx Indicators</button>
-        <button className={`tb ${layout.compareNifty ? 'tb-on' : ''}`} onClick={() => update((l) => ({ ...l, compareNifty: !l.compareNifty }))} title="Compare with Nifty 500 (price scale switches to %)">+ Nifty</button>
+        <button className={`tb ${active?.compareNifty ? 'tb-on' : ''}`} onClick={() => active && setPane(active.id, { compareNifty: !active.compareNifty })} title="Compare the selected chart with Nifty 500 (its price scale switches to %)">+ Nifty</button>
         <button className={`tb ${layout.showAlgo ? 'tb-on' : ''}`} onClick={() => { if (mobile && layout.showAlgo && !sheet) { setSheet(true); return; } setSheet(mobile && !layout.showAlgo); update((l) => ({ ...l, showAlgo: !l.showAlgo })); }}
           title={algoRelevant ? 'Show / hide what Algo Live saw (dots, levels, order, reasons)' : `${symbol} is not on Algo Live's list on ${date}`}>
           Algo {algoRelevant ? (layout.showAlgo ? 'on' : 'off') : '—'}

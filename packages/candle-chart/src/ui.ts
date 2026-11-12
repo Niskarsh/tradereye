@@ -318,9 +318,8 @@ const TYPES: [ChartType, string][] = [['candles', 'Candles'], ['volume', 'Volume
 export class ChartSettingsDialog {
   private box: HTMLDivElement;
   private v: ChartSettings;
-  private all = true;
   private applied = false;
-  constructor(host: HTMLElement, private th: Theme, v: ChartSettings, private allOption: boolean, private onApply: (v: ChartSettings, all: boolean) => void, private onClose: () => void,
+  constructor(host: HTMLElement, private th: Theme, v: ChartSettings, private allOption: boolean | string, private onApply: (v: ChartSettings, all: boolean) => void, private onClose: () => void,
     private onPreview?: (v: ChartSettings) => void, private onCancel?: () => void) {
     this.v = JSON.parse(JSON.stringify(v));
     this.box = dialogScrim(th, () => this.close());
@@ -335,7 +334,8 @@ export class ChartSettingsDialog {
     const th = this.th, v = this.v;
     this.box.innerHTML = '';
     const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(380px,94vw);max-height:calc(100dvh - 24px);overflow:auto;color:${th.text};font:${th.font};font-size:12.5px;box-shadow:0 20px 50px rgba(0,0,0,.5)`, class: 'cc-scroll cc-float-dialog' });
-    card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, ['Chart settings']));
+    card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, [
+      'Chart settings', ...(typeof this.allOption === 'string' ? [el('span', { style: `color:${th.textMuted};font-weight:400;margin-left:6px` }, [`· ${this.allOption}`])] : [])]));
     const body = el('div', { style: 'padding:10px 14px;display:grid;grid-template-columns:1fr auto auto;gap:8px 12px;align-items:center' });
     const head = (t: string) => body.appendChild(el('div', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-top:4px` }, [t]));
     head('Chart type');
@@ -392,14 +392,22 @@ export class ChartSettingsDialog {
     };
     check('Grid lines', () => v.grid, (b) => { v.grid = b; });
     check('Session breaks (a line between days)', () => v.sessionBreaks, (b) => { v.sessionBreaks = b; });
-    if (this.allOption) check('Apply to every chart in the layout', () => this.all, (b) => { this.all = b; });
     card.appendChild(body);
-    const foot = el('div', { style: `display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;border-top:1px solid ${th.panelBorder}` });
+    // OK = this chart only (the one you clicked last); "Apply to all charts" = every chart in the layout
+    const foot = el('div', { style: `display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid ${th.panelBorder}` });
+    const left = el('div');
+    if (this.allOption) {
+      const allBtn = el('button', { title: 'Apply these settings to every chart in the layout', style: `${btnCss(th)};border:1px solid ${th.panelBorder}` }, ['Apply to all charts']);
+      allBtn.addEventListener('click', () => { this.applied = true; this.onApply(this.v, true); this.close(); });
+      left.appendChild(allBtn);
+    }
+    const right = el('div', { style: 'display:flex;gap:8px' });
     const cancel = el('button', { style: btnCss(th) }, ['Cancel']);
     cancel.addEventListener('click', () => this.close());
-    const ok = el('button', { style: `${btnCss(th)};background:${th.accent};color:#0A1118;font-weight:600;padding:5px 14px` }, ['OK']);
-    ok.addEventListener('click', () => { this.applied = true; this.onApply(this.v, this.allOption && this.all); this.close(); });
-    foot.append(cancel, ok);
+    const ok = el('button', { title: 'Apply to this chart only', style: `${btnCss(th)};background:${th.accent};color:#0A1118;font-weight:600;padding:5px 14px` }, ['OK']);
+    ok.addEventListener('click', () => { this.applied = true; this.onApply(this.v, false); this.close(); });
+    right.append(cancel, ok);
+    foot.append(left, right);
     card.appendChild(foot);
     this.box.appendChild(card);
   }

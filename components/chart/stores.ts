@@ -7,7 +7,7 @@ import { fetchT } from '@/lib/chart/fetchTimeout';
  * the layout and each symbol's drawings. Drawings belong to the symbol, so every chart showing it shares them.
  */
 
-export interface PaneCfg { id: string; symbol: string; interval: string; state?: Partial<ChartState> }
+export interface PaneCfg { id: string; symbol: string; interval: string; state?: Partial<ChartState>; /** Nifty 500 compare line on this chart */ compareNifty?: boolean }
 export interface Col { w: number; rows: { h: number; pane: string }[] }
 /** which parts of Algo Live's view go on the charts */
 export interface AlgoParts { dots: boolean; levels: boolean; orders: boolean }
