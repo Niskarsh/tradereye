@@ -1,4 +1,4 @@
-import type { Theme, TimeOpts } from './types';
+import type { CandleStyle, Theme, TimeOpts } from './types';
 
 /** Dark theme, close to TradingView's dark chart. Pass your own to `new Chart(el, { theme })`. */
 export const DARK: Theme = {
@@ -21,4 +21,16 @@ export const NSE: TimeOpts = { tzOffsetSec: 19800, sessionOpenMin: 555, sessionC
 /** Colours offered for drawings and indicator plots (TradingView's palette order: bright first). */
 export const PALETTE = [
   '#DFB15B', '#1DC995', '#E03F53', '#8FA8C2', '#E8873A', '#E8EAF0', '#2962FF', '#9C27B0', '#00BCD4', '#FFEB3B', '#FF9800', '#787B86',
+];
+
+/** Green / red candles from a theme. */
+export const classicCandles = (t: Theme): CandleStyle => ({ upBody: t.up, downBody: t.down, upBorder: t.up, downBorder: t.down, upWick: t.upWick, downWick: t.downWick, border: true });
+
+/** White up, black down, everything outlined in white: reads well on a dark background. */
+export const MONO_CANDLES: CandleStyle = { upBody: '#E8EAF0', downBody: '#05090D', upBorder: '#E8EAF0', downBorder: '#E8EAF0', upWick: '#E8EAF0', downWick: '#E8EAF0', border: true };
+
+export const CANDLE_PRESETS: { id: string; label: string; style: (t: Theme) => CandleStyle }[] = [
+  { id: 'mono', label: 'White / black', style: () => MONO_CANDLES },
+  { id: 'classic', label: 'Green / red', style: classicCandles },
+  { id: 'hollow-mono', label: 'Outline only', style: () => ({ ...MONO_CANDLES, upBody: 'rgba(0,0,0,0)', downBody: '#E8EAF0' }) },
 ];

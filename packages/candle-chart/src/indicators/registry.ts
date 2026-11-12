@@ -31,7 +31,7 @@ export interface IndicatorDef {
   /** a fixed value range for the pane scale (RSI: 0..100) */
   range?: [number, number];
   /** drawn in a special way by the chart (visible range volume profile) */
-  special?: 'vpvr';
+  special?: 'vpvr' | 'volume';
   /** only for intraday charts */
   intradayOnly?: boolean;
   compute(bars: Bar[], inp: Record<string, number | string | boolean>, ctx: Ctx): Record<string, number[]>;
@@ -169,7 +169,11 @@ const defs: IndicatorDef[] = [
     plots: [{ key: 'up', label: 'Up volume', color: 'rgba(29,201,149,0.35)' }, { key: 'down', label: 'Down volume', color: 'rgba(224,63,83,0.35)' }, { key: 'poc', label: 'POC', color: C.gold }],
     compute: () => ({}) },
   // ---------------- volume
-  { id: 'volume', name: 'Volume', short: 'Vol', category: 'Volume', overlay: false, inputs: [{ key: 'ma', label: 'MA length (0 = off)', type: 'int', default: 20, min: 0, max: 500 }],
+  { id: 'vol', name: 'Volume (on the price pane)', short: 'Volume', category: 'Volume', overlay: true, special: 'volume',
+    inputs: [{ key: 'ma', label: 'MA length (0 = off)', type: 'int', default: 0, min: 0, max: 500 }, { key: 'height', label: 'Height (% of pane)', type: 'int', default: 18, min: 5, max: 60 }],
+    plots: [{ key: 'up', label: 'Up volume', color: 'rgba(232,234,240,0.28)' }, { key: 'down', label: 'Down volume', color: 'rgba(124,136,153,0.32)' }, { key: 'ma', label: 'Volume MA', color: C.gold, width: 1 }],
+    compute: (b, i) => { const v = b.map((x) => x.v); return { ma: N(i.ma) > 0 ? sma(v, N(i.ma)) : v.map(() => NaN) }; } },
+  { id: 'volume', name: 'Volume (own pane)', short: 'Vol', category: 'Volume', overlay: false, inputs: [{ key: 'ma', label: 'MA length (0 = off)', type: 'int', default: 20, min: 0, max: 500 }],
     plots: [{ key: 'vol', label: 'Volume', color: C.steel, kind: 'columns', signColors: ['rgba(29,201,149,0.5)', 'rgba(224,63,83,0.5)'] }, { key: 'ma', label: 'Volume MA', color: C.gold, width: 1 }],
     compute: (b, i) => { const v = b.map((x) => x.v); return { vol: v.map((x, k) => (b[k].c >= b[k].o ? x : -x)), ma: N(i.ma) > 0 ? sma(v, N(i.ma)) : v.map(() => NaN) }; } },
   { id: 'rvol', name: 'Relative Volume at Time', short: 'RVOL', category: 'Volume', overlay: false, intradayOnly: true,

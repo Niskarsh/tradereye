@@ -2,6 +2,7 @@
 import { X } from 'lucide-react';
 import type { AlgoView } from '@/lib/chart/algo';
 import type { FactPush } from '@/lib/algoLive/why';
+import type { AlgoParts } from './stores';
 
 const r = (v: number | null | undefined, d = 4) => (v === null || v === undefined ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(d)}R`);
 const val = (v: number | null) => (v === null ? '—' : Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
@@ -21,7 +22,7 @@ function Push({ p, up }: { p: FactPush; up: boolean }) {
 }
 
 /** What Algo Live saw for this stock: every close, the bar, the reasons at the chosen close, its order. */
-export function AlgoPanel({ view: v, slot, onSlot, onClose }: { view: AlgoView; slot: number | null; onSlot: (s: number) => void; onClose: () => void }) {
+export function AlgoPanel({ view: v, slot, onSlot, onClose, parts, onParts }: { view: AlgoView; slot: number | null; onSlot: (s: number) => void; onClose: () => void; parts: AlgoParts; onParts: (p: AlgoParts) => void }) {
   const sel = v.closes.find((c) => c.slot === slot);
   return (
     <aside className="flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-brand-section text-xs">
@@ -37,6 +38,12 @@ export function AlgoPanel({ view: v, slot, onSlot, onClose }: { view: AlgoView; 
         <button onClick={onClose} title="Hide Algo Live (the chart stays clean)" className="text-ink-3 hover:text-white"><X className="size-4" /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line px-3 py-2 text-[11px]">
+          <span className="text-ink-3">On the charts:</span>
+          {([['dots', 'Close dots'], ['levels', 'Levels'], ['orders', 'Order lines']] as const).map(([k, l]) => (
+            <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={parts[k]} onChange={(e) => onParts({ ...parts, [k]: e.target.checked })} />{l}</label>
+          ))}
+        </div>
         <div className="px-3 pt-2 text-[11px] text-ink-3">
           Bar to clear: <span className="font-mono text-ink">{r(v.bar)}</span>{v.standAside ? ' · standing aside this month' : ''}
         </div>

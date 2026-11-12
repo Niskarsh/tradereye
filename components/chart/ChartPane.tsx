@@ -4,7 +4,7 @@ import { Maximize2, Minimize2 } from 'lucide-react';
 import { aggregate, Chart, intervalMinutes, isIntraday, NSE, type Annotations, type Bar, type Level, type Marker } from '@/packages/candle-chart/src';
 import { chunkDays, seriesFor, type SymbolSeries } from '@/lib/chart/series';
 import type { AlgoView } from '@/lib/chart/algo';
-import { getDrawings, onDrawings, setDrawings, type PaneCfg } from './stores';
+import { ALGO_PARTS_DEFAULT, getDrawings, onDrawings, setDrawings, type AlgoParts, type PaneCfg } from './stores';
 
 export interface PaneProps {
   cfg: PaneCfg;
@@ -18,6 +18,7 @@ export interface PaneProps {
   algo: AlgoView | null;
   showAlgo: boolean;
   algoSlot: number | null;
+  algoParts?: AlgoParts;
   maximized: boolean;
   onActivate(): void;
   onCfg(patch: Partial<PaneCfg>): void;
@@ -54,12 +55,13 @@ async function ensureIntraday(s: SymbolSeries, days: number) {
 }
 
 /** Algo Live on the chart: a dot at each close (score / bar / rank in its tooltip), the levels it read, its order. */
-export function algoAnnotations(v: AlgoView, slot: number | null, intraday = true): Annotations {
+export function algoAnnotations(v: AlgoView, slot: number | null, intraday = true, parts: AlgoParts = ALGO_PARTS_DEFAULT): Annotations {
   if (!intraday) {
+    if (!parts.orders) return {};
     // a day / week bar holds every close at once: only the trade itself, as one marker
     return { markers: v.orders.map((o) => ({ t: Math.floor(o.sentAt / 1000), position: o.side === 'short' ? 'above' : 'below', color: '#E03F53', shape: o.side === 'short' ? 'arrowDown' : 'arrowUp', text: `Algo ${o.side}`, tooltip: `Algo Live ${o.side} ${o.qty} at ${o.price} (${o.time})\nStop ${o.stop} · target ${o.target}\n${o.status}` })) };
   }
-  const markers: Marker[] = v.closes.map((c) => {
+  const markers: Marker[] = !parts.dots ? [] : v.closes.map((c) => {
     const tip = [
       `${c.time} close${c.slot === 10 ? ' (shortlist)' : ''}`,
       `Score ${fmtR(c.scoreR)}${v.bar !== null ? ` · bar ${fmtR(v.bar)}` : ''}`,
@@ -76,8 +78,8 @@ export function algoAnnotations(v: AlgoView, slot: number | null, intraday = tru
   });
   const levels: Level[] = [];
   const sel = v.closes.find((c) => c.slot === slot) ?? null;
-  if (sel?.levels) for (const l of sel.levels) levels.push({ price: l.price, color: LEVEL_COLORS[l.key] ?? '#8FA8C2', label: `${l.label} @${sel.time}`, dash: l.key.startsWith('ema') ? 'dotted' : 'dashed', from: closeT(v.date, sel.slot) - 60 });
-  for (const o of v.orders) {
+  if (parts.levels && sel?.levels) for (const l of sel.levels) levels.push({ price: l.price, color: LEVEL_COLORS[l.key] ?? '#8FA8C2', label: `${l.label} @${sel.time}`, dash: l.key.startsWith('ema') ? 'dotted' : 'dashed', from: closeT(v.date, sel.slot) - 60 });
+  for (const o of parts.orders ? v.orders : []) {
     const from = Math.floor(o.sentAt / 1000);
     levels.push({ price: o.avgPrice || o.price, color: '#E8EAF0', label: `Algo ${o.side} ${o.qty}`, dash: 'solid', width: 2, from });
     levels.push({ price: o.stop, color: '#E03F53', label: 'Algo stop', dash: 'solid', from });
@@ -174,9 +176,9 @@ export function ChartPane(p: PaneProps) {
   useEffect(() => { if (p.active) chart.current?.setTool(p.tool); else chart.current?.setTool(null); }, [p.tool, p.active]);
   useEffect(() => {
     const c = chart.current!;
-    c.setAnnotations('algo', p.algo && p.algo.symbol === symbol ? algoAnnotations(p.algo, p.algoSlot, isIntraday(interval)) : null);
+    c.setAnnotations('algo', p.algo && p.algo.symbol === symbol ? algoAnnotations(p.algo, p.algoSlot, isIntraday(interval), p.algoParts) : null);
     c.setLayerVisible('algo', p.showAlgo);
-  }, [p.algo, p.algoSlot, p.showAlgo, symbol, interval]);
+  }, [p.algo, p.algoSlot, p.algoParts, p.showAlgo, symbol, interval]);
 
   return (
     <div className={`group relative h-full w-full ${p.active ? 'ring-1 ring-inset ring-brand-accent/70' : ''}`} onPointerDownCapture={() => p.onActivate()}>

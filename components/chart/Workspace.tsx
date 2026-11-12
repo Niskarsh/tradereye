@@ -1,14 +1,14 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, ChevronDown, ExternalLink, Search, X } from 'lucide-react';
-import { intervalLabel, listIndicators, listTools, type Chart, type ChartType } from '@/packages/candle-chart/src';
+import { intervalLabel, listIndicators, listTools, MONO_CANDLES, type Chart, type ChartType } from '@/packages/candle-chart/src';
 import { useAuth } from '@/context/AuthContext';
 import { sharedFeed, type FeedStatus } from '@/lib/chart/feed';
 import type { AlgoView } from '@/lib/chart/algo';
 import { ChartPane } from './ChartPane';
 import { AlgoPanel } from './AlgoPanel';
 import { ToolIcon } from './icons';
-import { colsFor, defaultLayout, loadLayout, paneId, PRESETS, saveLayout, type Layout, type PaneCfg } from './stores';
+import { ALGO_PARTS_DEFAULT, colsFor, defaultLayout, loadLayout, paneId, PRESETS, saveLayout, type Layout, type PaneCfg } from './stores';
 
 const INTERVALS = ['1', '3', '5', '10', '15', '30', '60', '120', '240', 'D', 'W', 'M'];
 const QUICK = ['1', '5', '10', '15', '60', 'D', 'W'];
@@ -147,6 +147,8 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
     let done = false;
     const apply = (l: Layout) => {
       const lay: Layout = JSON.parse(JSON.stringify(l));
+      // charts saved before candle colours existed get the white / black candles
+      lay.panes = lay.panes.map((p) => (p.state?.candles ? p : { ...p, state: { ...p.state, candles: { ...MONO_CANDLES } } }));
       if (initialSymbol) lay.panes = lay.panes.map((p) => (lay.syncSymbol || p === lay.panes[0] ? { ...p, symbol: initialSymbol } : p));
       if (initialSymbol && algoDate) lay.showAlgo = true;
       setLayout(lay);
@@ -264,7 +266,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
     <ChartPane key={cfg.id} cfg={cfg} active={cfg.id === active?.id} token={token}
       extCross={layout.syncCrosshair && cross.from !== cfg.id ? cross.t : null}
       compareNifty={layout.compareNifty} magnet={layout.magnet} tool={tool} drawingsHidden={hidden}
-      algo={algoRelevant ? algo : null} showAlgo={layout.showAlgo} algoSlot={algoSlot}
+      algo={algoRelevant ? algo : null} showAlgo={layout.showAlgo} algoSlot={algoSlot} algoParts={layout.algoParts ?? ALGO_PARTS_DEFAULT}
       maximized={maxId === cfg.id}
       onActivate={() => setActiveId(cfg.id)}
       onCfg={(patch) => setPane(cfg.id, patch)}
@@ -308,7 +310,11 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
         <Menu label="Scale" title="Price scale">{(close) => (['linear', 'log', 'percent'] as const).map((m) => (
           <button key={m} onClick={() => { activeChart?.setScaleMode(m); close(); }} className="block w-full rounded px-3 py-1.5 text-left text-sm capitalize hover:bg-white/5">{m === 'linear' ? 'Regular' : m === 'log' ? 'Logarithmic' : 'Percent'}</button>
         ))}</Menu>
-        <button className="tb" onClick={() => activeChart?.setVolumeVisible(!(activeChart.getState().showVolume ?? true))} title="Volume on the price pane">Vol</button>
+        <button className={`tb ${activeChart?.hasVolume() ? 'tb-on' : ''}`} onClick={() => { activeChart?.setVolumeVisible(!activeChart.hasVolume()); force((x) => x + 1); }} title="Volume on the price pane (hover its legend line to hide, set up or remove it)">Vol</button>
+        <button className="tb" title="Chart settings: candle colours, borders, wicks, grid" onClick={() => activeChart?.openSettings({
+          allOption: layout.panes.length > 1,
+          onApply: (st, all) => { if (all) for (const [id, c] of charts.current) if (id !== active?.id && st.candles) { c.setState({ candles: st.candles, grid: st.grid, sessionBreaks: st.sessionBreaks }); setPane(id, { state: c.getState() }); } },
+        })}>⚙ Settings</button>
         <span className="tb-sep" />
         <button className={`tb ${layout.showAlgo ? 'tb-on' : ''}`} onClick={() => update((l) => ({ ...l, showAlgo: !l.showAlgo }))}
           title={algoRelevant ? 'Show / hide what Algo Live saw (dots, levels, order, reasons)' : `${symbol} is not on Algo Live's list on ${date}`}>
@@ -400,7 +406,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
 
         {/* Algo Live */}
         {layout.showAlgo && algoRelevant && algo && (
-          <AlgoPanel view={algo} slot={algoSlot} onSlot={pickSlot} onClose={() => update((l) => ({ ...l, showAlgo: false }))} />
+          <AlgoPanel view={algo} slot={algoSlot} onSlot={pickSlot} parts={layout.algoParts ?? ALGO_PARTS_DEFAULT} onParts={(algoParts) => update((l) => ({ ...l, algoParts }))} onClose={() => update((l) => ({ ...l, showAlgo: false }))} />
         )}
       </div>
       {algoErr && layout.showAlgo && <p className="border-t border-line px-3 py-1 text-[11px] text-data-red-text">Algo Live view: {algoErr}</p>}

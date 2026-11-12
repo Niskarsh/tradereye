@@ -37,7 +37,7 @@ export interface Drawing { id: string; type: string; points: Anchor[]; style: Dr
 export interface IndicatorState {
   id: string; defId: string; inputs: Record<string, number | string | boolean>;
   /** per plot: colour, width, shown */
-  plots: Record<string, { color: string; width: number; visible: boolean }>;
+  plots: Record<string, { color: string; width: number; visible: boolean; dash?: 'solid' | 'dashed' | 'dotted' }>;
   visible: boolean;
   /** which pane: 'main' or the id of its own pane */
   pane: string;
@@ -45,9 +45,15 @@ export interface IndicatorState {
 
 export interface PaneState { id: string; ratio: number }
 
+/** How candles (and bars) are coloured: bodies, outlines and wicks, up and down. */
+export interface CandleStyle { upBody: string; downBody: string; upBorder: string; downBorder: string; upWick: string; downWick: string; border: boolean }
+
 /** Everything about a chart that is worth saving (not the data, not the drawings: those belong to a symbol). */
 export interface ChartState {
-  type: ChartType; scaleMode: ScaleMode; indicators: IndicatorState[]; panes: PaneState[]; showVolume?: boolean;
+  type: ChartType; scaleMode: ScaleMode; indicators: IndicatorState[]; panes: PaneState[];
+  candles?: CandleStyle; grid?: boolean; sessionBreaks?: boolean;
+  /** @deprecated volume is the 'vol' indicator now; true here adds it */
+  showVolume?: boolean;
 }
 
 /** Things the app pins to a chart that are not the user's drawings (signals, trade levels). Grouped in layers so a layer can be hidden. */

@@ -2,12 +2,12 @@ import { heikinAshi, indexAtOrBefore, intervalLabel, intervalMinutes, intervalSe
 import { axisLabel, fmtCountdown, fmtPrice, fmtTime, fmtValue, fmtVolume } from './format';
 import { getIndicator, type IndicatorDef } from './indicators/registry';
 import { getTool, stroke, tag, type DrawEnv, type Pt } from './drawings/tools';
-import { DARK, NSE } from './theme';
+import { classicCandles, DARK, NSE } from './theme';
 import type {
-  Anchor, Annotations, Bar, ChartEvent, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
+  Anchor, Annotations, Bar, CandleStyle, ChartEvent, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
   ScaleMode, Theme, TimeOpts,
 } from './types';
-import { DrawingBar, IndicatorDialog, el } from './ui';
+import { ChartSettingsDialog, DrawingBar, IndicatorDialog, el, icon, popupMenu } from './ui';
 
 export interface ChartOptions {
   theme?: Theme; time?: TimeOpts; interval?: Interval; symbol?: string; precision?: number;
@@ -55,7 +55,10 @@ export class Chart {
   private bars: Bar[] = [];
   private type: ChartType = 'candles';
   private scaleMode: ScaleMode = 'linear';
-  private showVolume = true;
+  private candles: CandleStyle;
+  private grid = true;
+  private sessionBreaks = true;
+  private legendCollapsed = false;
   private inds: Ind[] = [];
   private panes: Pane[] = [{ id: 'main', ratio: 3, top: 0, h: 0, min: 0, max: 1, auto: true }];
   private compare: (CompareSeries & { byT: Map<number, number> })[] = [];
@@ -87,7 +90,7 @@ export class Chart {
   private legendMain: HTMLDivElement;
   private tooltip: HTMLDivElement;
   private drawingBar: DrawingBar;
-  private dialog: IndicatorDialog | null = null;
+  private dialog: IndicatorDialog | ChartSettingsDialog | null = null;
   private destroyed = false;
 
   constructor(container: HTMLElement, opts: ChartOptions = {}) {
@@ -97,6 +100,7 @@ export class Chart {
     this.symbol = opts.symbol ?? '';
     this.description = opts.description ?? '';
     this.precision = opts.precision ?? 2;
+    this.candles = classicCandles(this.theme);
     this.root = el('div', { class: 'cc-root', tabindex: '0' }) as HTMLDivElement;
     Object.assign(this.root.style, { position: 'relative', width: '100%', height: '100%', overflow: 'hidden', outline: 'none', background: this.theme.bg, font: this.theme.font, userSelect: 'none', touchAction: 'none' });
     this.canvas = document.createElement('canvas');
@@ -174,11 +178,29 @@ export class Chart {
   getType(): ChartType { return this.type; }
   setScaleMode(m: ScaleMode) { this.scaleMode = m; this.panes[0].auto = true; this.emit({ type: 'stateChange' }); this.invalidate(); }
   getScaleMode(): ScaleMode { return this.scaleMode; }
-  setVolumeVisible(on: boolean) { this.showVolume = on; this.renderLegendStructure(); this.emit({ type: 'stateChange' }); this.invalidate(); }
+  /** volume on the price pane is the 'vol' indicator (removable and customisable like any other) */
+  hasVolume(): boolean { return this.inds.some((x) => x.def.special === 'volume'); }
+  setVolumeVisible(on: boolean) {
+    const has = this.inds.find((x) => x.def.special === 'volume');
+    if (on && !has) this.addIndicator('vol');
+    else if (!on && has) this.removeIndicator(has.st.id);
+  }
+  setCandleStyle(c: CandleStyle) { this.candles = { ...c }; this.emit({ type: 'stateChange' }); this.invalidate(); }
+  getCandleStyle(): CandleStyle { return { ...this.candles }; }
+  /** Chart settings (candle colours, grid, session breaks). `onApply` also gets whether to copy it to the other charts. */
+  openSettings(opts: { allOption?: boolean; onApply?: (st: ChartState, all: boolean) => void } = {}) {
+    this.dialog?.close();
+    this.dialog = new ChartSettingsDialog(this.root, this.theme, { candles: this.candles, grid: this.grid, sessionBreaks: this.sessionBreaks }, !!opts.allOption, (v, all) => {
+      this.candles = v.candles; this.grid = v.grid; this.sessionBreaks = v.sessionBreaks;
+      this.emit({ type: 'stateChange' });
+      this.invalidate();
+      opts.onApply?.(this.getState(), all);
+    }, () => { this.dialog = null; });
+  }
 
   getState(): ChartState {
     return {
-      type: this.type, scaleMode: this.scaleMode, showVolume: this.showVolume,
+      type: this.type, scaleMode: this.scaleMode, candles: { ...this.candles }, grid: this.grid, sessionBreaks: this.sessionBreaks,
       indicators: this.inds.map((x) => JSON.parse(JSON.stringify(x.st))),
       panes: this.panes.map((p) => ({ id: p.id, ratio: p.ratio })),
     };
@@ -187,11 +209,14 @@ export class Chart {
   setState(s: Partial<ChartState>) {
     if (s.type) this.type = s.type;
     if (s.scaleMode) this.scaleMode = s.scaleMode;
-    if (s.showVolume !== undefined) this.showVolume = s.showVolume;
+    if (s.candles) this.candles = { ...s.candles };
+    if (s.grid !== undefined) this.grid = s.grid;
+    if (s.sessionBreaks !== undefined) this.sessionBreaks = s.sessionBreaks;
     if (s.indicators) {
       this.inds = [];
       for (const st of s.indicators) { const def = getIndicator(st.defId); if (def) this.inds.push({ st: this.fillState(def, st), def, out: {} }); }
     }
+    if (s.showVolume && !this.hasVolume()) { const def = getIndicator('vol')!; this.inds.unshift({ st: this.fillState(def, { id: newId('i'), defId: 'vol', inputs: {}, plots: {}, visible: true, pane: 'main' }), def, out: {} }); }
     this.syncPanes(s.panes);
     this.recompute();
     this.invalidate();
@@ -303,7 +328,7 @@ export class Chart {
     const inputs: IndicatorState['inputs'] = {};
     for (const i of def.inputs) inputs[i.key] = st.inputs?.[i.key] ?? i.default;
     const plots: IndicatorState['plots'] = {};
-    for (const p of def.plots) plots[p.key] = { color: st.plots?.[p.key]?.color ?? p.color, width: st.plots?.[p.key]?.width ?? p.width ?? 2, visible: st.plots?.[p.key]?.visible ?? true };
+    for (const p of def.plots) plots[p.key] = { color: st.plots?.[p.key]?.color ?? p.color, width: st.plots?.[p.key]?.width ?? p.width ?? 2, visible: st.plots?.[p.key]?.visible ?? true, dash: st.plots?.[p.key]?.dash ?? 'solid' };
     return { id: st.id, defId: def.id, inputs, plots, visible: st.visible ?? true, pane: def.overlay ? 'main' : (st.pane && st.pane !== 'main' ? st.pane : `p_${st.id}`) };
   }
 
@@ -748,7 +773,8 @@ export class Chart {
       if (hi - lo < 1e-9) { const m = Math.abs(hi) * 0.01 || 1; hi += m; lo -= m; }
       const pad = (hi - lo) * (pane.id === 'main' ? 0.08 : 0.1);
       pane.min = lo - pad; pane.max = hi + pad;
-      if (pane.id === 'main' && this.showVolume) pane.min -= (hi - lo) * 0.12; // room for the volume columns
+      const vol = pane.id === 'main' ? this.inds.find((x) => x.def.special === 'volume' && x.st.visible) : undefined;
+      if (vol) { const f = Math.min(0.6, (Number(vol.st.inputs.height) || 18) / 100); pane.min -= ((hi - lo + 2 * pad) * f) / (1 - f) * 0.7; } // room for the volume columns
     }
   }
 
@@ -791,11 +817,11 @@ export class Chart {
     c.strokeStyle = th.grid;
     c.setLineDash([]);
     c.beginPath();
-    for (const tk of ticks) { const x = Math.round(this.x(tk.i)) + 0.5; c.moveTo(x, 0); c.lineTo(x, this.plotH); }
-    for (const p of this.panes) for (const v of this.priceTicks(p)) { const y = Math.round(p.top + ((p.max - v) / (p.max - p.min)) * p.h) + 0.5; c.moveTo(0, y); c.lineTo(this.plotW, y); }
+    if (this.grid) for (const tk of ticks) { const x = Math.round(this.x(tk.i)) + 0.5; c.moveTo(x, 0); c.lineTo(x, this.plotH); }
+    if (this.grid) for (const p of this.panes) for (const v of this.priceTicks(p)) { const y = Math.round(p.top + ((p.max - v) / (p.max - p.min)) * p.h) + 0.5; c.moveTo(0, y); c.lineTo(this.plotW, y); }
     c.stroke();
     // session breaks (intraday)
-    if (isIntraday(this.interval) && intervalMinutes(this.interval) < 240) {
+    if (this.sessionBreaks && isIntraday(this.interval) && intervalMinutes(this.interval) < 240) {
       c.strokeStyle = th.axisLine; c.setLineDash([2, 4]); c.beginPath();
       for (let i = Math.max(1, from); i <= to; i++) {
         if (localDayStart(this.bars[i].t, this.time.tzOffsetSec) !== localDayStart(this.bars[i - 1].t, this.time.tzOffsetSec)) { const x = Math.round(this.x(i - 0.5)) + 0.5; c.moveTo(x, 0); c.lineTo(x, this.plotH); }
@@ -808,7 +834,7 @@ export class Chart {
       c.beginPath(); c.rect(0, pane.top, this.plotW, pane.h); c.clip();
       if (pane.id === 'main') {
         this.drawZones(pane);
-        if (this.showVolume) this.drawVolume(pane, from, to);
+        for (const x of this.inds) if (x.st.pane === 'main' && x.st.visible && x.def.special === 'volume') this.drawVolume(pane, x, from, to);
         for (const x of this.inds) if (x.st.pane === 'main' && x.st.visible && x.def.special === 'vpvr') this.drawVpvr(pane, x, from, to);
         this.drawSeries(pane, from, to);
         for (const x of this.inds) if (x.st.pane === 'main' && x.st.visible && !x.def.special) this.drawIndicator(pane, x, from, to);
@@ -896,36 +922,52 @@ export class Chart {
       const b = this.bars[i], up = b.c >= b.o;
       const x = Math.round(this.x(i));
       const yo = this.yOf(pane, b.o), yc = this.yOf(pane, b.c), yh = this.yOf(pane, b.h), yl = this.yOf(pane, b.l);
-      const col = up ? th.up : th.down;
+      const cs = this.candles;
       if (this.type === 'bars') {
-        c.strokeStyle = col; c.lineWidth = Math.max(1, Math.min(2, sp / 6));
+        c.strokeStyle = up ? cs.upBorder : cs.downBorder; c.lineWidth = Math.max(1, Math.min(2, sp / 6));
         c.beginPath(); c.moveTo(x + 0.5, yh); c.lineTo(x + 0.5, yl);
         const tick = Math.max(2, bw / 2);
         c.moveTo(x - tick, yo); c.lineTo(x + 0.5, yo); c.moveTo(x + 0.5, yc); c.lineTo(x + tick + 1, yc); c.stroke();
         continue;
       }
-      c.fillStyle = up ? th.upWick : th.downWick;
+      c.fillStyle = up ? cs.upWick : cs.downWick;
       c.fillRect(x, Math.round(yh), 1, Math.max(1, Math.round(yl) - Math.round(yh)));
       const top = Math.round(Math.min(yo, yc)), h = Math.max(1, Math.round(Math.abs(yc - yo)));
       const left = x - Math.floor(bw / 2);
-      if (this.type === 'hollow' && up) {
-        c.fillStyle = th.bg; c.fillRect(left, top, bw, h);
-        c.strokeStyle = col; c.lineWidth = 1; c.strokeRect(left + 0.5, top + 0.5, Math.max(0, bw - 1), Math.max(0, h - 1));
-      } else { c.fillStyle = col; c.fillRect(left, top, bw, h); }
+      const hollow = this.type === 'hollow' && up;
+      c.fillStyle = hollow ? th.bg : up ? cs.upBody : cs.downBody;
+      c.fillRect(left, top, bw, h);
+      // the outline (always for hollow up candles); at 1-2 px wide a candle is all outline anyway
+      if ((cs.border || hollow) && bw >= 3) {
+        c.strokeStyle = up ? cs.upBorder : cs.downBorder; c.lineWidth = 1;
+        c.strokeRect(left + 0.5, top + 0.5, Math.max(0, bw - 1), Math.max(0, h - 1));
+      } else if (cs.border && bw < 3) { c.fillStyle = up ? cs.upBorder : cs.downBorder; c.fillRect(left, top, bw, h); }
     }
   }
 
-  private drawVolume(pane: Pane, from: number, to: number) {
+  private drawVolume(pane: Pane, x: Ind, from: number, to: number) {
     const c = this.c;
     let max = 0;
     for (let i = from; i <= to; i++) max = Math.max(max, this.raw[i]?.v ?? 0);
     if (!max) return;
-    const h = pane.h * 0.16, base = pane.top + pane.h, bw = Math.max(1, Math.round(this.spacing * 0.72) - (this.spacing > 4 ? 1 : 0));
+    const ps = x.st.plots;
+    const h = pane.h * Math.min(0.6, (Number(x.st.inputs.height) || 18) / 100), base = pane.top + pane.h;
+    const bw = Math.max(1, Math.round(this.spacing * 0.72) - (this.spacing > 4 ? 1 : 0));
     for (let i = from; i <= to; i++) {
       const b = this.raw[i]; if (!b) continue;
+      const up = b.c >= b.o, p = up ? ps.up : ps.down;
+      if (!p?.visible) continue;
       const vh = (b.v / max) * h;
-      c.fillStyle = b.c >= b.o ? this.theme.volUp : this.theme.volDown;
+      c.fillStyle = p.color;
       c.fillRect(Math.round(this.x(i)) - Math.floor(bw / 2), base - vh, bw, vh);
+    }
+    const ma = x.out.ma;
+    if (ma && ps.ma?.visible) {
+      c.strokeStyle = ps.ma.color; c.lineWidth = ps.ma.width; c.setLineDash([]);
+      c.beginPath();
+      let pen = false;
+      for (let i = from; i <= to; i++) { const v = ma[i]; if (!Number.isFinite(v)) { pen = false; continue; } const y = base - (v / max) * h; if (pen) c.lineTo(this.x(i), y); else { c.moveTo(this.x(i), y); pen = true; } }
+      c.stroke();
     }
   }
 
@@ -980,6 +1022,7 @@ export class Chart {
         continue;
       }
       c.strokeStyle = ps.color; c.fillStyle = ps.color; c.lineWidth = ps.width;
+      c.setLineDash(ps.dash === 'dashed' ? [6, 4] : ps.dash === 'dotted' ? [1.5, 3] : []);
       if (kind === 'dots') {
         for (let i = from; i <= to; i++) { const v = a[i]; if (Number.isFinite(v)) { c.beginPath(); c.arc(this.x(i), yv(v), Math.max(1.5, Math.min(3, this.spacing / 4)), 0, Math.PI * 2); c.fill(); } }
         continue;
@@ -1000,6 +1043,7 @@ export class Chart {
         prevY = py;
       }
       c.stroke();
+      c.setLineDash([]);
     }
   }
 
@@ -1284,32 +1328,69 @@ export class Chart {
         Object.assign(p.legend!.style, { position: 'absolute', left: '8px', zIndex: '4', pointerEvents: 'none', color: th.text, fontSize: '12px', lineHeight: '18px' });
         this.root.appendChild(p.legend!);
       }
-      for (const x of this.inds.filter((i) => i.st.pane === p.id)) {
-        const args = x.def.inputs.filter((i) => i.type !== 'bool').map((i) => x.st.inputs[i.key]).join(' ');
-        const row = el('div', { class: 'cc-ind', style: 'display:flex;align-items:center;gap:6px;pointer-events:auto;width:max-content' });
+      const list = this.inds.filter((i) => i.st.pane === p.id);
+      const rows: HTMLElement[] = [];
+      for (const x of list) {
+        const args = x.def.special === 'volume' ? (Number(x.st.inputs.ma) > 0 ? `MA ${x.st.inputs.ma}` : '') : x.def.inputs.filter((i) => i.type !== 'bool').map((i) => x.st.inputs[i.key]).join(' ');
+        const row = el('div', { class: 'cc-ind', style: `display:flex;align-items:center;gap:6px;pointer-events:auto;width:max-content;border-radius:4px;padding:0 4px;margin-left:-4px;border:1px solid transparent;cursor:default` });
         const name = el('span', { style: `color:${x.st.visible ? th.text : th.textMuted}` }, [`${x.def.short}${args ? ` ${args}` : ''}`]);
         row.appendChild(name);
         const vals = el('span', {}) as HTMLSpanElement;
         this.legendVals.set(x.st.id, vals);
         row.appendChild(vals);
-        const btn = (label: string, title: string, fn: () => void) => {
-          const b = el('button', { title, style: `display:none;background:${th.panelBg};border:1px solid ${th.panelBorder};color:${th.text};border-radius:4px;padding:0 5px;font-size:11px;line-height:16px;cursor:pointer` }, [label]);
+        const btn = (ic: string, title: string, fn: (b: HTMLElement) => void, always = false) => {
+          const b = el('button', { title, style: `display:${always ? 'inline-flex' : 'none'};align-items:center;background:transparent;border:0;color:${th.text};border-radius:4px;padding:1px;cursor:pointer` }, [icon(ic)]);
           b.addEventListener('pointerdown', (e) => e.stopPropagation());
-          b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+          b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
+          b.addEventListener('mouseenter', () => { b.style.background = th.panelBorder; });
+          b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; });
           return b;
         };
+        const menu = (at: HTMLElement) => {
+          const r = at.getBoundingClientRect(), h = this.root.getBoundingClientRect();
+          popupMenu(this.root, this.theme, r.left - h.left, r.bottom - h.top + 2, [
+            { label: 'Settings…', fn: () => this.openIndicatorSettings(x.st.id) },
+            { label: x.st.visible ? 'Hide' : 'Show', fn: () => this.updateIndicator(x.st.id, { visible: !x.st.visible }) },
+            { label: 'Duplicate', fn: () => this.duplicateIndicator(x.st.id) },
+            ...(x.def.overlay ? [] : [{ label: 'Reset pane height', fn: () => { const pn = this.panes.find((q) => q.id === x.st.pane); if (pn) { pn.ratio = 1; this.emit({ type: 'stateChange' }); this.invalidate(); } } }]),
+            { label: 'Remove', danger: true, fn: () => this.removeIndicator(x.st.id) },
+          ]);
+        };
         const tools = [
-          btn(x.st.visible ? 'Hide' : 'Show', 'Show / hide', () => this.updateIndicator(x.st.id, { visible: !x.st.visible })),
-          btn('Settings', 'Settings', () => this.openIndicatorSettings(x.st.id)),
-          btn('✕', 'Remove', () => this.removeIndicator(x.st.id)),
+          btn(x.st.visible ? 'eye' : 'eyeOff', x.st.visible ? 'Hide' : 'Show', () => this.updateIndicator(x.st.id, { visible: !x.st.visible }), !x.st.visible),
+          btn('gear', 'Settings', () => this.openIndicatorSettings(x.st.id)),
+          btn('trash', 'Remove', () => this.removeIndicator(x.st.id)),
+          btn('more', 'More', (b) => menu(b)),
         ];
         tools.forEach((t) => row.appendChild(t));
-        row.addEventListener('mouseenter', () => tools.forEach((t) => { (t as HTMLElement).style.display = 'inline-block'; }));
-        row.addEventListener('mouseleave', () => tools.forEach((t) => { (t as HTMLElement).style.display = 'none'; }));
+        row.addEventListener('mouseenter', () => { row.style.borderColor = th.panelBorder; row.style.background = `${th.panelBg}cc`; tools.forEach((t) => { t.style.display = 'inline-flex'; }); });
+        row.addEventListener('mouseleave', () => { row.style.borderColor = 'transparent'; row.style.background = 'transparent'; tools.forEach((t, k) => { t.style.display = k === 0 && !x.st.visible ? 'inline-flex' : 'none'; }); });
         name.addEventListener('dblclick', () => this.openIndicatorSettings(x.st.id));
+        row.addEventListener('contextmenu', (e) => { e.preventDefault(); menu(name); });
+        if (p.id === 'main' && this.legendCollapsed) row.style.display = 'none';
+        rows.push(row);
         target.appendChild(row);
       }
+      // TradingView's arrow under the main legend: fold the indicator list away
+      if (p.id === 'main' && list.length) {
+        const fold = el('button', { title: this.legendCollapsed ? 'Show indicator legend' : 'Hide indicator legend', style: `pointer-events:auto;margin-top:2px;display:inline-flex;align-items:center;gap:4px;background:${th.panelBg};border:1px solid ${th.panelBorder};color:${th.textMuted};border-radius:4px;padding:0 4px;cursor:pointer;font-size:11px` }, [icon(this.legendCollapsed ? 'down' : 'up'), ...(this.legendCollapsed ? [`${list.length}`] : [])]);
+        fold.addEventListener('pointerdown', (e) => e.stopPropagation());
+        fold.addEventListener('click', (e) => { e.stopPropagation(); this.legendCollapsed = !this.legendCollapsed; this.renderLegendStructure(); this.invalidate(); });
+        target.appendChild(fold);
+      }
     }
+  }
+
+  duplicateIndicator(id: string) {
+    const x = this.inds.find((i) => i.st.id === id);
+    if (!x) return;
+    const nid = newId('i');
+    const st: IndicatorState = { ...JSON.parse(JSON.stringify(x.st)), id: nid, pane: x.def.overlay ? 'main' : `p_${nid}` };
+    this.inds.push({ st, def: x.def, out: {} });
+    this.syncPanes();
+    this.recompute();
+    this.emit({ type: 'stateChange' });
+    this.invalidate();
   }
 
   private positionLegends() {
@@ -1328,7 +1409,6 @@ export class Chart {
         const part = (k: string, v: string) => { this.ohlcEl!.appendChild(el('span', { style: `color:${th.textMuted};margin-left:6px` }, [k])); this.ohlcEl!.appendChild(el('span', { style: `color:${col};margin-left:2px` }, [v])); };
         part('O', f(b.o)); part('H', f(b.h)); part('L', f(b.l)); part('C', f(b.c));
         this.ohlcEl.appendChild(el('span', { style: `color:${col};margin-left:6px` }, [`${ch >= 0 ? '+' : ''}${f(ch)} (${((ch / prev) * 100).toFixed(2)}%)`]));
-        if (this.showVolume) part('Vol', fmtVolume(r.v));
       }
     }
     for (const x of this.inds) {
@@ -1337,6 +1417,14 @@ export class Chart {
       span.innerHTML = '';
       if (!x.st.visible) continue;
       if (x.def.intradayOnly && !isIntraday(this.interval)) { span.appendChild(el('span', { style: `color:${th.textMuted}` }, ['intraday only'])); continue; }
+      if (x.def.special === 'volume') {
+        const r = this.raw[i];
+        if (r) span.appendChild(el('span', { style: `color:${r.c >= r.o ? th.up : th.down};margin-right:6px` }, [fmtVolume(r.v)]));
+        const ma = x.out.ma?.[i];
+        if (Number.isFinite(ma) && x.st.plots.ma?.visible) span.appendChild(el('span', { style: `color:${x.st.plots.ma.color}` }, [fmtVolume(ma)]));
+        continue;
+      }
+      if (x.def.special === 'vpvr') continue;
       for (const p of x.def.plots) {
         const a = x.out[p.key], ps = x.st.plots[p.key];
         if (!a || !ps?.visible) continue;

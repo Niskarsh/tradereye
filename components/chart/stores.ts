@@ -1,5 +1,5 @@
 'use client';
-import type { ChartState, Drawing } from '@/packages/candle-chart/src';
+import { MONO_CANDLES, type ChartState, type Drawing } from '@/packages/candle-chart/src';
 
 /**
  * What the Charts page saves (S3 through /api/chart/store, with this browser's copy as a fast first answer):
@@ -8,7 +8,10 @@ import type { ChartState, Drawing } from '@/packages/candle-chart/src';
 
 export interface PaneCfg { id: string; symbol: string; interval: string; state?: Partial<ChartState> }
 export interface Col { w: number; rows: { h: number; pane: string }[] }
-export interface Layout { v: 1; preset: string; cols: Col[]; panes: PaneCfg[]; syncSymbol: boolean; syncCrosshair: boolean; compareNifty: boolean; showAlgo: boolean; magnet: 'off' | 'weak' | 'strong' }
+/** which parts of Algo Live's view go on the charts */
+export interface AlgoParts { dots: boolean; levels: boolean; orders: boolean }
+export const ALGO_PARTS_DEFAULT: AlgoParts = { dots: true, levels: true, orders: true };
+export interface Layout { v: 1; preset: string; cols: Col[]; panes: PaneCfg[]; syncSymbol: boolean; syncCrosshair: boolean; compareNifty: boolean; showAlgo: boolean; algoParts?: AlgoParts; magnet: 'off' | 'weak' | 'strong' }
 
 const LS = 'tradereye-chart-';
 const lsGet = <T,>(k: string): T | undefined => { try { const v = localStorage.getItem(LS + k); return v ? JSON.parse(v) as T : undefined; } catch { return undefined; } };
@@ -111,13 +114,14 @@ export function colsFor(preset: string, ids: string[]): Col[] {
   }
 }
 
-/** His default: left top 5m, left bottom 1D, right (big) 10m; volume and VWAP on the intraday charts. */
+/** His default: left top 5m, left bottom 1D, right (big) 10m; white / black candles; volume and VWAP on the intraday charts. */
 export function defaultLayout(symbol = 'NIFTY500'): Layout {
-  const vwap = { id: 'dvw', defId: 'vwap', inputs: { source: 'hlc3', bands: 0 }, plots: {}, visible: true, pane: 'main' };
+  const ind = (id: string, defId: string, inputs: Record<string, number | string | boolean> = {}) => ({ id, defId, inputs, plots: {}, visible: true, pane: 'main' });
+  const st = (...indicators: ReturnType<typeof ind>[]): Partial<ChartState> => ({ candles: { ...MONO_CANDLES }, indicators });
   const panes: PaneCfg[] = [
-    { id: paneId(), symbol, interval: '5', state: { indicators: [{ ...vwap, id: 'dvw5' }] as never } },
-    { id: paneId(), symbol, interval: 'D', state: { indicators: [{ id: 'de200', defId: 'ema', inputs: { length: 200, source: 'close' }, plots: {}, visible: true, pane: 'main' }] as never } },
-    { id: paneId(), symbol, interval: '10', state: { indicators: [{ ...vwap, id: 'dvw10' }] as never } },
+    { id: paneId(), symbol, interval: '5', state: st(ind('dvol5', 'vol'), ind('dvw5', 'vwap', { source: 'hlc3', bands: 0 })) },
+    { id: paneId(), symbol, interval: 'D', state: st(ind('dvold', 'vol'), ind('de200', 'ema', { length: 200, source: 'close' })) },
+    { id: paneId(), symbol, interval: '10', state: st(ind('dvol10', 'vol'), ind('dvw10', 'vwap', { source: 'hlc3', bands: 0 })) },
   ];
   return { v: 1, preset: '3L', cols: colsFor('3L', panes.map((p) => p.id)), panes, syncSymbol: true, syncCrosshair: true, compareNifty: false, showAlgo: true, magnet: 'weak' };
 }
