@@ -29,6 +29,8 @@ export interface PaneProps {
   onOrderCancel?(id: string): void;
   /** phone: no maximise button (one chart shows at a time) */
   compact?: boolean;
+  /** draw the gold "selected" border (only when the layout has several charts) */
+  highlight?: boolean;
   onActivate(): void;
   onCfg(patch: Partial<PaneCfg>): void;
   onCrosshair(t: number | null): void;
@@ -224,8 +226,10 @@ export function ChartPane(p: PaneProps) {
   }, [p.algo, p.algoSlot, p.algoParts, p.showAlgo, symbol, interval]);
 
   return (
-    <div className={`group relative h-full w-full ${p.active ? 'ring-1 ring-inset ring-brand-accent/70' : ''}`} onPointerDownCapture={() => p.onActivate()}>
+    <div className="group relative h-full w-full" onPointerDownCapture={() => p.onActivate()}>
       <div ref={host} className="absolute inset-0" />
+      {/* the selected chart: a gold frame over the chart (the strip and settings act on it) */}
+      {p.active && p.highlight && <div className="pointer-events-none absolute inset-0 z-20 border-2 border-brand-accent shadow-[inset_0_0_0_1px_rgba(223,177,91,0.35)]" />}
       {info.empty && info.state !== 'ok' && info.state !== 'idle' && (
         <div className="absolute left-1/2 top-1/2 z-10 max-w-[80%] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-line-strong bg-brand-section/95 px-4 py-3 text-center text-xs text-ink-2 shadow-xl">
           {info.state === 'error' ? (

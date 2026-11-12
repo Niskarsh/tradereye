@@ -261,7 +261,7 @@ export class Chart {
     if (s.type) this.type = s.type;
     if (s.scaleMode) this.scaleMode = s.scaleMode;
     if (s.candles) this.candles = { ...s.candles };
-    if (s.volCandles) this.volCandles = { base: clamp01(s.volCandles.base), effect: clamp01(s.volCandles.effect) };
+    if (s.volCandles) this.volCandles = { base: clamp01(s.volCandles.base), effect: Number.isFinite(s.volCandles.effect) ? Math.max(0, Math.min(3, s.volCandles.effect)) : 1 };
     if (s.grid !== undefined) this.grid = s.grid;
     if (s.sessionBreaks !== undefined) this.sessionBreaks = s.sessionBreaks;
     if (s.indicators) {
@@ -1059,7 +1059,11 @@ export class Chart {
     const widthOf = (v: number) => {
       if (this.type !== 'volume' || !(vmax > 0)) return bw;
       const full = Math.max(1, sp * 0.94 - (sp > 4 ? 1 : 0));
-      return Math.max(Math.min(2, full), Math.round(full * (base + (1 - base) * effect * Math.min(1, v / vmax))));
+      // effect up to 1: volume fills that much of the rest of the slot; above 1: a contrast curve (quiet candles get
+      // thinner, the busiest still fill their slot)
+      const ratio = Math.min(1, v / vmax);
+      const share = effect <= 1 ? effect * ratio : Math.pow(ratio, effect);
+      return Math.max(Math.min(2, full), Math.round(full * (base + (1 - base) * share)));
     };
     if (this.type === 'line' || this.type === 'area') {
       c.beginPath();

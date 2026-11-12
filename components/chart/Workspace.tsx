@@ -298,7 +298,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
       extCross={layout.syncCrosshair && cross.from !== cfg.id ? cross.t : null}
       compareNifty={cfg.compareNifty ?? false} magnet={layout.magnet} tool={tool} drawingsHidden={hidden}
       algo={algoRelevant ? algo : null} showAlgo={layout.showAlgo} algoSlot={algoSlot} algoParts={layout.algoParts ?? ALGO_PARTS_DEFAULT}
-      maximized={maxId === cfg.id} compact={mobile}
+      maximized={maxId === cfg.id} compact={mobile} highlight={!mobile && !showMax && layout.panes.length > 1}
       orderLines={cfg.symbol === symbol ? trade.lines : []} linesRev={trade.rev} positionQty={cfg.symbol === symbol ? trade.book?.position?.netQty : undefined}
       onOrderMove={trade.actions.move} onOrderCancel={trade.actions.cancel}
       onActivate={() => setActiveId(cfg.id)}

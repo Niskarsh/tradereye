@@ -210,11 +210,28 @@ export class DrawingBar {
   }
 }
 
+/** drag a dialog by its title bar; `pos` keeps where it was put across redraws */
+function draggable(card: HTMLElement, handle: HTMLElement, pos: { x: number; y: number }) {
+  card.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+  handle.style.cursor = 'move';
+  handle.style.touchAction = 'none';
+  handle.title = 'Drag to move';
+  handle.addEventListener('pointerdown', (e) => {
+    if ((e.target as HTMLElement).closest('button,input,select')) return;
+    e.preventDefault();
+    const sx = e.clientX - pos.x, sy = e.clientY - pos.y;
+    const move = (ev: PointerEvent) => { pos.x = ev.clientX - sx; pos.y = ev.clientY - sy; card.style.transform = `translate(${pos.x}px, ${pos.y}px)`; };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  });
+}
+
 /** the dimmed full-window backdrop a dialog sits on (in document.body: never cut by the chart's box) */
 function dialogScrim(th: Theme, close: () => void): HTMLDivElement {
   ensureStyles(th);
   const scrim = el('div', { class: 'cc-scrim' }) as HTMLDivElement;
-  Object.assign(scrim.style, { position: 'fixed', inset: '0', background: 'rgba(5,9,13,0.6)', zIndex: '2147483000', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px' });
+  // barely tinted: what the dialog changes stays visible behind it (it previews live)
+  Object.assign(scrim.style, { position: 'fixed', inset: '0', background: 'rgba(5,9,13,0.12)', zIndex: '2147483000', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px' });
   scrim.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === scrim) close(); });
   document.body.appendChild(scrim);
   return scrim;
@@ -223,6 +240,7 @@ function dialogScrim(th: Theme, close: () => void): HTMLDivElement {
 /** Settings of one indicator: its inputs and how each line looks. */
 export class IndicatorDialog {
   private box: HTMLDivElement;
+  private pos = { x: 0, y: 0 };
   private st: IndicatorState;
   constructor(host: HTMLElement, private th: Theme, private def: IndicatorDef, st: IndicatorState, private onApply: (st: IndicatorState) => void, private onClose: () => void) {
     this.st = JSON.parse(JSON.stringify(st));
@@ -238,7 +256,9 @@ export class IndicatorDialog {
     const th = this.th, d = this.def, st = this.st;
     this.box.innerHTML = '';
     const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(440px,94vw);max-height:calc(100dvh - 24px);overflow:auto;color:${th.text};font:${th.font};font-size:12.5px;box-shadow:0 20px 50px rgba(0,0,0,.5)`, class: 'cc-scroll cc-float-dialog' });
-    card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, [d.name]));
+    const title = el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px;user-select:none` }, [d.name]);
+    card.appendChild(title);
+    draggable(card, title, this.pos);
     const body = el('div', { style: 'padding:10px 14px;display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center' });
     const inputCss = `background:${th.bg};border:1px solid ${th.panelBorder};color:${th.text};border-radius:6px;padding:4px 6px;width:110px`;
     if (d.inputs.length) body.appendChild(el('div', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:.06em` }, ['Inputs']));
@@ -319,6 +339,7 @@ export class ChartSettingsDialog {
   private box: HTMLDivElement;
   private v: ChartSettings;
   private applied = false;
+  private pos = { x: 0, y: 0 };
   constructor(host: HTMLElement, private th: Theme, v: ChartSettings, private allOption: boolean | string, private onApply: (v: ChartSettings, all: boolean) => void, private onClose: () => void,
     private onPreview?: (v: ChartSettings) => void, private onCancel?: () => void) {
     this.v = JSON.parse(JSON.stringify(v));
@@ -334,8 +355,10 @@ export class ChartSettingsDialog {
     const th = this.th, v = this.v;
     this.box.innerHTML = '';
     const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(380px,94vw);max-height:calc(100dvh - 24px);overflow:auto;color:${th.text};font:${th.font};font-size:12.5px;box-shadow:0 20px 50px rgba(0,0,0,.5)`, class: 'cc-scroll cc-float-dialog' });
-    card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, [
-      'Chart settings', ...(typeof this.allOption === 'string' ? [el('span', { style: `color:${th.textMuted};font-weight:400;margin-left:6px` }, [`· ${this.allOption}`])] : [])]));
+    const title = el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px;user-select:none` }, [
+      'Chart settings', ...(typeof this.allOption === 'string' ? [el('span', { style: `color:${th.textMuted};font-weight:400;margin-left:6px` }, [`· ${this.allOption}`])] : [])]);
+    card.appendChild(title);
+    draggable(card, title, this.pos);
     const body = el('div', { style: 'padding:10px 14px;display:grid;grid-template-columns:1fr auto auto;gap:8px 12px;align-items:center' });
     const head = (t: string) => body.appendChild(el('div', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-top:4px` }, [t]));
     head('Chart type');
@@ -360,7 +383,8 @@ export class ChartSettingsDialog {
         body.appendChild(wrap);
       };
       slider('Base thickness', 'Every candle\'s body before volume: share of its slot', 'base', 5, 100);
-      slider('Volume effect', 'How much volume widens a candle: 0% = all the same, 100% = the busiest in view fills its slot', 'effect', 0, 100);
+      slider('Volume effect', '0% = all the same width · 100% = width follows volume · above 100% = more contrast (quiet candles thinner)', 'effect', 0, 300);
+      body.appendChild(el('span', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px` }, ['A candle can be at most as wide as its slot: zoom in (mouse wheel / pinch) for bigger differences.']));
     }
     head('Candle colours');
     const presets = el('div', { style: 'grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap' });
