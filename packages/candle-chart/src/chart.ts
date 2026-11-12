@@ -88,6 +88,9 @@ export class Chart {
   private orders: OrderLine[] = [];
   private orderPreview: { id: string; price: number } | null = null;
   private bidAsk: { bid?: number; ask?: number } = {};
+  /** net position shown between SELL and BUY in the quote box (0 / undefined = flat) */
+  private posQty: number | undefined;
+  private quoteEl: HTMLDivElement | null = null;
   private tick = 0.05;
   private touches = new Map<number, { x: number; y: number }>();
   private cornerBtn!: HTMLButtonElement;
@@ -313,8 +316,33 @@ export class Chart {
   setBidAsk(bid?: number, ask?: number) {
     if (this.bidAsk.bid === bid && this.bidAsk.ask === ask) return;
     this.bidAsk = { bid, ask };
+    this.renderQuote();
     this.invalidate();
   }
+  /** The position size shown in the quote box (TradingView's SELL | spread | BUY under the symbol). */
+  setPositionQty(q: number | undefined) { if (this.posQty === q) return; this.posQty = q; this.renderQuote(); }
+
+  /** SELL bid | spread over position | BUY ask, like TradingView's box under the symbol (display only) */
+  private renderQuote() {
+    const box = this.quoteEl;
+    if (!box) return;
+    const { bid, ask } = this.bidAsk;
+    if (!(bid && ask)) { box.style.display = 'none'; return; }
+    const f = (v: number) => fmtPrice(v, this.precision);
+    const q = this.posQty;
+    box.style.display = 'flex';
+    box.innerHTML = '';
+    const side = (price: number, label: string, bg: string) => el('div', { style: `display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:64px;padding:2px 8px;border-radius:5px;background:${bg};color:#fff;line-height:15px` }, [
+      el('span', { style: 'font-weight:600;font-size:12.5px' }, [f(price)]), el('span', { style: 'font-size:10px;letter-spacing:.04em;opacity:.9' }, [label])]);
+    box.append(
+      side(bid, 'SELL', '#C93545'),
+      el('div', { style: `display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:42px;padding:0 4px;line-height:15px;color:${this.theme.text}` }, [
+        el('span', { style: `font-size:10.5px;color:${this.theme.textMuted}` }, [f(ask - bid)]),
+        el('span', { title: 'Position size', style: `font-size:11.5px;font-weight:600;border:1px solid ${this.theme.panelBorder};border-radius:4px;padding:0 5px;color:${q ? (q > 0 ? this.theme.up : this.theme.down) : this.theme.textMuted}` }, [q ? `${q > 0 ? '+' : ''}${q}` : '0'])]),
+      side(ask, 'BUY', '#2962FF'),
+    );
+  }
+
   /** true when a price or time scale was changed by hand (the reset button is worth showing) */
   isScaled(): boolean { return this.panes.some((p) => !p.auto) || Math.abs(this.right - (this.bars.length - 1 + RIGHT_GAP)) > 1; }
 
@@ -1380,8 +1408,6 @@ export class Chart {
           if (v !== undefined) this.axisTag(this.yOf(p, v), `${(((v / this.base()) - 1) * 100).toFixed(2)}%`, s.color, '#0A1118');
         }
         for (const l of this.orders) { const v = this.orderPreview?.id === l.id ? this.orderPreview.price : l.price; const y = this.yOf(p, v); if (y > p.top && y < p.top + p.h) this.axisTag(y, fmtPrice(v, this.precision), l.color, '#0A1118'); }
-        if (this.bidAsk.bid) this.axisTag(this.yOf(p, this.bidAsk.bid), fmtPrice(this.bidAsk.bid, this.precision), '#4FA3F7', '#0A1118');
-        if (this.bidAsk.ask) this.axisTag(this.yOf(p, this.bidAsk.ask), fmtPrice(this.bidAsk.ask, this.precision), '#F06B7C', '#0A1118');
         const b = this.bars[this.bars.length - 1];
         if (b) {
           let sub: string | undefined;
@@ -1468,6 +1494,9 @@ export class Chart {
     this.ohlcEl = el('span', {}) as HTMLSpanElement;
     head.appendChild(this.ohlcEl);
     box.appendChild(head);
+    this.quoteEl = el('div', { style: 'display:none;gap:2px;align-items:stretch;margin:4px 0 2px;width:max-content' }) as HTMLDivElement;
+    box.appendChild(this.quoteEl);
+    this.renderQuote();
     for (const s of this.compare) {
       const v = el('span', { style: `color:${s.color}` }) as HTMLSpanElement;
       this.legendVals.set(`cmp:${s.id}`, v);

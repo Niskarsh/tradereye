@@ -296,7 +296,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
       compareNifty={layout.compareNifty} magnet={layout.magnet} tool={tool} drawingsHidden={hidden}
       algo={algoRelevant ? algo : null} showAlgo={layout.showAlgo} algoSlot={algoSlot} algoParts={layout.algoParts ?? ALGO_PARTS_DEFAULT}
       maximized={maxId === cfg.id} compact={mobile}
-      orderLines={cfg.symbol === symbol ? trade.lines : []} linesRev={trade.rev}
+      orderLines={cfg.symbol === symbol ? trade.lines : []} linesRev={trade.rev} positionQty={cfg.symbol === symbol ? trade.book?.position?.netQty : undefined}
       onOrderMove={trade.actions.move} onOrderCancel={trade.actions.cancel}
       onActivate={() => setActiveId(cfg.id)}
       onCfg={(patch) => setPane(cfg.id, patch)}
