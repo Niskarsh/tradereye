@@ -46,7 +46,8 @@ export interface IndicatorState {
 
 export interface PaneState { id: string; ratio: number }
 
-export interface VolCandleStyle { base: number; effect: number }
+/** volume candles: `widen` = the slot itself grows with volume (Equivolume: busy candles take more room, the time axis is no longer evenly spaced) */
+export interface VolCandleStyle { base: number; effect: number; widen?: boolean }
 
 /** How candles (and bars) are coloured: bodies, outlines and wicks, up and down. */
 export interface CandleStyle { upBody: string; downBody: string; upBorder: string; downBorder: string; upWick: string; downWick: string; border: boolean }
