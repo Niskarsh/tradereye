@@ -1026,14 +1026,16 @@ export class Chart {
   private drawSeries(pane: Pane, from: number, to: number) {
     const c = this.c, th = this.theme, sp = this.spacing;
     const bw = Math.max(1, Math.round(sp * 0.72) - (sp > 4 ? 1 : 0));
-    // volume candles (TradingView's): each candle's width is its volume relative to the biggest volume in view; the
-    // busiest candle fills its slot, a quiet one is thin (never under 2 px, so it can still be seen)
+    // volume candles (TradingView's): every candle gets a base body (a third of its slot, so it still reads as a candle),
+    // and the rest of the slot fills in proportion to its volume against the biggest volume in view. Relative, not
+    // absolute: zooming or scrolling rescales to what is on screen.
     let vmax = 0;
     if (this.type === 'volume') for (let i = from; i <= to; i++) vmax = Math.max(vmax, this.bars[i].v);
+    const VOL_BASE = 0.35;
     const widthOf = (v: number) => {
       if (this.type !== 'volume' || !(vmax > 0)) return bw;
       const full = Math.max(1, sp * 0.94 - (sp > 4 ? 1 : 0));
-      return Math.max(Math.min(2, full), Math.round(full * (v / vmax)));
+      return Math.max(Math.min(3, full), Math.round(full * (VOL_BASE + (1 - VOL_BASE) * Math.min(1, v / vmax))));
     };
     if (this.type === 'line' || this.type === 'area') {
       c.beginPath();
