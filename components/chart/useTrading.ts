@@ -7,7 +7,7 @@ import { seriesFor } from '@/lib/chart/series';
 /**
  * The active chart's stock as a trade: its position and working orders (through trading-scaler, every 5 s in market
  * hours while the page is visible), the order lines the charts draw, and the Flatten / Clear all / Break-even /
- * move / cancel actions. Every action asks first: they act on real orders.
+ * move / cancel actions. They act at once (no confirmation), on real orders.
  */
 
 const IST_MS = 330 * 60_000;
@@ -82,30 +82,18 @@ export function useTrading(symbol: string, token: string) {
 
   const pos = book?.position && book.position.netQty ? book.position : null;
   const stops = book?.working.filter((w) => w.role === 'stop') ?? [];
+  // no confirmations (his call): every press acts at once; the result shows in the bar under the strip
   const actions = {
-    flatten: () => {
-      if (!pos) return;
-      const n = book!.working.length;
-      if (window.confirm(`Flatten ${symbol}?\n\n${n ? `Cancel its ${n} working order(s) (stop / target / others), then ` : ''}${pos.netQty < 0 ? 'buy back' : 'sell'} ${Math.abs(pos.netQty)} at MARKET.`)) void run('Flatten', 'flatten');
-    },
-    clearAll: () => {
-      const n = book?.working.length ?? 0;
-      if (n && window.confirm(`Clear all ${symbol} orders?\n\nCancel its ${n} working order(s).${pos ? `\n\nYour position (${pos.netQty}) stays open WITHOUT a stop.` : ''}`)) void run('Clear all', 'clearall');
-    },
-    breakEven: () => {
-      if (!pos || !stops.length) return;
-      if (window.confirm(`Move the ${symbol} stop to break-even?\n\nThe stop goes where an exit still pays Dhan's charges and the usual slippage (Algo Live's "move stop to").`)) void run('Break-even', 'breakeven');
-    },
-    move: (id: string, price: number, from: number) => {
-      const w = book?.working.find((x) => x.id === id);
-      if (!w) { setRev((x) => x + 1); return; }
-      if (window.confirm(`Move ${ROLE[w.role].label} ${symbol} from ${from.toFixed(2)} to ${price.toFixed(2)}?`)) void run('Move', 'move', { id, price });
-      else setRev((x) => x + 1);
+    flatten: () => { if (pos) void run('Flatten', 'flatten'); },
+    clearAll: () => { if (book?.working.length) void run('Clear all', 'clearall'); },
+    breakEven: () => { if (pos && stops.length) void run('Break-even', 'breakeven'); },
+    move: (id: string, price: number) => {
+      if (!book?.working.some((x) => x.id === id)) { setRev((x) => x + 1); return; }
+      void run('Move', 'move', { id, price });
     },
     cancel: (id: string) => {
       if (id === 'pos') { actions.flatten(); return; }
-      const w = book?.working.find((x) => x.id === id);
-      if (w && window.confirm(`Cancel ${ROLE[w.role].label} ${w.qty} ${symbol} at ${w.price.toFixed(2)}?${w.role === 'stop' && pos ? '\n\nThe position stays open WITHOUT this stop.' : ''}`)) void run('Cancel', 'cancel', { id });
+      if (book?.working.some((x) => x.id === id)) void run('Cancel', 'cancel', { id });
     },
   };
   return { book, lines: orderLinesOf(book), rev, msg, busy, bookErr, hasPosition: !!pos, hasOrders: (book?.working.length ?? 0) > 0, hasStop: stops.length > 0, actions, clearMsg: () => setMsg(null) };

@@ -22,6 +22,8 @@ export interface PaneProps {
   maximized: boolean;
   /** live orders / position of this chart's stock (drag to move, ✕ to cancel); `linesRev` redraws them (a declined drag) */
   orderLines?: OrderLine[];
+  /** net position of this chart's stock (the quote box shows it between SELL and BUY) */
+  positionQty?: number;
   linesRev?: number;
   onOrderMove?(id: string, price: number, from: number): void;
   onOrderCancel?(id: string): void;
@@ -197,6 +199,7 @@ export function ChartPane(p: PaneProps) {
 
   useEffect(() => { chart.current?.setCrosshairTime(p.extCross); }, [p.extCross]);
   useEffect(() => { chart.current?.setOrderLines(p.orderLines ?? []); }, [p.orderLines, p.linesRev]);
+  useEffect(() => { chart.current?.setPositionQty(p.positionQty); }, [p.positionQty]);
   useEffect(() => { chart.current?.setMagnet(p.magnet); }, [p.magnet]);
   useEffect(() => { chart.current?.setDrawingsHidden(p.drawingsHidden); }, [p.drawingsHidden]);
   useEffect(() => { if (p.active) chart.current?.setTool(p.tool); else chart.current?.setTool(null); }, [p.tool, p.active]);
