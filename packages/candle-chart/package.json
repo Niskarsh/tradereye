@@ -1,0 +1,13 @@
+{
+  "name": "@candlesbeforecubicles/candle-chart",
+  "version": "0.1.0",
+  "description": "A dependency-free canvas financial chart: candles, 30+ indicators, drawing tools, panes, compare lines and annotations.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": ["src"],
+  "sideEffects": false,
+  "keywords": ["chart", "candlestick", "trading", "technical-analysis", "canvas"]
+}

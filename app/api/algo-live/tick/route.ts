@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { errorResponse, guard } from '@/lib/live/guard';
 import {
   counts, gateBlocks, istNow, loadModelOf, loadSettings, loadState, MAX_LATE_MIN, note, orderFor, pick, reconcile, saveState, scoreAt, SHORTLIST_SLOT, slotTime, toScaler,
@@ -6,6 +6,7 @@ import {
 } from '@/lib/algoLive/engine';
 import { scaler, ScalerError, type ScalerStatus } from '@/lib/algoLive/scaler';
 import { liveStore } from '@/lib/algoLive/store';
+import { saveCloseFacts } from '@/lib/chart/algo';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;  // the wide list is about twice the narrow one
@@ -35,6 +36,9 @@ export async function POST(req: Request) {
     if ((first.version ?? 'narrow') !== settings.version) return NextResponse.json({ error: 'OTHER_LIST', message: `Today's day list was made for the ${first.version ?? 'narrow'} model, and Algo Live is switched to ${settings.version}: make the day list again.` }, { status: 409 });
 
     const res = await scoreAt(g.dhan, liveStore, model, now.date, first.list, k);
+    // for the Charts page's "why": every stock's facts at this close, saved only after this answer has gone out
+    // (orders included), so it can never slow or break the tick; a failed save just leaves this close unexplained
+    try { after(() => saveCloseFacts(liveStore, now.date, k, res.facts)); } catch { /* outside a request scope: skip the save */ }
     // the state again (a veto or the arm switch may have changed while the candles were fetched)
     const s = await loadState(liveStore, now.date);
     s.model = { month: model.month, threshold: model.threshold, standAside: model.standAside, createdAt: model.createdAt, version: settings.version, iteration: model.iteration };

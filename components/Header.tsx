@@ -22,6 +22,7 @@ const LIVE_TRADING: Item[] = [
     { name: 'Co-pilot', href: '/copilot' },
     { name: 'Order Book', href: '/order-book' },
     { name: 'Algo Live', href: '/algo/live' },
+    { name: 'Charts', href: '/chart' },
     { name: 'Backfill', href: '/backfill' },
     { name: 'Dhan login', href: '/dhan-login' },
 ];
