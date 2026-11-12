@@ -2,6 +2,7 @@
 import type { Bar } from '@/packages/candle-chart/src';
 import { sharedFeed, type Quote } from './feed';
 import { algoQuietMs } from './quiet';
+import { fetchT } from './fetchTimeout';
 
 /**
  * One symbol's candles in this tab, shared by every chart showing it: 1-minute candles (from which every intraday
@@ -100,10 +101,10 @@ export class SymbolSeries {
       if (quiet) { this.setStatus(kind === '1d' ? 'd' : 'm1', 'waiting', 'Waiting for Algo Live’s close to pass (charts stay off Dhan for 2 min)'); await sleep(quiet + 500); }
       let r: Response, j: Record<string, unknown> = {};
       try {
-        r = await fetch('/api/chart/bars', {
+        r = await fetchT('/api/chart/bars', {
           method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': this.token() },
           body: JSON.stringify({ symbol: this.symbol, kind, from, to, securityId: this.securityId }),
-        });
+        }, 30_000);
         j = await r.json().catch(() => ({}));
       } catch (e) { last = `network: ${(e as Error).message}`; await sleep(1500 * (attempt + 1)); continue; }
       // busy / timed out / server hiccup: try again, slower each time

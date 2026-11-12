@@ -1,5 +1,6 @@
 'use client';
 import { MONO_CANDLES, type ChartState, type Drawing } from '@/packages/candle-chart/src';
+import { fetchT } from '@/lib/chart/fetchTimeout';
 
 /**
  * What the Charts page saves (S3 through /api/chart/store, with this browser's copy as a fast first answer):
@@ -18,12 +19,13 @@ const lsGet = <T,>(k: string): T | undefined => { try { const v = localStorage.g
 const lsSet = (k: string, v: unknown) => { try { localStorage.setItem(LS + k, JSON.stringify(v)); } catch { /* full or private */ } };
 
 async function remoteGet<T>(what: string, symbol?: string): Promise<T | null> {
-  const r = await fetch(`/api/chart/store?what=${what}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ''}`, { cache: 'no-store' });
+  // short: the page waits on the layout before drawing anything (this browser's copy is used if S3 is slow)
+  const r = await fetchT(`/api/chart/store?what=${what}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ''}`, { cache: 'no-store' }, 6000);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return ((await r.json()) as { data: T | null }).data;
 }
 async function remotePut(what: string, data: unknown, symbol?: string) {
-  await fetch('/api/chart/store', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ what, symbol, data }) });
+  await fetchT('/api/chart/store', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ what, symbol, data }) }, 15_000);
 }
 
 /* ---------------- layout ---------------- */
