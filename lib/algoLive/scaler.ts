@@ -38,6 +38,10 @@ export interface ScalerLeg { legName: string; orderStatus: string; price: number
 export interface ScalerSuper { orderId: string; correlationId: string; symbol: string; orderStatus: string; qty: number; filledQty: number; avgPrice: number; legs: ScalerLeg[]; error?: string }
 export interface ScalerStatus { orders: ScalerSuper[]; positions: { symbol: string; securityId: string; netQty: number; realized: number; unrealized: number }[]; squaredOffAt?: number | null; maxPerDay: number }
 
+/** one stock's position and working orders (trading-scaler src/lib/symbolOrders.ts) */
+export interface ScalerWorking { id: string; role: 'stop' | 'target' | 'entry' | 'limit'; side: 'BUY' | 'SELL'; qty: number; price: number; status: string; byBot: boolean }
+export interface ScalerBook { securityId: string; position: { netQty: number; avgPrice: number; productType: string; realized: number; unrealized: number } | null; working: ScalerWorking[] }
+
 export class ScalerError extends Error {}
 
 /** Dhan reports the switch as ACTIVATE or DEACTIVATE: only its own "on" counts as on */
@@ -73,4 +77,10 @@ export const scaler = {
   squareOff: (token: string) => call<{ done: string[]; errors: string[] }>('squareoff', token, {}, 60_000),
   killStatus: (token: string) => call<{ status: string }>('killstatus', token),
   killSwitch: (token: string) => call<{ status: string; error?: string }>('killswitch', token),
+  // one stock, from the Charts page (every order of that stock, hand-placed ones included)
+  book: (token: string, securityId: string) => call<ScalerBook>('book', token, { securityId }),
+  clearAll: (token: string, securityId: string) => call<{ errors: string[]; book: ScalerBook }>('clearall', token, { securityId }, 40_000),
+  flatten: (token: string, securityId: string) => call<{ done: string[]; errors: string[]; book: ScalerBook }>('flatten', token, { securityId }, 60_000),
+  move: (token: string, securityId: string, id: string, price: number) => call<{ book: ScalerBook }>('move', token, { securityId, id, price }, 30_000),
+  cancel: (token: string, securityId: string, id: string) => call<{ book: ScalerBook }>('cancel', token, { securityId, id }, 30_000),
 };

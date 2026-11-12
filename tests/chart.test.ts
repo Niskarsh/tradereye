@@ -119,6 +119,19 @@ test('feed packets: ticker (index) and quote (stock)', () => {
   assert.deepEqual([q[1].securityId, q[1].ltp, q[1].volume], ['1333', 280.5, 123456]);
 });
 
+test('full packet (stocks): best bid / ask from the first depth level', () => {
+  const buf = new ArrayBuffer(162);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 8); dv.setInt16(1, 162, true); dv.setUint8(3, 1); dv.setInt32(4, 1333, true);
+  dv.setFloat32(8, 280.5, true); dv.setInt32(22, 5000, true);
+  dv.setFloat32(74, 280.45, true); dv.setFloat32(78, 280.55, true);
+  const [q] = parseQuotes(buf, 1);
+  assert.equal(q.securityId, '1333');
+  assert.equal(q.volume, 5000);
+  assert.equal(Math.round(q.bid! * 100), 28045);
+  assert.equal(Math.round(q.ask! * 100), 28055);
+});
+
 test('Algo levels are rebuilt from the model facts (distance in 10-min ATRs)', () => {
   // price 200, ATR 1% = 2: VWAP 1 ATR below price, PDH 2.5 ATR above, POC 0.5 below, a missing fact is skipped
   const lv = levelsFrom({ priceRs: 200, atrPct: 1, distVwapAtr: 1, distHiAtr: 0.5, distLoAtr: 3, pdhAtr: 2.5, pdlAtr: -4, pocAtr: -0.5, vaHiAtr: null, ema10Atr: null });

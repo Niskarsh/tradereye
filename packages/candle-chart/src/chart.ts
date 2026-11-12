@@ -4,7 +4,7 @@ import { getIndicator, type IndicatorDef } from './indicators/registry';
 import { getTool, stroke, tag, type DrawEnv, type Pt } from './drawings/tools';
 import { classicCandles, DARK, NSE } from './theme';
 import type {
-  Anchor, Annotations, Bar, CandleStyle, ChartEvent, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
+  Anchor, Annotations, Bar, CandleStyle, ChartEvent, OrderLine, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
   ScaleMode, Theme, TimeOpts,
 } from './types';
 import { ChartSettingsDialog, DrawingBar, IndicatorDialog, el, icon, popupMenu } from './ui';
@@ -14,6 +14,8 @@ export interface ChartOptions {
   /** text under the symbol in the legend (exchange, company name) */
   description?: string;
   state?: Partial<ChartState>;
+  /** price step for dragged order lines (NSE: 0.05) */
+  tick?: number;
 }
 
 interface Ind { st: IndicatorState; def: IndicatorDef; out: Record<string, number[]> }
@@ -25,7 +27,9 @@ type Drag =
   | { kind: 'sep'; y: number; a: Pane; b: Pane; ra: number; rb: number; ha: number; hb: number }
   | { kind: 'move'; d: Drawing; orig: Anchor[]; at: { i: number; p: number }; moved: boolean }
   | { kind: 'handle'; d: Drawing; h: number; moved: boolean }
-  | { kind: 'brush'; d: Drawing };
+  | { kind: 'brush'; d: Drawing }
+  | { kind: 'order'; id: string; y0: number; p0: number; moved: boolean }
+  | { kind: 'pinch'; d0: number; spacing: number; i0: number; x0: number };
 
 const AXIS_W = 70, TIME_H = 26, MIN_SPACING = 1.2, MAX_SPACING = 80, RIGHT_GAP = 6;
 let uid = 0;
@@ -81,6 +85,13 @@ export class Chart {
   private mouse: { x: number; y: number } | null = null;
   private extCross: number | null = null;
   private drag: Drag | null = null;
+  private orders: OrderLine[] = [];
+  private orderPreview: { id: string; price: number } | null = null;
+  private bidAsk: { bid?: number; ask?: number } = {};
+  private tick = 0.05;
+  private touches = new Map<number, { x: number; y: number }>();
+  private cornerBtn!: HTMLButtonElement;
+  private liveBtn!: HTMLButtonElement;
   private downAt: { x: number; y: number } | null = null;
   private frame = 0;
   private historyAsked = 0;
@@ -101,6 +112,7 @@ export class Chart {
     this.description = opts.description ?? '';
     this.precision = opts.precision ?? 2;
     this.candles = classicCandles(this.theme);
+    this.tick = opts.tick ?? 0.05;
     this.root = el('div', { class: 'cc-root', tabindex: '0' }) as HTMLDivElement;
     Object.assign(this.root.style, { position: 'relative', width: '100%', height: '100%', overflow: 'hidden', outline: 'none', background: this.theme.bg, font: this.theme.font, userSelect: 'none', touchAction: 'none' });
     this.canvas = document.createElement('canvas');
@@ -112,6 +124,19 @@ export class Chart {
     this.tooltip = el('div', { class: 'cc-tip' }) as HTMLDivElement;
     Object.assign(this.tooltip.style, { position: 'absolute', display: 'none', pointerEvents: 'none', zIndex: '6', background: this.theme.panelBg, border: `1px solid ${this.theme.panelBorder}`, color: this.theme.text, padding: '6px 8px', borderRadius: '6px', maxWidth: '280px', whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.35' });
     this.root.appendChild(this.tooltip);
+    // TradingView's corner: reset the scales; and "go to the latest bar" when scrolled back
+    const small = (title: string, label: string) => {
+      const b = el('button', { title, style: `position:absolute;z-index:5;display:flex;align-items:center;justify-content:center;background:${this.theme.panelBg};border:1px solid ${this.theme.panelBorder};color:${this.theme.text};border-radius:6px;cursor:pointer;font-size:12px;line-height:1` }, [label]) as HTMLButtonElement;
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      this.root.appendChild(b);
+      return b;
+    };
+    this.cornerBtn = small('Reset the price and time scales (Alt+R)', '⟲');
+    Object.assign(this.cornerBtn.style, { right: '4px', bottom: '3px', width: `${AXIS_W - 10}px`, height: `${TIME_H - 6}px` });
+    this.cornerBtn.addEventListener('click', () => this.resetScales());
+    this.liveBtn = small('Go to the latest bar', '»');
+    Object.assign(this.liveBtn.style, { right: `${AXIS_W + 8}px`, bottom: `${TIME_H + 8}px`, width: '26px', height: '24px', display: 'none' });
+    this.liveBtn.addEventListener('click', () => this.scrollToRealtime());
     this.drawingBar = new DrawingBar(this.root, this.theme, {
       change: (patch) => this.patchSelected(patch),
       remove: () => this.deleteSelected(),
@@ -190,7 +215,8 @@ export class Chart {
   /** Chart settings (candle colours, grid, session breaks). `onApply` also gets whether to copy it to the other charts. */
   openSettings(opts: { allOption?: boolean; onApply?: (st: ChartState, all: boolean) => void } = {}) {
     this.dialog?.close();
-    this.dialog = new ChartSettingsDialog(this.root, this.theme, { candles: this.candles, grid: this.grid, sessionBreaks: this.sessionBreaks }, !!opts.allOption, (v, all) => {
+    this.dialog = new ChartSettingsDialog(this.root, this.theme, { type: this.type, candles: this.candles, grid: this.grid, sessionBreaks: this.sessionBreaks }, !!opts.allOption, (v, all) => {
+      if (v.type !== this.type) { this.type = v.type; this.recompute(); }
       this.candles = v.candles; this.grid = v.grid; this.sessionBreaks = v.sessionBreaks;
       this.emit({ type: 'stateChange' });
       this.invalidate();
@@ -280,6 +306,17 @@ export class Chart {
     this.panes[0].auto = true;
     this.invalidate();
   }
+
+  /** Live orders / the position as lines (drag to move, ✕ to cancel); replaces the previous set and any drag preview. */
+  setOrderLines(lines: OrderLine[]) { this.orders = lines.slice(); this.orderPreview = null; this.invalidate(); }
+  /** Best bid / ask as dashed lines (undefined hides them). */
+  setBidAsk(bid?: number, ask?: number) {
+    if (this.bidAsk.bid === bid && this.bidAsk.ask === ask) return;
+    this.bidAsk = { bid, ask };
+    this.invalidate();
+  }
+  /** true when a price or time scale was changed by hand (the reset button is worth showing) */
+  isScaled(): boolean { return this.panes.some((p) => !p.auto) || Math.abs(this.right - (this.bars.length - 1 + RIGHT_GAP)) > 1; }
 
   /** Show another chart's crosshair time here (synced layouts). */
   setCrosshairTime(t: number | null) { this.extCross = t; this.invalidate(); }
@@ -467,12 +504,46 @@ export class Chart {
       this.emit({ type: 'focus' });
       if (e.button !== 0) return;
       const { x, y } = pos(e);
-      this.downAt = { x, y };
       cv.setPointerCapture(e.pointerId);
+      if (e.pointerType === 'touch') {
+        this.touches.set(e.pointerId, { x, y });
+        if (this.touches.size === 2) {
+          // two fingers: pinch to zoom the time scale around their middle
+          const [a, b] = [...this.touches.values()];
+          const mx = (a.x + b.x) / 2;
+          this.drag = { kind: 'pinch', d0: Math.max(10, Math.abs(a.x - b.x)), spacing: this.spacing, i0: this.idx(mx), x0: mx };
+          return;
+        }
+      }
+      this.downAt = { x, y };
       this.onDown(x, y, e);
     });
-    cv.addEventListener('pointermove', (e) => { const { x, y } = pos(e); this.mouse = { x, y }; this.onMove(x, y); });
-    cv.addEventListener('pointerup', (e) => { const { x, y } = pos(e); try { cv.releasePointerCapture(e.pointerId); } catch { /* not captured */ } this.onUp(x, y); });
+    cv.addEventListener('pointermove', (e) => {
+      const { x, y } = pos(e);
+      if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) this.touches.set(e.pointerId, { x, y });
+      const dr = this.drag;
+      if (dr?.kind === 'pinch') {
+        const [a, b] = [...this.touches.values()];
+        if (a && b) {
+          this.spacing = Math.max(MIN_SPACING, Math.min(MAX_SPACING, dr.spacing * (Math.max(10, Math.abs(a.x - b.x)) / dr.d0)));
+          this.right = dr.i0 + (this.plotW - dr.x0) / this.spacing;
+          this.clampRight();
+          this.invalidate();
+        }
+        return;
+      }
+      this.mouse = { x, y };
+      this.onMove(x, y);
+    });
+    const up = (e: PointerEvent) => {
+      const { x, y } = pos(e);
+      try { cv.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+      this.touches.delete(e.pointerId);
+      if (this.drag?.kind === 'pinch') { if (this.touches.size === 0) this.drag = null; return; }
+      this.onUp(x, y);
+    };
+    cv.addEventListener('pointerup', up);
+    cv.addEventListener('pointercancel', up);
     cv.addEventListener('pointerleave', () => { if (!this.drag) { this.mouse = null; this.tooltip.style.display = 'none'; this.emit({ type: 'crosshair', t: null }); this.invalidate(); } });
     cv.addEventListener('dblclick', (e) => {
       const { x, y } = pos(e);
@@ -545,6 +616,14 @@ export class Chart {
     if (x > this.plotW) { if (pane) this.drag = { kind: 'price', y, pane, min: pane.min, max: pane.max }; return; }
     const main = this.main();
     const inMain = y < main.top + main.h;
+    // live order lines: ✕ cancels, the box or the line drags
+    if (inMain && !this.tool) {
+      const hit = this.hitOrder(x, y);
+      if (hit) {
+        if (hit.part === 'x') { this.emit({ type: 'orderCancel', id: hit.line.id }); return; }
+        if (hit.line.draggable) { this.drag = { kind: 'order', id: hit.line.id, y0: y, p0: hit.line.price, moved: false }; return; }
+      }
+    }
     // placing a drawing
     if (this.tool && inMain) {
       const def = getTool(this.tool)!;
@@ -653,6 +732,15 @@ export class Chart {
           if (def.moveHandle) def.moveHandle(dr.d, dr.h, at, this.env(dr.d)); else dr.d.points[dr.h] = at;
           break;
         }
+        case 'order': {
+          const m = this.main();
+          const p = Math.round(this.vOf(m, y) / this.tick) * this.tick;
+          if (Math.abs(y - dr.y0) > 2) dr.moved = true;
+          this.orderPreview = { id: dr.id, price: Math.round(p * 100) / 100 };
+          this.root.style.cursor = 'ns-resize';
+          break;
+        }
+        case 'pinch': break;
         case 'brush': {
           const last = dr.d.points[dr.d.points.length - 1], a = this.anchorAt(x, y);
           const lp = { x: this.x(this.tIdx(last.t)), y: this.yOf(this.main(), last.p) };
@@ -673,6 +761,7 @@ export class Chart {
     if (x > this.plotW) cursor = 'ns-resize';
     else if (y > this.plotH) cursor = 'ew-resize';
     else if (this.panes.slice(1).some((p) => Math.abs(y - p.top) < 4)) cursor = 'row-resize';
+    else if (!this.tool && this.hitOrder(x, y)) { const h = this.hitOrder(x, y)!; cursor = h.part === 'x' ? 'pointer' : h.line.draggable ? 'ns-resize' : 'default'; }
     else if (!this.tool) {
       if (this.selected && this.handlesOf(this.selected).some((p) => Math.hypot(p.x - x, p.y - y) < 8)) cursor = 'move';
       else if (this.hitDrawing(x, y)) cursor = 'pointer';
@@ -700,7 +789,10 @@ export class Chart {
     const dr = this.drag;
     this.drag = null;
     this.root.style.cursor = '';
-    if (dr?.kind === 'brush') {
+    if (dr?.kind === 'order') {
+      if (dr.moved && this.orderPreview && this.orderPreview.price !== dr.p0) this.emit({ type: 'orderMove', id: dr.id, price: this.orderPreview.price, from: dr.p0 });
+      else this.orderPreview = null;
+    } else if (dr?.kind === 'brush') {
       if (dr.d.points.length > 1) { this.pushUndo(); this.drawings.push(dr.d); this.select(dr.d); this.emitDrawings(); }
       this.creating = null; this.setTool(null); this.emit({ type: 'toolDone' });
     } else if (dr && (dr.kind === 'move' || dr.kind === 'handle')) {
@@ -841,8 +933,10 @@ export class Chart {
         this.drawCompare(pane, from, to);
         this.drawLevels(pane);
         this.drawLastPriceLine(pane);
+        this.drawBidAsk(pane);
         this.drawMarkers();
         if (!this.drawingsHidden) this.drawDrawings();
+        this.drawOrders(pane);
       } else {
         for (const x of this.inds) if (x.st.pane === pane.id && x.st.visible) this.drawIndicator(pane, x, from, to);
       }
@@ -857,6 +951,8 @@ export class Chart {
     this.drawTimeAxis(ticks);
     this.drawCrosshair();
     this.positionLegends();
+    this.cornerBtn.style.color = this.isScaled() ? this.theme.accent : this.theme.textMuted;
+    this.liveBtn.style.display = this.right < this.bars.length - 1 - 2 ? 'flex' : 'none';
     const hover = this.mouse && this.mouse.x < this.plotW && this.mouse.y < this.plotH ? Math.round(this.idx(this.mouse.x)) : this.extCross !== null ? Math.round(this.tIdx(this.extCross)) : -1;
     this.updateLegendValues(hover >= 0 && hover < this.bars.length ? hover : this.bars.length - 1);
   }
@@ -1190,6 +1286,59 @@ export class Chart {
     }
   }
 
+  private orderBox(l: OrderLine, y: number) {
+    const c = this.c;
+    c.font = this.theme.font;
+    const text = `${l.label}${l.qty ? `  ${l.qty}` : ''}${l.extra ? `  ${l.extra}` : ''}`;
+    const w = c.measureText(text).width + 12, xw = l.cancellable ? 18 : 0, h = 18;
+    const x = Math.max(4, this.plotW - w - xw - 12);
+    return { x, y: y - h / 2, w, xw, h, text };
+  }
+  private hitOrder(x: number, y: number): { line: OrderLine; part: 'box' | 'x' | 'line' } | null {
+    const m = this.main();
+    for (let k = this.orders.length - 1; k >= 0; k--) {
+      const l = this.orders[k];
+      const py = this.yOf(m, this.orderPreview?.id === l.id ? this.orderPreview.price : l.price);
+      if (py < m.top || py > m.top + m.h) continue;
+      const b = this.orderBox(l, py);
+      if (y >= b.y && y <= b.y + b.h) {
+        if (l.cancellable && x >= b.x + b.w && x <= b.x + b.w + b.xw) return { line: l, part: 'x' };
+        if (x >= b.x && x <= b.x + b.w) return { line: l, part: 'box' };
+      }
+      if (l.draggable && Math.abs(y - py) < 4 && x < this.plotW) return { line: l, part: 'line' };
+    }
+    return null;
+  }
+  private drawOrders(pane: Pane) {
+    const c = this.c;
+    for (const l of this.orders) {
+      const price = this.orderPreview?.id === l.id ? this.orderPreview.price : l.price;
+      const y = Math.round(this.yOf(pane, price)) + 0.5;
+      if (y < pane.top || y > pane.top + pane.h) continue;
+      c.strokeStyle = l.color; c.lineWidth = 1; c.setLineDash([4, 3]);
+      c.beginPath(); c.moveTo(0, y); c.lineTo(this.plotW, y); c.stroke(); c.setLineDash([]);
+      const b = this.orderBox(l, y);
+      c.fillStyle = this.theme.bg; c.fillRect(b.x, b.y, b.w + b.xw, b.h);
+      c.strokeStyle = l.color; c.strokeRect(b.x + 0.5, b.y + 0.5, b.w + b.xw - 1, b.h - 1);
+      c.fillStyle = l.color; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.fillText(b.text, b.x + 6, y);
+      if (b.xw) {
+        c.fillStyle = l.color; c.fillRect(b.x + b.w, b.y, b.xw, b.h);
+        c.fillStyle = '#0A1118'; c.textAlign = 'center'; c.fillText('✕', b.x + b.w + b.xw / 2, y);
+      }
+    }
+  }
+  private drawBidAsk(pane: Pane) {
+    const c = this.c;
+    for (const [v, col] of [[this.bidAsk.bid, '#4FA3F7'], [this.bidAsk.ask, '#F06B7C']] as const) {
+      if (v === undefined || !(v > 0)) continue;
+      const y = Math.round(this.yOf(pane, v)) + 0.5;
+      if (y < pane.top || y > pane.top + pane.h) continue;
+      c.strokeStyle = col; c.lineWidth = 1; c.setLineDash([2, 3]);
+      c.beginPath(); c.moveTo(0, y); c.lineTo(this.plotW, y); c.stroke(); c.setLineDash([]);
+    }
+  }
+
   private drawLastPriceLine(pane: Pane) {
     const b = this.bars[this.bars.length - 1]; if (!b) return;
     const y = Math.round(this.yOf(pane, b.c)) + 0.5, c = this.c;
@@ -1230,6 +1379,9 @@ export class Chart {
           const b0 = this.compareBase(s), v = this.compareAt(s, this.bars.length - 1, b0);
           if (v !== undefined) this.axisTag(this.yOf(p, v), `${(((v / this.base()) - 1) * 100).toFixed(2)}%`, s.color, '#0A1118');
         }
+        for (const l of this.orders) { const v = this.orderPreview?.id === l.id ? this.orderPreview.price : l.price; const y = this.yOf(p, v); if (y > p.top && y < p.top + p.h) this.axisTag(y, fmtPrice(v, this.precision), l.color, '#0A1118'); }
+        if (this.bidAsk.bid) this.axisTag(this.yOf(p, this.bidAsk.bid), fmtPrice(this.bidAsk.bid, this.precision), '#4FA3F7', '#0A1118');
+        if (this.bidAsk.ask) this.axisTag(this.yOf(p, this.bidAsk.ask), fmtPrice(this.bidAsk.ask, this.precision), '#F06B7C', '#0A1118');
         const b = this.bars[this.bars.length - 1];
         if (b) {
           let sub: string | undefined;

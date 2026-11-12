@@ -1,7 +1,7 @@
 import type { ToolDef } from './drawings/tools';
 import type { IndicatorDef } from './indicators/registry';
 import { CANDLE_PRESETS, PALETTE } from './theme';
-import type { CandleStyle, Drawing, DrawingStyle, IndicatorState, Theme } from './types';
+import type { CandleStyle, ChartType, Drawing, DrawingStyle, IndicatorState, Theme } from './types';
 
 /** Tiny DOM helper: el('div', { class: 'x', style: '...' }, ['text', child]) */
 export function el(tag: string, attrs: Record<string, string> = {}, children: (Node | string)[] = []): HTMLElement {
@@ -9,6 +9,54 @@ export function el(tag: string, attrs: Record<string, string> = {}, children: (N
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
   for (const c of children) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
   return e;
+}
+
+/** one stylesheet for the chart's floating UI: thin scrollbars in the theme's colours */
+function ensureStyles(th: Theme) {
+  if (typeof document === 'undefined' || document.getElementById('cc-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'cc-styles';
+  st.textContent = `.cc-scroll{scrollbar-width:thin;scrollbar-color:${th.panelBorder} transparent}
+.cc-scroll::-webkit-scrollbar{width:8px;height:8px}.cc-scroll::-webkit-scrollbar-track{background:transparent}
+.cc-scroll::-webkit-scrollbar-thumb{background:${th.panelBorder};border-radius:8px;border:2px solid ${th.panelBg}}
+.cc-scroll::-webkit-scrollbar-thumb:hover{background:${th.textMuted}}
+.cc-float select,.cc-float input[type=number]{color-scheme:dark}
+.cc-float input[type=range]{accent-color:${th.accent}}`;
+  document.head.appendChild(st);
+}
+
+/**
+ * A popover pinned next to `anchor`, on top of everything (never clipped by a dialog's scroll box). Closes on a press
+ * outside it, on Escape, or when the returned function is called. Flips above / left when there is no room.
+ */
+export function floatPopover(th: Theme, anchor: HTMLElement, content: HTMLElement, onClose?: () => void): () => void {
+  ensureStyles(th);
+  const pop = el('div', { class: 'cc-float cc-scroll' }) as HTMLDivElement;
+  Object.assign(pop.style, { position: 'fixed', zIndex: '2147483001', background: th.panelBg, border: `1px solid ${th.panelBorder}`, borderRadius: '10px', padding: '8px', boxShadow: '0 12px 32px rgba(0,0,0,.5)', color: th.text, font: th.font, maxHeight: '70vh', overflow: 'auto' });
+  pop.appendChild(content);
+  document.body.appendChild(pop);
+  const place = () => {
+    const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    let left = r.left, top = r.bottom + 6;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    pop.style.left = `${left}px`; pop.style.top = `${top}px`;
+  };
+  place();
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    pop.remove();
+    window.removeEventListener('pointerdown', outside, true);
+    window.removeEventListener('keydown', esc, true);
+    window.removeEventListener('resize', close);
+    onClose?.();
+  };
+  const outside = (e: PointerEvent) => { if (!pop.contains(e.target as Node) && !anchor.contains(e.target as Node)) close(); };
+  const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  setTimeout(() => { if (!closed) { window.addEventListener('pointerdown', outside, true); window.addEventListener('keydown', esc, true); window.addEventListener('resize', close); } }, 0);
+  return close;
 }
 
 const btnCss = (th: Theme, on = false) => `background:${on ? th.panelBorder : 'transparent'};border:0;color:${th.text};border-radius:4px;padding:4px 7px;cursor:pointer;font-size:12px;line-height:16px`;
@@ -69,49 +117,45 @@ function joinColor(hex: string, a: number): string {
 }
 
 /** Colour picker: the palette, a free choice and opacity (TradingView's picker in small). */
-export function colorPicker(th: Theme, value: string, onPick: (c: string) => void): HTMLElement {
+export function colorPicker(th: Theme, value: string, onPick: (c: string, final: boolean) => void): HTMLElement {
   let [hex, alpha] = splitColor(value);
   const wrap = el('div', { style: 'display:flex;flex-direction:column;gap:6px;width:176px' });
   const grid = el('div', { style: 'display:flex;flex-wrap:wrap;gap:4px' });
   for (const c of [...PALETTE, '#FFFFFF', '#000000']) {
     const sw = el('button', { title: c, style: `width:18px;height:18px;border-radius:4px;border:2px solid ${c.toLowerCase() === hex.toLowerCase() ? th.text : th.panelBorder};background:${c};cursor:pointer;padding:0` });
-    sw.addEventListener('click', (e) => { e.stopPropagation(); hex = c; onPick(joinColor(hex, alpha)); });
+    sw.addEventListener('click', (e) => { e.stopPropagation(); hex = c; onPick(joinColor(hex, alpha), true); });
     grid.appendChild(sw);
   }
   const free = el('input', { type: 'color', value: hex, title: 'Any colour', style: 'width:22px;height:20px;border:0;padding:0;background:none;cursor:pointer' }) as HTMLInputElement;
-  free.addEventListener('input', () => { hex = free.value; onPick(joinColor(hex, alpha)); });
+  free.addEventListener('input', () => { hex = free.value; onPick(joinColor(hex, alpha), false); });
   grid.appendChild(free);
   wrap.appendChild(grid);
   const row = el('label', { style: `display:flex;align-items:center;gap:6px;font-size:11px;color:${th.textMuted}` }, ['Opacity']);
   const op = el('input', { type: 'range', min: '0', max: '100', value: String(Math.round(alpha * 100)), style: 'flex:1' }) as HTMLInputElement;
   const pct = el('span', { style: 'width:30px;text-align:right' }, [`${Math.round(alpha * 100)}%`]);
-  op.addEventListener('input', () => { alpha = Number(op.value) / 100; pct.textContent = `${op.value}%`; });
-  op.addEventListener('change', () => onPick(joinColor(hex, alpha)));
+  op.addEventListener('input', () => { alpha = Number(op.value) / 100; pct.textContent = `${op.value}%`; onPick(joinColor(hex, alpha), false); });
   row.append(op, pct);
   wrap.appendChild(row);
   return wrap;
 }
 
-/** a colour swatch button that opens the picker in a small popover next to it */
+/** a colour swatch button that opens the picker as a floating popover; a palette colour closes it at once */
 function swatchButton(th: Theme, value: string, onPick: (c: string) => void): HTMLElement {
-  const holder = el('span', { style: 'position:relative;display:inline-block' });
-  const sw = el('button', { title: 'Colour', style: `width:24px;height:20px;border-radius:4px;border:1px solid ${th.panelBorder};background:linear-gradient(${value},${value}),repeating-conic-gradient(#777 0 25%,#bbb 0 50%) 0 0/8px 8px;cursor:pointer;padding:0` });
-  let pop: HTMLElement | null = null;
+  const bg = (c: string) => `linear-gradient(${c},${c}),repeating-conic-gradient(#777 0 25%,#bbb 0 50%) 0 0/8px 8px`;
+  const sw = el('button', { title: 'Colour', style: `width:26px;height:22px;border-radius:5px;border:1px solid ${th.panelBorder};background:${bg(value)};cursor:pointer;padding:0;flex:none` });
+  let close: (() => void) | null = null;
   sw.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (pop) { pop.remove(); pop = null; return; }
-    pop = el('div', { style: `position:absolute;right:0;top:24px;z-index:5;background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:8px;padding:8px;box-shadow:0 10px 30px rgba(0,0,0,.45)` }, [colorPicker(th, value, (c) => { value = c; sw.style.background = `linear-gradient(${c},${c}),repeating-conic-gradient(#777 0 25%,#bbb 0 50%) 0 0/8px 8px`; onPick(c); })]);
-    pop.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-    holder.appendChild(pop);
+    if (close) { close(); return; }
+    close = floatPopover(th, sw, colorPicker(th, value, (c, final) => { value = c; sw.style.background = bg(c); onPick(c); if (final) close?.(); }), () => { close = null; });
   });
-  holder.appendChild(sw);
-  return holder;
+  return sw;
 }
 
 /** The floating bar over a selected drawing: colour, width, line style, text, lock, clone, delete. */
 export class DrawingBar {
   private box: HTMLDivElement;
-  private pop: HTMLDivElement | null = null;
+  private pop: (() => void) | null = null;
   constructor(host: HTMLElement, private th: Theme, private on: { change: (p: Partial<DrawingStyle>) => void; remove: () => void; lock: () => void; clone: () => void }) {
     this.box = el('div', { class: 'cc-dbar' }) as HTMLDivElement;
     Object.assign(this.box.style, { position: 'absolute', top: '34px', left: '50%', transform: 'translateX(-50%)', zIndex: '7', display: 'none', gap: '2px', alignItems: 'center', background: th.panelBg, border: `1px solid ${th.panelBorder}`, borderRadius: '8px', padding: '3px', boxShadow: '0 6px 20px rgba(0,0,0,.35)' });
@@ -119,13 +163,10 @@ export class DrawingBar {
     host.appendChild(this.box);
   }
   hide() { this.box.style.display = 'none'; this.closePop(); }
-  private closePop() { this.pop?.remove(); this.pop = null; }
+  private closePop() { const c = this.pop; this.pop = null; c?.(); }
   private popup(anchor: HTMLElement, content: HTMLElement) {
     this.closePop();
-    const p = el('div', {}, [content]) as HTMLDivElement;
-    Object.assign(p.style, { position: 'absolute', top: '100%', left: `${anchor.offsetLeft}px`, marginTop: '4px', background: this.th.panelBg, border: `1px solid ${this.th.panelBorder}`, borderRadius: '8px', padding: '8px', zIndex: '8' });
-    this.box.appendChild(p);
-    this.pop = p;
+    this.pop = floatPopover(this.th, anchor, content, () => { this.pop = null; });
   }
   show(d: Drawing, def: ToolDef) {
     const th = this.th, b = this.box;
@@ -138,10 +179,10 @@ export class DrawingBar {
       return x;
     };
     b.appendChild(el('span', { style: `color:${th.textMuted};font-size:11px;padding:0 6px` }, [def.label]));
-    const swatch = add('', 'Colour', (x) => this.popup(x, colorPicker(th, d.style.color, (c) => { this.on.change({ color: c }); this.closePop(); this.show({ ...d, style: { ...d.style, color: c } }, def); })));
+    const swatch = add('', 'Colour', (x) => this.popup(x, colorPicker(th, d.style.color, (c, final) => { this.on.change({ color: c }); d = { ...d, style: { ...d.style, color: c } }; if (final) { this.closePop(); this.show(d, def); } })));
     swatch.appendChild(el('span', { style: `display:inline-block;width:14px;height:14px;border-radius:3px;background:${d.style.color};vertical-align:middle` }));
     if (d.style.fill !== undefined) {
-      add('Fill', 'Fill colour', (x) => this.popup(x, colorPicker(th, d.style.fill ?? '', (c) => { const fill = c; this.on.change({ fill }); this.closePop(); this.show({ ...d, style: { ...d.style, fill } }, def); })));
+      add('Fill', 'Fill colour', (x) => this.popup(x, colorPicker(th, d.style.fill ?? '', (c, final) => { this.on.change({ fill: c }); d = { ...d, style: { ...d.style, fill: c } }; if (final) { this.closePop(); this.show(d, def); } })));
     }
     if (!['text', 'long', 'short', 'measure'].includes(def.type)) {
       add(`${d.style.width}px`, 'Line width', (x) => {
@@ -169,25 +210,34 @@ export class DrawingBar {
   }
 }
 
+/** the dimmed full-window backdrop a dialog sits on (in document.body: never cut by the chart's box) */
+function dialogScrim(th: Theme, close: () => void): HTMLDivElement {
+  ensureStyles(th);
+  const scrim = el('div', { class: 'cc-scrim' }) as HTMLDivElement;
+  Object.assign(scrim.style, { position: 'fixed', inset: '0', background: 'rgba(5,9,13,0.6)', zIndex: '2147483000', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px' });
+  scrim.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === scrim) close(); });
+  document.body.appendChild(scrim);
+  return scrim;
+}
+
 /** Settings of one indicator: its inputs and how each line looks. */
 export class IndicatorDialog {
   private box: HTMLDivElement;
   private st: IndicatorState;
   constructor(host: HTMLElement, private th: Theme, private def: IndicatorDef, st: IndicatorState, private onApply: (st: IndicatorState) => void, private onClose: () => void) {
     this.st = JSON.parse(JSON.stringify(st));
-    const scrim = el('div') as HTMLDivElement;
-    Object.assign(scrim.style, { position: 'absolute', inset: '0', background: 'rgba(5,9,13,0.55)', zIndex: '20', display: 'flex', alignItems: 'center', justifyContent: 'center' });
-    scrim.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === scrim) this.close(); });
-    scrim.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') this.close(); });
-    this.box = scrim;
-    host.appendChild(scrim);
+    this.box = dialogScrim(th, () => this.close());
+    void host;
     this.draw();
   }
-  close() { this.box.remove(); this.onClose(); }
+  close() { this.box.remove(); window.removeEventListener('keydown', this.esc, true); this.onClose(); }
+  private esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.cc-float')) { e.stopPropagation(); this.close(); } };
   private draw() {
+    window.removeEventListener('keydown', this.esc, true);
+    window.addEventListener('keydown', this.esc, true);
     const th = this.th, d = this.def, st = this.st;
     this.box.innerHTML = '';
-    const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;min-width:300px;max-width:min(420px,92%);max-height:85%;overflow:auto;color:${th.text};font-size:12px;box-shadow:0 20px 50px rgba(0,0,0,.5)` });
+    const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(440px,94vw);max-height:calc(100dvh - 24px);overflow:auto;color:${th.text};font:${th.font};font-size:12.5px;box-shadow:0 20px 50px rgba(0,0,0,.5)`, class: 'cc-scroll cc-float-dialog' });
     card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, [d.name]));
     const body = el('div', { style: 'padding:10px 14px;display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center' });
     const inputCss = `background:${th.bg};border:1px solid ${th.panelBorder};color:${th.text};border-radius:6px;padding:4px 6px;width:110px`;
@@ -261,7 +311,8 @@ export class IndicatorDialog {
   }
 }
 
-export interface ChartSettings { candles: CandleStyle; grid: boolean; sessionBreaks: boolean }
+export interface ChartSettings { type: ChartType; candles: CandleStyle; grid: boolean; sessionBreaks: boolean }
+const TYPES: [ChartType, string][] = [['candles', 'Candles'], ['hollow', 'Hollow candles'], ['heikin', 'Heikin Ashi'], ['bars', 'Bars'], ['line', 'Line'], ['area', 'Area']];
 
 /** Chart settings (TradingView's "Symbol" tab in small): candle bodies, outlines and wicks, grid, session breaks. */
 export class ChartSettingsDialog {
@@ -270,23 +321,30 @@ export class ChartSettingsDialog {
   private all = true;
   constructor(host: HTMLElement, private th: Theme, v: ChartSettings, private allOption: boolean, private onApply: (v: ChartSettings, all: boolean) => void, private onClose: () => void) {
     this.v = JSON.parse(JSON.stringify(v));
-    const scrim = el('div') as HTMLDivElement;
-    Object.assign(scrim.style, { position: 'absolute', inset: '0', background: 'rgba(5,9,13,0.55)', zIndex: '20', display: 'flex', alignItems: 'center', justifyContent: 'center' });
-    scrim.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === scrim) this.close(); });
-    scrim.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') this.close(); });
-    this.box = scrim;
-    host.appendChild(scrim);
+    this.box = dialogScrim(th, () => this.close());
+    void host;
     this.draw();
   }
-  close() { this.box.remove(); this.onClose(); }
+  close() { this.box.remove(); window.removeEventListener('keydown', this.esc, true); this.onClose(); }
+  private esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.cc-float')) { e.stopPropagation(); this.close(); } };
   private draw() {
+    window.removeEventListener('keydown', this.esc, true);
+    window.addEventListener('keydown', this.esc, true);
     const th = this.th, v = this.v;
     this.box.innerHTML = '';
-    const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(360px,92%);max-height:88%;overflow:auto;color:${th.text};font-size:12px;box-shadow:0 20px 50px rgba(0,0,0,.5)` });
+    const card = el('div', { style: `background:${th.panelBg};border:1px solid ${th.panelBorder};border-radius:12px;width:min(380px,94vw);max-height:calc(100dvh - 24px);overflow:auto;color:${th.text};font:${th.font};font-size:12.5px;box-shadow:0 20px 50px rgba(0,0,0,.5)`, class: 'cc-scroll cc-float-dialog' });
     card.appendChild(el('div', { style: `padding:12px 14px;border-bottom:1px solid ${th.panelBorder};font-weight:600;font-size:13px` }, ['Chart settings']));
     const body = el('div', { style: 'padding:10px 14px;display:grid;grid-template-columns:1fr auto auto;gap:8px 12px;align-items:center' });
     const head = (t: string) => body.appendChild(el('div', { style: `grid-column:1/-1;color:${th.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-top:4px` }, [t]));
-    head('Candles');
+    head('Chart type');
+    const types = el('div', { style: 'grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap' });
+    for (const [t, label] of TYPES) {
+      const b = el('button', { style: `background:${v.type === t ? th.panelBorder : th.bg};border:1px solid ${v.type === t ? th.accent : th.panelBorder};color:${th.text};border-radius:6px;padding:4px 8px;cursor:pointer` }, [label]);
+      b.addEventListener('click', () => { v.type = t; this.draw(); });
+      types.appendChild(b);
+    }
+    body.appendChild(types);
+    head('Candle colours');
     const presets = el('div', { style: 'grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap' });
     for (const p of CANDLE_PRESETS) {
       const b = el('button', { style: `background:${th.bg};border:1px solid ${th.panelBorder};color:${th.text};border-radius:6px;padding:4px 8px;cursor:pointer` }, [p.label]);
