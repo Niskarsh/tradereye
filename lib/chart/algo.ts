@@ -34,7 +34,7 @@ export interface AlgoClose {
 }
 export interface AlgoOrder { slot: number; time: string; side: 'short' | 'long'; qty: number; price: number; avgPrice?: number; stop: number; target: number; status: string; sentAt: number; scoreR: number }
 export interface AlgoView {
-  date: string; symbol: string; onList: boolean; listSize: number; vetoed: boolean;
+  date: string; symbol: string; securityId?: string; onList: boolean; listSize: number; vetoed: boolean;
   bar: number | null; standAside: boolean;
   model?: { iteration: number | null; month: string; version: string; leansOnMost: string[] };
   closes: AlgoClose[];
@@ -90,7 +90,7 @@ export async function algoView(d: WhyDeps & { store: Store }, date: string, symb
   const notes: string[] = [];
   const onList = state.list.some((x) => x.symbol === symbol);
   const view: AlgoView = {
-    date, symbol, onList, listSize: state.list.length, vetoed: state.vetoes.includes(symbol),
+    date, symbol, securityId: state.list.find((x) => x.symbol === symbol)?.securityId, onList, listSize: state.list.length, vetoed: state.vetoes.includes(symbol),
     bar: state.model?.threshold ?? null, standAside: !!state.model?.standAside, closes: closesOf(state, symbol),
     orders: state.orders.filter((o) => o.symbol === symbol).map((o) => ({
       slot: o.slot, time: slotTime(o.slot), side: o.target < o.price ? 'short' : 'long', qty: o.qty, price: o.price, avgPrice: o.avgPrice,

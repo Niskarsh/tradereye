@@ -1,9 +1,10 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, ChevronDown, ExternalLink, Search, X } from 'lucide-react';
+import { Camera, ChevronDown, ExternalLink, Maximize2, Minimize2, Search, X } from 'lucide-react';
 import { intervalLabel, listIndicators, listTools, MONO_CANDLES, type Chart, type ChartType } from '@/packages/candle-chart/src';
 import { useAuth } from '@/context/AuthContext';
 import { sharedFeed, type FeedStatus } from '@/lib/chart/feed';
+import { seriesFor } from '@/lib/chart/series';
 import type { AlgoView } from '@/lib/chart/algo';
 import { ChartPane } from './ChartPane';
 import { AlgoPanel } from './AlgoPanel';
@@ -136,6 +137,10 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   const [feed, setFeed] = useState<FeedStatus>({ state: 'off', leader: false });
   const [toolGroup, setToolGroup] = useState<string | null>(null);
   const charts = useRef(new Map<string, Chart>());
+  // expanded: the charts cover the whole window, over the site's top menu (remembered in this browser)
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { try { setExpanded(localStorage.getItem('tradereye-chart-expanded') === '1'); } catch { /* private mode */ } }, []);
+  const toggleExpanded = () => setExpanded((e) => { try { localStorage.setItem('tradereye-chart-expanded', e ? '0' : '1'); } catch { /* private mode */ } return !e; });
   const [, force] = useState(0);
   const date = algoDate ?? istDate();
 
@@ -195,9 +200,10 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message ?? `HTTP ${r.status}`);
       setAlgo(j as AlgoView); setAlgoErr('');
+      if ((j as AlgoView).securityId) seriesFor(symbol, () => token).setSid((j as AlgoView).securityId!);
       if (slot == null) setAlgoSlot((j as AlgoView).reasonsAt ?? null);
     } catch (e) { setAlgoErr((e as Error).message); }
-  }, [symbol, date]);
+  }, [symbol, date, token]);
   useEffect(() => { setAlgo(null); void loadAlgo(null); }, [loadAlgo]);
   useEffect(() => {
     const id = setInterval(() => {
@@ -225,11 +231,11 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   const shell = useRef<HTMLDivElement>(null);
   const [h, setH] = useState(600);
   useEffect(() => {
-    const fit = () => { const top = shell.current?.getBoundingClientRect().top ?? 80; setH(Math.max(360, window.innerHeight - top)); };
+    const fit = () => { const top = expanded ? 0 : shell.current?.getBoundingClientRect().top ?? 80; setH(Math.max(360, window.innerHeight - top)); };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [layout === null]);
+  }, [layout === null, expanded]);
 
   // dividers
   const grid = useRef<HTMLDivElement>(null);
@@ -289,7 +295,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   const feedText = feed.state === 'live' ? 'Live' : feed.message ?? (feed.state === 'connecting' ? 'Connecting' : 'Not live');
 
   return (
-    <div ref={shell} style={{ height: h }} className="flex flex-col bg-brand-bg text-ink-2">
+    <div ref={shell} style={{ height: expanded ? '100dvh' : h }} className={`flex flex-col bg-brand-bg text-ink-2 ${expanded ? 'fixed inset-0 z-[70]' : ''}`}>
       <style>{`.tb{display:inline-flex;align-items:center;gap:4px;border-radius:6px;padding:5px 8px;font-size:12.5px;color:var(--ink-2);white-space:nowrap}.tb:hover{background:rgba(232,234,240,.06);color:#fff}.tb-on{color:var(--candlelight-gold)!important;background:rgba(223,177,91,.1)}.tb-sep{width:1px;align-self:stretch;margin:4px 4px;background:var(--line)}`}</style>
       {/* top bar */}
       <div className="flex flex-wrap items-center gap-0.5 border-b border-line bg-brand-section px-2 py-1">
@@ -339,6 +345,9 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
         <button className="tb" onClick={() => activeChart?.redo()} title="Redo (Ctrl+Shift+Z)"><ToolIcon name="redo" className="size-4" /></button>
         <button className="tb" onClick={shot} title="Download a picture of the active chart"><Camera className="size-4" /></button>
         <a className="tb" href={`/chart?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noreferrer" title="Open in a new tab"><ExternalLink className="size-4" /></a>
+        <button className={`tb ${expanded ? 'tb-on' : ''}`} onClick={toggleExpanded} title={expanded ? 'Back to the page (show the top menu)' : 'Expand the charts over the whole window'}>
+          {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </button>
         <span className="tb" title={feed.leader ? 'This tab holds the live feed for every chart tab' : 'Live prices come through the chart tab that holds the feed'}>
           <span className={`size-2 rounded-full ${feedDot}`} />{feedText}
         </span>

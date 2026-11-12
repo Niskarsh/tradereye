@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { lookupSecurityId, type Candles } from '@/lib/dhan';
+import type { Candles } from '@/lib/dhan';
 import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { getChunk, putChunk } from '@/lib/book/s3';
 import { joinCandles, minuteDays, NIFTY500, NIFTY_SYMBOL, weekdaysBack, type Counts, type Instrument } from '@/lib/candles/store';
 import { algoQuietMs } from '@/lib/chart/quiet';
+import { resolveSid } from '@/lib/chart/sid';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
     const index = symbol === NIFTY_SYMBOL;
     let securityId = index ? NIFTY500.securityId : /^\d{1,10}$/.test(String(b?.securityId ?? '')) ? String(b.securityId) : undefined;
     const resolveId = async () => {
-      securityId ??= await lookupSecurityId(symbol);
+      securityId ??= await resolveSid(symbol);
       if (!securityId) throw new Error(`${symbol} is not in Dhan's NSE equity list.`);
       return securityId;
     };
@@ -58,8 +59,8 @@ export async function POST(req: Request) {
 
     const n: Counts = { fromS3: 0, fromDhan: 0, saved: 0, dhanCalls: 0, s3Errors: 0, notSaved: 0 };
     const days = weekdaysBack(to, span);
-    const r = await minuteDays({ store: { get: getChunk, put: putChunk }, dhan, lookupSecurityId: (s) => lookupSecurityId(s) }, ins, days, undefined, n, resolveId);
-    securityId ??= r.securityId ?? (index ? NIFTY500.securityId : await lookupSecurityId(symbol));
+    const r = await minuteDays({ store: { get: getChunk, put: putChunk }, dhan, lookupSecurityId: (s) => resolveSid(s) }, ins, days, undefined, n, resolveId);
+    securityId ??= r.securityId ?? (index ? NIFTY500.securityId : await resolveSid(symbol));
     const partial = n.notSaved > 0;
     return NextResponse.json({
       symbol, securityId, segment: ins.segment, c: r.c,
