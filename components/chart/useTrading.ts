@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OrderLine } from '@/packages/candle-chart/src';
 import type { ScalerBook, ScalerWorking } from '@/lib/algoLive/scaler';
 import { seriesFor } from '@/lib/chart/series';
+import { fetchT } from '@/lib/chart/fetchTimeout';
 
 /**
  * The active chart's stock as a trade: its position and working orders (through trading-scaler, every 5 s in market
@@ -42,7 +43,7 @@ export function useTrading(symbol: string, token: string) {
   const call = useCallback(async (action: string, extra: Record<string, unknown> = {}) => {
     const securityId = sid();
     if (!securityId) throw new Error('The stock\'s Dhan id is not known yet: wait for its chart to load.');
-    const r = await fetch('/api/chart/trade', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': tokenRef.current }, body: JSON.stringify({ action, securityId, symbol, ...extra }) });
+    const r = await fetchT('/api/chart/trade', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': tokenRef.current }, body: JSON.stringify({ action, securityId, symbol, ...extra }) }, action === 'book' ? 20_000 : 65_000);
     const j = await r.json().catch(() => ({}));
     if (j?.book) setBook(j.book as ScalerBook);
     if (!r.ok) throw new Error(j?.message ?? `HTTP ${r.status}`);

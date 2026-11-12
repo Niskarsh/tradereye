@@ -109,6 +109,20 @@ export function ChartPane(p: PaneProps) {
   // what to say while the chart has no candles (loading, waiting for an Algo close, or why it failed)
   const [info, setInfo] = useState<{ state: string; message?: string; empty: boolean }>({ state: 'loading', empty: true });
   const [retry, setRetry] = useState(0);
+  // how long the chart has been loading (a phone can freeze a request; the box offers Retry and says how long)
+  const [since, setSince] = useState(() => Date.now());
+  const [, tick] = useState(0);
+  useEffect(() => { setSince(Date.now()); }, [symbol, interval, retry]);
+  const loading = info.empty && (info.state === 'loading' || info.state === 'waiting');
+  useEffect(() => {
+    if (!loading) return;
+    const t = setInterval(() => tick((x) => x + 1), 1000);
+    // back to this tab after the phone froze it: a load stuck for 20 s starts again
+    const vis = () => { if (!document.hidden && Date.now() - since > 20_000) setRetry((r) => r + 1); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+  }, [loading, since]);
+  const waited = Math.round((Date.now() - since) / 1000);
 
   // the chart itself: made once per pane
   useEffect(() => {
@@ -221,7 +235,12 @@ export function ChartPane(p: PaneProps) {
               <button onClick={() => setRetry((r) => r + 1)} className="mt-2 rounded-md border border-line-strong px-3 py-1 text-white hover:border-brand-accent">Retry now</button>
               <p className="mt-1 text-[10px] text-ink-4">Retries by itself every 20 s</p>
             </>
-          ) : <p>{info.state === 'waiting' ? info.message : `Loading ${symbol}…`}</p>}
+          ) : (
+            <>
+              <p>{info.state === 'waiting' ? info.message : `Loading ${symbol}…`}{waited >= 3 ? ` ${waited} s` : ''}</p>
+              {waited >= 15 && <button onClick={() => setRetry((r) => r + 1)} className="mt-2 rounded-md border border-line-strong px-3 py-1 text-white hover:border-brand-accent">Retry now</button>}
+            </>
+          )}
         </div>
       )}
       {!p.compact && <button onClick={p.onToggleMax} title={p.maximized ? 'Restore layout (Alt+Enter)' : 'Maximise this chart (Alt+Enter)'}

@@ -6,6 +6,7 @@ import { intervalLabel, listIndicators, listTools, MONO_CANDLES, type Chart } fr
 import { useAuth } from '@/context/AuthContext';
 import { sharedFeed, type FeedStatus } from '@/lib/chart/feed';
 import { seriesFor } from '@/lib/chart/series';
+import { fetchT } from '@/lib/chart/fetchTimeout';
 import type { AlgoView } from '@/lib/chart/algo';
 import { ChartPane } from './ChartPane';
 import { AlgoPanel } from './AlgoPanel';
@@ -220,7 +221,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   const loadAlgo = useCallback(async (slot?: number | null) => {
     if (!symbol) return;
     try {
-      const r = await fetch(`/api/chart/algo?symbol=${encodeURIComponent(symbol)}&date=${date}${slot != null ? `&slot=${slot}` : ''}`, { cache: 'no-store' });
+      const r = await fetchT(`/api/chart/algo?symbol=${encodeURIComponent(symbol)}&date=${date}${slot != null ? `&slot=${slot}` : ''}`, { cache: 'no-store' }, 20_000);
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message ?? `HTTP ${r.status}`);
       setAlgo(j as AlgoView); setAlgoErr('');

@@ -942,7 +942,8 @@ export class Chart {
     c.stroke();
     // session breaks (intraday)
     if (this.sessionBreaks && isIntraday(this.interval) && intervalMinutes(this.interval) < 240) {
-      c.strokeStyle = th.axisLine; c.setLineDash([2, 4]); c.beginPath();
+      // session breaks: a dashed yellow line where a new day starts
+      c.strokeStyle = 'rgba(245,197,66,0.7)'; c.lineWidth = 1; c.setLineDash([5, 4]); c.beginPath();
       for (let i = Math.max(1, from); i <= to; i++) {
         if (localDayStart(this.bars[i].t, this.time.tzOffsetSec) !== localDayStart(this.bars[i - 1].t, this.time.tzOffsetSec)) { const x = Math.round(this.x(i - 0.5)) + 0.5; c.moveTo(x, 0); c.lineTo(x, this.plotH); }
       }
