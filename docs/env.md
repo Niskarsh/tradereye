@@ -88,6 +88,7 @@ Only the values tradereye depends on; the rest are in trading-scaler's `BOT.md`.
 | `BOT_MAX_PER_DAY` | no | the most bot orders a day (default 2). Iteration 15 (Algo Live's wide model) takes up to 3: set `3` before switching to it. Leaving it at 3 on the narrow model is safe (that model never sends more than 2) |
 | `BOT_MAX_NOTIONAL` | no | the biggest position the bot may open, in rupees, checked as qty x stop price (default 75000). The wide model is sized by position (Algo Live page, "Position a trade"): set it about 6% above that size (₹1.5 lakh positions → `160000`). Raise it together with the page's position size |
 | `BOT_FROM`, `BOT_TO` | no | the bot's hours (default 09:30-11:05 IST); both models trade 09:35-10:55 |
+| `BOT_STOP`, `SLM_GRACE_MS` | no | Algo Live's stops are SL-M orders swapped in for the super order's stop leg, unless `BOT_STOP=super`; the stop guard gives an SL-M `SLM_GRACE_MS` (2500) to fill before it steps in |
 | `STOP_GUARD`, `GUARD_TICK_MS`, `GUARD_GRACE_MS`, `EXIT_CHASE_PCT` | no | the stop guard (closes a position whose stop was hit but left unfilled, and drives the Charts page's Flatten): on unless `STOP_GUARD=off`; looks every 2000 ms, acts the moment the price is past the stop (GUARD_GRACE_MS 0), exits with a buy / sell 2% through the last price (fills like a market order). Defaults need no setting. Needs `DHAN_CLIENT_ID` and the Dhan Data API (last prices) |
 
 ### Lambda environments (set by Terraform, never by hand)
