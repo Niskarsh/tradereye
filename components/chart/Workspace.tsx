@@ -378,6 +378,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
           title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop ? 'The position already has a stop' : 'Add a stop (stop-limit, 0.5% limit buffer) and a target at Algo Live\'s levels for this stock (they cancel each other)'}>
           {trade.busy === 'addstop' ? 'Adding…' : 'Add stop'}
         </button>
+        {trade.hasPosition && !trade.hasStop && <span className="tb font-semibold text-data-red-text" title="This position has no stop order: press Add stop, or add one in Dhan">⚠ no stop</span>}
         {trade.bookErr && <span className="tb text-data-caution" title={`Orders could not be read: ${trade.bookErr}`}>⚠ orders off</span>}
         <span className="ml-auto" />
         <Menu label="Layout" title="Layout and sync" wide align="right">{(close) => (

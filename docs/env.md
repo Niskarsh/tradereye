@@ -88,7 +88,7 @@ Only the values tradereye depends on; the rest are in trading-scaler's `BOT.md`.
 | `BOT_MAX_PER_DAY` | no | the most bot orders a day (default 2). Iteration 15 (Algo Live's wide model) takes up to 3: set `3` before switching to it. Leaving it at 3 on the narrow model is safe (that model never sends more than 2) |
 | `BOT_MAX_NOTIONAL` | no | the biggest position the bot may open, in rupees, checked as qty x stop price (default 75000). The wide model is sized by position (Algo Live page, "Position a trade"): set it about 6% above that size (₹1.5 lakh positions → `160000`). Raise it together with the page's position size |
 | `BOT_FROM`, `BOT_TO` | no | the bot's hours (default 09:30-11:05 IST); both models trade 09:35-10:55 |
-| `STOP_LIMIT_BUFFER_PCT` | no | Charts page Add stop: how far past the trigger the stop's limit sits, in % (default 0.5; Dhan's API refuses a stop without a limit price). Add stop also needs Node 22+ on the machine (Dhan's order stream) |
+| `STOP_LIMIT_BUFFER_PCT`, `BOT_ORDERS` | no | Stops (Algo Live's and the Charts page's Add stop) are stop-limits at the exchange; their limit sits `STOP_LIMIT_BUFFER_PCT` % past the trigger (default 0.5; Dhan's API refuses a stop without a limit price). Algo Live places a plain entry, then the stop and target once it fills; `BOT_ORDERS=super` goes back to super orders. Needs Node 22+ on the machine (Dhan's order stream); without it, super orders |
 
 ### Lambda environments (set by Terraform, never by hand)
 | Lambda | Variables |
