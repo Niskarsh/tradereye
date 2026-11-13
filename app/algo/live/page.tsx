@@ -176,6 +176,16 @@ export default function AlgoLivePage() {
     } catch (e) { setErr((e as Error).message); } finally { setBusy(''); }
   }, [api, refresh]);
 
+  // an order's missing stop and / or target, at this order's levels (trading-scaler places it as a linked pair)
+  const pushExits = async (o: { symbol: string; securityId: string; correlationId: string }) => {
+    setBusy(`exits:${o.correlationId}`); setErr('');
+    try {
+      const r = await api('/api/chart/trade', { action: 'addstop', securityId: o.securityId, symbol: o.symbol, correlationId: o.correlationId });
+      setScalerMsg(`${o.symbol}: ${r.done?.length ? `placed ${r.done.join(', ')}` : 'nothing placed'}${r.errors?.length ? ` · ${r.errors.join('; ')}` : ''}`);
+      await scalerCall('status');
+    } catch (e) { setErr(`${o.symbol}: ${(e as Error).message}`); } finally { setBusy(''); }
+  };
+
   // Dhan's kill switch, as Dhan reports it (an older trading-scaler does not know the call: then it just stays unknown)
   useEffect(() => { if (token) api('/api/algo-live/scaler', { action: 'killstatus' }).then((r) => setKillOn(!!r.on)).catch(() => undefined); }, [api, token]);
   const killSwitch = async () => {
@@ -377,8 +387,8 @@ export default function AlgoLivePage() {
                 <button className={`${btn} border-data-red/60 text-data-red-text`} disabled={!token || !!busy} onClick={() => { if (confirm('Close every position the bot opened today, now, at market?')) scalerCall('squareoff'); }}>Square off now</button>
               </div>}>
               {!st?.orders.length ? <p className="text-[11px] text-ink-3">No orders today.</p> : (
-                <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-xs"><thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
-                  <th className="px-2 py-1 text-left">Stock</th><th className="px-2 py-1 text-left">At</th><th className="px-2 py-1 text-right">Qty</th><th className="px-2 py-1 text-right">Close</th><th className="px-2 py-1 text-right">Filled</th><th className="px-2 py-1 text-right">Stop</th><th className="px-2 py-1 text-right">Target</th><th className="px-2 py-1 text-right">90% at</th><th className="px-2 py-1 text-right">Move stop to</th><th className="px-2 py-1 text-left">Status</th>
+                <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-xs"><thead><tr className="border-b border-line text-[10px] font-black uppercase tracking-widest text-ink-3">
+                  <th className="px-2 py-1 text-left">Stock</th><th className="px-2 py-1 text-left">At</th><th className="px-2 py-1 text-right">Qty</th><th className="px-2 py-1 text-right">Close</th><th className="px-2 py-1 text-right">Filled</th><th className="px-2 py-1 text-right">Stop</th><th className="px-2 py-1 text-right">Target</th><th className="px-2 py-1 text-right">90% at</th><th className="px-2 py-1 text-right">Move stop to</th><th className="px-2 py-1 text-left">Status</th><th className="px-2 py-1 text-left">SL / TP</th>
                 </tr></thead><tbody>
                   {st.orders.map((o) => (
                     <tr key={o.correlationId} className="border-b border-line/60 font-mono">
@@ -387,6 +397,12 @@ export default function AlgoLivePage() {
                       <td className="px-2 py-1 text-right">{o.stop.toFixed(2)}</td><td className="px-2 py-1 text-right">{o.target.toFixed(2)}</td>
                       <td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.at90.toFixed(2) ?? '–'}</td><td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.moveStop.toFixed(2) ?? '–'}</td>
                       <td className="px-2 py-1">{o.status}{o.error ? ` · ${o.error}` : ''}</td>
+                      <td className="px-2 py-1 font-sans">{positions?.some((p) => p.symbol === o.symbol && p.netQty) ? (
+                        <button className="rounded border border-data-green/50 px-2 py-0.5 text-[11px] text-data-green disabled:opacity-40" disabled={!token || !!busy} onClick={() => pushExits(o)}
+                          title={`Place whichever of the stop (${o.stop.toFixed(2)}) and target (${o.target.toFixed(2)}) this position is missing; they cancel each other`}>
+                          {busy === `exits:${o.correlationId}` ? 'Placing…' : 'Push missing SL / TP'}
+                        </button>
+                      ) : <span className="text-ink-4">–</span>}</td>
                     </tr>
                   ))}
                 </tbody></table></div>

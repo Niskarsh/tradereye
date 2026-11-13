@@ -83,6 +83,6 @@ export const scaler = {
   flatten: (token: string, securityId: string) => call<{ done: string[]; errors: string[]; book: ScalerBook }>('flatten', token, { securityId }, 60_000),
   move: (token: string, securityId: string, id: string, price: number) => call<{ book: ScalerBook }>('move', token, { securityId, id, price }, 30_000),
   cancel: (token: string, securityId: string, id: string) => call<{ book: ScalerBook }>('cancel', token, { securityId, id }, 30_000),
-  /** an SL-M (and target limit) for the open position when it has no stop, cancelling each other (trading-scaler) */
+  /** a stop (and target limit) for the open position when it has no stop, cancelling each other (trading-scaler) */
   addStop: (token: string, securityId: string, stop: number, target?: number) => call<{ done: string[]; errors: string[]; book: ScalerBook }>('addstop', token, { securityId, stop, target }, 30_000),
 };
