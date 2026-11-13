@@ -11,13 +11,14 @@ export const maxDuration = 60;
 /**
  * The Charts page's order buttons, for ONE stock, through trading-scaler (Dhan only takes orders from its fixed IP):
  *   book       its position and working orders (the chart draws them as lines)
- *   flatten    cancel its stop / target / other working orders, then close the position at market
+ *   flatten    cancel its stop / target / other working orders (waiting until Dhan shows them gone), then close the
+ *              position with a limit through the market, re-priced until flat (trading-scaler exitNow)
  *   clearall   cancel its working orders (the position stays)
  *   breakeven  move its stop(s) to where an exit pays Dhan's charges and the usual stop slippage (the same "move stop to"
  *              as Algo Live: lib/algoLive/levels.ts), so the trade cannot end red after costs
  *   move       { id, price }: a dragged order line
  *   cancel     { id }: the ✕ on an order line
- * These act on every order of that stock, hand-placed ones included. The page asks before each one.
+ * These act on every order of that stock, hand-placed ones included, at once (no confirmation: his call).
  */
 export async function POST(req: Request) {
   const g = guard(req);

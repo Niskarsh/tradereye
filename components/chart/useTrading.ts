@@ -13,7 +13,8 @@ import { fetchT } from '@/lib/chart/fetchTimeout';
 
 const IST_MS = 330 * 60_000;
 const tradingHours = (ms = Date.now()) => { const t = new Date(ms + IST_MS); const m = t.getUTCHours() * 60 + t.getUTCMinutes(), wd = t.getUTCDay(); return wd > 0 && wd < 6 && m >= 9 * 60 && m <= 15 * 60 + 40; };
-const inr = (v: number) => `${v >= 0 ? '+' : '−'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`;
+export const inrPnl = (v: number) => `${v >= 0 ? '+' : '−'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`;
+export const PROFIT = '#1DC995', LOSS = '#E03F53', LOSS_TEXT = '#F06B7C';
 const ROLE: Record<ScalerWorking['role'], { label: string; color: string }> = {
   stop: { label: 'SL', color: '#E03F53' }, target: { label: 'TP', color: '#1DC995' }, entry: { label: 'Entry', color: '#E8EAF0' }, limit: { label: 'LMT', color: '#DFB15B' },
 };
@@ -23,9 +24,13 @@ export function orderLinesOf(book: ScalerBook | null): OrderLine[] {
   const lines: OrderLine[] = [];
   const p = book.position;
   if (p && p.netQty && p.avgPrice > 0) {
-    lines.push({ id: 'pos', price: p.avgPrice, color: p.netQty > 0 ? '#1DC995' : '#F06B7C', label: p.netQty > 0 ? 'Long' : 'Short', qty: Math.abs(p.netQty), extra: inr(p.unrealized + p.realized), cancellable: true });
+    // the side keeps its colour; the P&L itself is green when in profit, red when in loss
+    const pnl = p.unrealized + p.realized;
+    lines.push({ id: 'pos', price: p.avgPrice, color: p.netQty > 0 ? '#1DC995' : '#F06B7C', label: p.netQty > 0 ? 'Long' : 'Short', qty: Math.abs(p.netQty), extra: inrPnl(pnl), extraColor: pnl >= 0 ? PROFIT : LOSS_TEXT, cancellable: true });
   }
-  for (const w of book.working) lines.push({ id: w.id, price: w.price, color: ROLE[w.role].color, label: `${ROLE[w.role].label}${w.byBot ? ' (algo)' : ''}`, qty: w.qty, draggable: w.role !== 'entry' && w.price > 0, cancellable: true });
+  // an order that closes the position (stop, target, an exit limit) shows what the position makes / loses if it fills there
+  const exitSide = p && p.netQty ? (p.netQty > 0 ? 'SELL' : 'BUY') : null;
+  for (const w of book.working) lines.push({ id: w.id, price: w.price, color: ROLE[w.role].color, label: `${ROLE[w.role].label}${w.byBot ? ' (algo)' : ''}`, qty: w.qty, draggable: w.role !== 'entry' && w.price > 0, cancellable: true, pnl: w.role !== 'entry' && w.side === exitSide && w.price > 0 });
   return lines;
 }
 
@@ -97,5 +102,6 @@ export function useTrading(symbol: string, token: string) {
       if (book?.working.some((x) => x.id === id)) void run('Cancel', 'cancel', { id });
     },
   };
-  return { book, lines: orderLinesOf(book), rev, msg, busy, bookErr, hasPosition: !!pos, hasOrders: (book?.working.length ?? 0) > 0, hasStop: stops.length > 0, actions, clearMsg: () => setMsg(null) };
+  const pnlPos = pos && pos.avgPrice > 0 ? { avgPrice: pos.avgPrice, qty: pos.netQty } : null;
+  return { book, lines: orderLinesOf(book), pnlPos, rev, msg, busy, bookErr, hasPosition: !!pos, hasOrders: (book?.working.length ?? 0) > 0, hasStop: stops.length > 0, actions, clearMsg: () => setMsg(null) };
 }

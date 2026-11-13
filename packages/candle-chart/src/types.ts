@@ -70,7 +70,16 @@ export interface Zone { from: number; to: number; top: number; bottom: number; c
 export interface Annotations { markers?: Marker[]; levels?: Level[]; zones?: Zone[] }
 
 /** A live order or position drawn as a line you can drag (to move it) or close (✕), as on TradingView. */
-export interface OrderLine { id: string; price: number; color: string; label: string; qty?: number; extra?: string; draggable?: boolean; cancellable?: boolean }
+export interface OrderLine {
+  id: string; price: number; color: string; label: string; qty?: number; extra?: string; draggable?: boolean; cancellable?: boolean;
+  /** colour of `extra` (default: the line's colour), e.g. green / red for a P&L */
+  extraColor?: string;
+  /** show what the open position (setPnl) makes or loses if price reaches this line; follows the line while it is dragged */
+  pnl?: boolean;
+}
+/** an open position, for P&L at order lines and under the crosshair: qty > 0 long, < 0 short */
+export interface PnlPosition { avgPrice: number; qty: number }
+export interface PnlOptions { profit?: string; loss?: string; format?(v: number): string }
 
 export interface CompareSeries { id: string; label: string; bars: Bar[]; color: string }
 

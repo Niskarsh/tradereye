@@ -4,7 +4,7 @@ import { getIndicator, type IndicatorDef } from './indicators/registry';
 import { getTool, stroke, tag, type DrawEnv, type Pt } from './drawings/tools';
 import { classicCandles, DARK, NSE } from './theme';
 import type {
-  Anchor, Annotations, Bar, CandleStyle, ChartEvent, OrderLine, VolCandleStyle, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
+  Anchor, Annotations, Bar, CandleStyle, ChartEvent, OrderLine, PnlOptions, PnlPosition, VolCandleStyle, ChartState, ChartType, CompareSeries, Drawing, DrawingStyle, IndicatorState, Interval, Marker,
   ScaleMode, Theme, TimeOpts,
 } from './types';
 import { ChartSettingsDialog, DrawingBar, IndicatorDialog, el, icon, popupMenu } from './ui';
@@ -101,6 +101,9 @@ export class Chart {
   private drag: Drag | null = null;
   private orders: OrderLine[] = [];
   private orderPreview: { id: string; price: number } | null = null;
+  private pnlPos: PnlPosition | null = null;
+  private pnlOpts: PnlOptions = {};
+  private pnlHover = false;
   private bidAsk: { bid?: number; ask?: number } = {};
   /** net position shown between SELL and BUY in the quote box (0 / undefined = flat) */
   private posQty: number | undefined;
@@ -340,6 +343,22 @@ export class Chart {
 
   /** Live orders / the position as lines (drag to move, ✕ to cancel); replaces the previous set and any drag preview. */
   setOrderLines(lines: OrderLine[]) { this.orders = lines.slice(); this.orderPreview = null; this.invalidate(); }
+  /** the open position, for P&L at `pnl` order lines and under the crosshair (null: none) */
+  setPnl(pos: PnlPosition | null, opts: PnlOptions = {}) {
+    const p = pos && pos.qty && pos.avgPrice > 0 ? { avgPrice: pos.avgPrice, qty: pos.qty } : null;
+    if (p?.avgPrice === this.pnlPos?.avgPrice && p?.qty === this.pnlPos?.qty && opts.profit === this.pnlOpts.profit && opts.loss === this.pnlOpts.loss) return;
+    this.pnlPos = p; this.pnlOpts = opts; this.invalidate();
+  }
+  /** show the position's P&L at the price under the crosshair */
+  setPnlHover(on: boolean) { if (this.pnlHover === on) return; this.pnlHover = on; this.invalidate(); }
+  /** the position's P&L if price were `price`: text and colour (null without a position) */
+  private pnlAt(price: number): { text: string; color: string } | null {
+    const p = this.pnlPos;
+    if (!p) return null;
+    const v = (price - p.avgPrice) * p.qty;
+    const fmt = this.pnlOpts.format ?? ((x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x)).toLocaleString()}`);
+    return { text: fmt(v), color: v >= 0 ? this.pnlOpts.profit ?? this.theme.up : this.pnlOpts.loss ?? this.theme.down };
+  }
   /** Best bid / ask as dashed lines (undefined hides them). */
   setBidAsk(bid?: number, ask?: number) {
     if (this.bidAsk.bid === bid && this.bidAsk.ask === ask) return;
@@ -1400,21 +1419,26 @@ export class Chart {
     }
   }
 
-  private orderBox(l: OrderLine, y: number) {
+  private orderBox(l: OrderLine, y: number, price = l.price) {
     const c = this.c;
     c.font = this.theme.font;
-    const text = `${l.label}${l.qty ? `  ${l.qty}` : ''}${l.extra ? `  ${l.extra}` : ''}`;
-    const w = c.measureText(text).width + 12, xw = l.cancellable ? 18 : 0, h = 18;
+    const text = `${l.label}${l.qty ? `  ${l.qty}` : ''}`;
+    const pnl = l.pnl ? this.pnlAt(price) : null;
+    const ex = pnl ?? (l.extra ? { text: l.extra, color: l.extraColor ?? l.color } : null);
+    const extra = ex ? { text: `  ${ex.text}`, color: ex.color } : null;
+    const tw = c.measureText(text).width;
+    const w = tw + (extra ? c.measureText(extra.text).width : 0) + 12, xw = l.cancellable ? 18 : 0, h = 18;
     const x = Math.max(4, this.plotW - w - xw - 12);
-    return { x, y: y - h / 2, w, xw, h, text };
+    return { x, y: y - h / 2, w, xw, h, text, tw, extra };
   }
   private hitOrder(x: number, y: number): { line: OrderLine; part: 'box' | 'x' | 'line' } | null {
     const m = this.main();
     for (let k = this.orders.length - 1; k >= 0; k--) {
       const l = this.orders[k];
-      const py = this.yOf(m, this.orderPreview?.id === l.id ? this.orderPreview.price : l.price);
+      const pp = this.orderPreview?.id === l.id ? this.orderPreview.price : l.price;
+      const py = this.yOf(m, pp);
       if (py < m.top || py > m.top + m.h) continue;
-      const b = this.orderBox(l, py);
+      const b = this.orderBox(l, py, pp);
       if (y >= b.y && y <= b.y + b.h) {
         if (l.cancellable && x >= b.x + b.w && x <= b.x + b.w + b.xw) return { line: l, part: 'x' };
         if (x >= b.x && x <= b.x + b.w) return { line: l, part: 'box' };
@@ -1431,11 +1455,12 @@ export class Chart {
       if (y < pane.top || y > pane.top + pane.h) continue;
       c.strokeStyle = l.color; c.lineWidth = 1; c.setLineDash([4, 3]);
       c.beginPath(); c.moveTo(0, y); c.lineTo(this.plotW, y); c.stroke(); c.setLineDash([]);
-      const b = this.orderBox(l, y);
+      const b = this.orderBox(l, y, price);
       c.fillStyle = this.theme.bg; c.fillRect(b.x, b.y, b.w + b.xw, b.h);
       c.strokeStyle = l.color; c.strokeRect(b.x + 0.5, b.y + 0.5, b.w + b.xw - 1, b.h - 1);
       c.fillStyle = l.color; c.textAlign = 'left'; c.textBaseline = 'middle';
       c.fillText(b.text, b.x + 6, y);
+      if (b.extra) { c.fillStyle = b.extra.color; c.fillText(b.extra.text, b.x + 6 + b.tw, y); }
       if (b.xw) {
         c.fillStyle = l.color; c.fillRect(b.x + b.w, b.y, b.xw, b.h);
         c.fillStyle = '#0A1118'; c.textAlign = 'center'; c.fillText('✕', b.x + b.w + b.xw / 2, y);
@@ -1579,6 +1604,17 @@ export class Chart {
     c.beginPath(); c.moveTo(Math.round(x) + 0.5, 0); c.lineTo(Math.round(x) + 0.5, this.plotH);
     if (y !== null) { c.moveTo(0, Math.round(y) + 0.5); c.lineTo(this.plotW, Math.round(y) + 0.5); }
     c.stroke(); c.setLineDash([]);
+    // the open position's P&L at the hovered price (a tag at the left end of the horizontal line)
+    const m = this.main();
+    if (this.pnlHover && y !== null && y >= m.top && y <= m.top + m.h) {
+      const v = this.pnlAt(this.vOf(m, y));
+      if (v) {
+        c.font = this.theme.font; c.textAlign = 'left'; c.textBaseline = 'middle';
+        const text = `P&L ${v.text}`, w = c.measureText(text).width + 12, h = 18, ty = Math.round(y);
+        c.fillStyle = v.color; c.fillRect(4, ty - h / 2, w, h);
+        c.fillStyle = '#0A1118'; c.fillText(text, 10, ty);
+      }
+    }
   }
 
   /* ======================= legends (DOM) ======================= */
