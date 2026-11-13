@@ -374,9 +374,13 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
           title={pnlHover ? 'P&L on hover is on: the crosshair shows your open position\'s P&L at that price' : 'Show your open position\'s P&L at the price under the crosshair'}>
           P&amp;L hover {pnlHover ? 'on' : 'off'}
         </button>
-        <button className={`${tradeBtn} text-data-green`} disabled={!trade.hasPosition || (trade.hasStop && trade.hasTarget) || !!trade.busy} onClick={trade.actions.addStop}
-          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop && trade.hasTarget ? 'The position has a stop and a target' : 'Add what is missing at Algo Live\'s levels for this stock: the stop (stop-limit, 0.5% limit buffer) and / or the target. They cancel each other'}>
-          {trade.busy === 'addstop' ? 'Adding…' : !trade.hasPosition || (!trade.hasStop && !trade.hasTarget) ? 'Add SL + TP' : !trade.hasStop ? 'Add SL' : !trade.hasTarget ? 'Add TP' : 'SL + TP set'}
+        <button className={`${tradeBtn} text-data-red-text`} disabled={!trade.hasPosition || trade.hasStop || !!trade.busy} onClick={trade.actions.addSl}
+          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop ? 'The position has a stop (✕ its line first if Dhan shows none)' : 'Add a stop at Algo Live\'s stop for this stock (stop-limit, 0.5% limit buffer); it and the target cancel each other'}>
+          {trade.busy === 'addstop:sl' ? 'Adding…' : 'Add SL'}
+        </button>
+        <button className={`${tradeBtn} text-data-green`} disabled={!trade.hasPosition || trade.hasTarget || !!trade.busy} onClick={trade.actions.addTp}
+          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasTarget ? 'The position has a target (✕ its line first if Dhan shows none)' : 'Add a target at Algo Live\'s target for this stock; it and the stop cancel each other'}>
+          {trade.busy === 'addstop:tp' ? 'Adding…' : 'Add TP'}
         </button>
         {trade.hasPosition && !trade.hasStop && <span className="tb font-semibold text-data-red-text" title="This position has no stop order: press Add stop, or add one in Dhan">⚠ no stop</span>}
         {trade.bookErr && <span className="tb text-data-caution" title={`Orders could not be read: ${trade.bookErr}`}>⚠ orders off</span>}

@@ -74,7 +74,7 @@ export function useTrading(symbol: string, token: string) {
   }, [symbol, token, call]);
 
   const run = useCallback(async (label: string, action: string, extra: Record<string, unknown> = {}) => {
-    setBusy(action); setMsg(null);
+    setBusy(extra.which ? `${action}:${String(extra.which)}` : action); setMsg(null);
     try {
       const j = await call(action, extra);
       const errs = j.errors ?? [];
@@ -97,8 +97,9 @@ export function useTrading(symbol: string, token: string) {
     flatten: () => { if (pos) void run('Flatten', 'flatten'); },
     clearAll: () => { if (book?.working.length) void run('Clear all', 'clearall'); },
     breakEven: () => { if (pos && stops.length) void run('Break-even', 'breakeven'); },
-    // whichever of the stop and target the position is missing, at Algo Live's levels, linked (trading-scaler)
-    addStop: () => { if (pos && (!stops.length || !targets.length)) void run('Add SL/TP', 'addstop'); },
+    // the position's missing stop / target, at Algo Live's level, paired with what is there (trading-scaler)
+    addSl: () => { if (pos && !stops.length) void run('Add SL', 'addstop', { which: 'sl' }); },
+    addTp: () => { if (pos && !targets.length) void run('Add TP', 'addstop', { which: 'tp' }); },
     move: (id: string, price: number) => {
       if (!book?.working.some((x) => x.id === id)) { setRev((x) => x + 1); return; }
       void run('Move', 'move', { id, price });
