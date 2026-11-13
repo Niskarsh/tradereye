@@ -20,7 +20,7 @@ import { Card, rr } from '@/components/setups/parts';
 
 interface Scored { symbol: string; pred: number | null; price?: number; adr?: number; above: boolean; note?: string; turnover?: number; thin?: boolean }
 interface Tick { slot: number; at: number; scored: Scored[]; picked: string[]; note: string; missing: string[] }
-interface Order { symbol: string; slot: number; pred: number; price: number; adr: number; qty: number; stop: number; target: number; correlationId: string; sentAt: number; orderId?: string; status: string; error?: string; avgPrice?: number }
+interface Order { symbol: string; securityId?: string; slot: number; pred: number; price: number; adr: number; qty: number; stop: number; target: number; correlationId: string; sentAt: number; orderId?: string; status: string; error?: string; avgPrice?: number }
 interface Item { symbol: string; securityId: string; prevClose: number; avgVol: number }
 type Version = 'narrow' | 'wide';
 interface Gate { move: number | null; bar: number | null; hot: boolean; history: number; stocks: number }
@@ -177,10 +177,13 @@ export default function AlgoLivePage() {
   }, [api, refresh]);
 
   // an order's missing stop and / or target, at this order's levels (trading-scaler places it as a linked pair)
-  const pushExits = async (o: { symbol: string; securityId: string; correlationId: string }) => {
+  const pushExits = async (o: Order) => {
+    // the order carries its Dhan id; older saved orders may not: then the day list has it
+    const securityId = o.securityId ?? st?.list.find((x) => x.symbol === o.symbol)?.securityId;
+    if (!securityId) { setErr(`${o.symbol}: its Dhan id is not known`); return; }
     setBusy(`exits:${o.correlationId}`); setErr('');
     try {
-      const r = await api('/api/chart/trade', { action: 'addstop', securityId: o.securityId, symbol: o.symbol, correlationId: o.correlationId });
+      const r = await api('/api/chart/trade', { action: 'addstop', securityId, symbol: o.symbol, correlationId: o.correlationId });
       setScalerMsg(`${o.symbol}: ${r.done?.length ? `placed ${r.done.join(', ')}` : 'nothing placed'}${r.errors?.length ? ` · ${r.errors.join('; ')}` : ''}`);
       await scalerCall('status');
     } catch (e) { setErr(`${o.symbol}: ${(e as Error).message}`); } finally { setBusy(''); }
