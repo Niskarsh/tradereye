@@ -4,6 +4,7 @@ import { Maximize2, Minimize2 } from 'lucide-react';
 import { aggregate, Chart, intervalMinutes, isIntraday, NSE, type Annotations, type Bar, type Level, type Marker, type OrderLine } from '@/packages/candle-chart/src';
 import { chunkDays, seriesFor, type SymbolSeries } from '@/lib/chart/series';
 import type { AlgoView } from '@/lib/chart/algo';
+import { inrPnl, LOSS_TEXT, PROFIT } from './useTrading';
 import { ALGO_PARTS_DEFAULT, getDrawings, onDrawings, setDrawings, type AlgoParts, type PaneCfg } from './stores';
 
 export interface PaneProps {
@@ -25,6 +26,9 @@ export interface PaneProps {
   /** net position of this chart's stock (the quote box shows it between SELL and BUY) */
   positionQty?: number;
   linesRev?: number;
+  /** the open position of this chart's stock: P&L at its exit order lines, and under the crosshair when `pnlHover` */
+  pnlPos?: { avgPrice: number; qty: number } | null;
+  pnlHover?: boolean;
   onOrderMove?(id: string, price: number, from: number): void;
   onOrderCancel?(id: string): void;
   /** phone: no maximise button (one chart shows at a time) */
@@ -216,6 +220,8 @@ export function ChartPane(p: PaneProps) {
   useEffect(() => { chart.current?.setCrosshairTime(p.extCross); }, [p.extCross]);
   useEffect(() => { chart.current?.setOrderLines(p.orderLines ?? []); }, [p.orderLines, p.linesRev]);
   useEffect(() => { chart.current?.setPositionQty(p.positionQty); }, [p.positionQty]);
+  useEffect(() => { chart.current?.setPnl(p.pnlPos ?? null, { profit: PROFIT, loss: LOSS_TEXT, format: inrPnl }); }, [p.pnlPos?.avgPrice, p.pnlPos?.qty]);
+  useEffect(() => { chart.current?.setPnlHover(!!p.pnlHover); }, [p.pnlHover]);
   useEffect(() => { chart.current?.setMagnet(p.magnet); }, [p.magnet]);
   useEffect(() => { chart.current?.setDrawingsHidden(p.drawingsHidden); }, [p.drawingsHidden]);
   useEffect(() => { if (p.active) chart.current?.setTool(p.tool); else chart.current?.setTool(null); }, [p.tool, p.active]);

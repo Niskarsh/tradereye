@@ -158,6 +158,10 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
   // expanded: the charts cover the whole window, over the site's top menu (remembered in this browser)
   const [expanded, setExpanded] = useState(false);
   useEffect(() => { try { setExpanded(localStorage.getItem('tradereye-chart-expanded') === '1'); } catch { /* private mode */ } }, []);
+  // P&L on hover: the open position's P&L at the price under the crosshair (remembered in this browser)
+  const [pnlHover, setPnlHover] = useState(false);
+  useEffect(() => { try { setPnlHover(localStorage.getItem('tradereye-chart-pnl-hover') === '1'); } catch { /* private mode */ } }, []);
+  const togglePnlHover = () => setPnlHover((v) => { try { localStorage.setItem('tradereye-chart-pnl-hover', v ? '0' : '1'); } catch { /* private mode */ } return !v; });
   const toggleExpanded = () => setExpanded((e) => { try { localStorage.setItem('tradereye-chart-expanded', e ? '0' : '1'); } catch { /* private mode */ } return !e; });
   const [, force] = useState(0);
   const date = algoDate ?? istDate();
@@ -300,6 +304,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
       algo={algoRelevant ? algo : null} showAlgo={layout.showAlgo} algoSlot={algoSlot} algoParts={layout.algoParts ?? ALGO_PARTS_DEFAULT}
       maximized={maxId === cfg.id} compact={mobile} highlight={!mobile && !showMax && layout.panes.length > 1}
       orderLines={cfg.symbol === symbol ? trade.lines : []} linesRev={trade.rev} positionQty={cfg.symbol === symbol ? trade.book?.position?.netQty : undefined}
+      pnlPos={cfg.symbol === symbol ? trade.pnlPos : null} pnlHover={pnlHover}
       onOrderMove={trade.actions.move} onOrderCancel={trade.actions.cancel}
       onActivate={() => setActiveId(cfg.id)}
       onCfg={(patch) => setPane(cfg.id, patch)}
@@ -364,6 +369,14 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
         </button>
         <button className={`${tradeBtn} text-brand-accent`} disabled={!trade.hasPosition || !trade.hasStop || !!trade.busy} onClick={trade.actions.breakEven} title={trade.hasPosition ? (trade.hasStop ? 'Move the stop to break-even after Dhan\'s charges and slippage' : 'No stop order to move') : `No open ${symbol} position`}>
           {trade.busy === 'breakeven' ? 'Moving…' : 'Break-even'}
+        </button>
+        <button className={`tb ${pnlHover ? 'tb-on' : ''}`} onClick={togglePnlHover}
+          title={pnlHover ? 'P&L on hover is on: the crosshair shows your open position\'s P&L at that price' : 'Show your open position\'s P&L at the price under the crosshair'}>
+          P&amp;L hover {pnlHover ? 'on' : 'off'}
+        </button>
+        <button className={`${tradeBtn} text-data-green`} disabled={!trade.hasPosition || trade.hasStop || !!trade.busy} onClick={trade.actions.addStop}
+          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop ? 'The position already has a stop' : 'Add an SL-M stop and a target at Algo Live\'s levels for this stock (they cancel each other)'}>
+          {trade.busy === 'addstop' ? 'Adding…' : 'Add stop'}
         </button>
         {trade.bookErr && <span className="tb text-data-caution" title={`Orders could not be read: ${trade.bookErr}`}>⚠ orders off</span>}
         <span className="ml-auto" />
