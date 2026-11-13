@@ -375,7 +375,7 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
           P&amp;L hover {pnlHover ? 'on' : 'off'}
         </button>
         <button className={`${tradeBtn} text-data-green`} disabled={!trade.hasPosition || trade.hasStop || !!trade.busy} onClick={trade.actions.addStop}
-          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop ? 'The position already has a stop' : 'Add an SL-M stop and a target at Algo Live\'s levels for this stock (they cancel each other)'}>
+          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop ? 'The position already has a stop' : 'Add a stop (stop-limit, 0.5% limit buffer) and a target at Algo Live\'s levels for this stock (they cancel each other)'}>
           {trade.busy === 'addstop' ? 'Adding…' : 'Add stop'}
         </button>
         {trade.bookErr && <span className="tb text-data-caution" title={`Orders could not be read: ${trade.bookErr}`}>⚠ orders off</span>}

@@ -94,7 +94,7 @@ export function useTrading(symbol: string, token: string) {
     flatten: () => { if (pos) void run('Flatten', 'flatten'); },
     clearAll: () => { if (book?.working.length) void run('Clear all', 'clearall'); },
     breakEven: () => { if (pos && stops.length) void run('Break-even', 'breakeven'); },
-    // no stop on the position: an SL-M at Algo Live's stop plus its target, linked (trading-scaler)
+    // no stop on the position: a stop at Algo Live's stop plus its target, linked (trading-scaler)
     addStop: () => { if (pos && !stops.length) void run('Add stop', 'addstop'); },
     move: (id: string, price: number) => {
       if (!book?.working.some((x) => x.id === id)) { setRev((x) => x + 1); return; }

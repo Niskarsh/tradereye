@@ -13,7 +13,7 @@ export const maxDuration = 60;
  *   book       its position and working orders (the chart draws them as lines)
  *   flatten    cancel its stop / target / other working orders (waiting until Dhan shows them gone), then close the
  *              position at market
- *   addstop    the position has no stop: an SL-M at Algo Live's stop for this stock today and a target limit at its
+ *   addstop    the position has no stop: a stop-limit at Algo Live's stop for this stock today and a target limit at its
  *              target, as a pair (trading-scaler cancels the other when one fills)
  *   clearall   cancel its working orders (the position stays)
  *   breakeven  move its stop(s) to where an exit pays Dhan's charges and the usual stop slippage (the same "move stop to"
