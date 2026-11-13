@@ -13,9 +13,9 @@ export const maxDuration = 60;
  *   book       its position and working orders (the chart draws them as lines)
  *   flatten    cancel its stop / target / other working orders (waiting until Dhan shows them gone), then close the
  *              position at market
- *   addstop    whichever of the position's stop (stop-limit) and target (limit) is missing, at Algo Live's levels for
- *              this stock today ({ correlationId } picks one Algo Live order), as a pair (trading-scaler cancels the
- *              other when one fills)
+ *   addstop    { which: 'sl' | 'tp' }: the position's stop (stop-limit) or target (limit), at Algo Live's level for this
+ *              stock today ({ correlationId } picks one Algo Live order); paired with what is there (trading-scaler
+ *              cancels the other when one fills)
  *   clearall   cancel its working orders (the position stays)
  *   breakeven  move its stop(s) to where an exit pays Dhan's charges and the usual stop slippage (the same "move stop to"
  *              as Algo Live: lib/algoLive/levels.ts), so the trade cannot end red after costs
@@ -26,7 +26,7 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const g = guard(req);
   if (!g.ok) return g.res;
-  const b = await req.json().catch(() => ({})) as { action?: string; securityId?: string; symbol?: string; id?: string; price?: number; correlationId?: string };
+  const b = await req.json().catch(() => ({})) as { action?: string; securityId?: string; symbol?: string; id?: string; price?: number; correlationId?: string; which?: 'sl' | 'tp' };
   const sid = String(b.securityId ?? '');
   if (!/^\d{1,10}$/.test(sid)) return NextResponse.json({ error: 'BAD_REQUEST', message: 'Need the stock\'s Dhan security id.' }, { status: 400 });
   try {
@@ -41,7 +41,9 @@ export async function POST(req: Request) {
         const state = await loadState(liveStore, istNow().date).catch(() => undefined);
         const o = [...(state?.orders ?? [])].reverse().find((x) => (b.correlationId ? x.correlationId === b.correlationId : x.securityId === sid || x.symbol === b.symbol) && x.stop > 0);
         if (!o) return NextResponse.json({ error: 'NO_ALGO_STOP', message: `Algo Live has no stop for ${b.symbol ?? 'this stock'} today.` }, { status: 409 });
-        return NextResponse.json({ ...(await scaler.addStop(g.token, sid, o.stop, o.target > 0 ? o.target : undefined)), stop: o.stop, target: o.target });
+        if (b.which !== 'sl' && b.which !== 'tp') return NextResponse.json({ error: 'BAD_REQUEST', message: 'Say which: sl or tp.' }, { status: 400 });
+        if (b.which === 'tp' && !(o.target > 0)) return NextResponse.json({ error: 'NO_ALGO_TARGET', message: `Algo Live has no target for ${o.symbol}.` }, { status: 409 });
+        return NextResponse.json({ ...(await scaler.addStop(g.token, sid, b.which === 'sl' ? o.stop : undefined, b.which === 'tp' ? o.target : undefined)), stop: o.stop, target: o.target });
       }
       case 'breakeven': {
         const bk: ScalerBook = await scaler.book(g.token, sid);

@@ -177,13 +177,13 @@ export default function AlgoLivePage() {
   }, [api, refresh]);
 
   // an order's missing stop and / or target, at this order's levels (trading-scaler places it as a linked pair)
-  const pushExits = async (o: Order) => {
+  const pushExits = async (o: Order, which: 'sl' | 'tp') => {
     // the order carries its Dhan id; older saved orders may not: then the day list has it
     const securityId = o.securityId ?? st?.list.find((x) => x.symbol === o.symbol)?.securityId;
     if (!securityId) { setErr(`${o.symbol}: its Dhan id is not known`); return; }
-    setBusy(`exits:${o.correlationId}`); setErr('');
+    setBusy(`exits:${which}:${o.correlationId}`); setErr('');
     try {
-      const r = await api('/api/chart/trade', { action: 'addstop', securityId, symbol: o.symbol, correlationId: o.correlationId });
+      const r = await api('/api/chart/trade', { action: 'addstop', which, securityId, symbol: o.symbol, correlationId: o.correlationId });
       setScalerMsg(`${o.symbol}: ${r.done?.length ? `placed ${r.done.join(', ')}` : 'nothing placed'}${r.errors?.length ? ` · ${r.errors.join('; ')}` : ''}`);
       await scalerCall('status');
     } catch (e) { setErr(`${o.symbol}: ${(e as Error).message}`); } finally { setBusy(''); }
@@ -401,10 +401,16 @@ export default function AlgoLivePage() {
                       <td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.at90.toFixed(2) ?? '–'}</td><td className="px-2 py-1 text-right">{snap?.levels?.[o.correlationId]?.moveStop.toFixed(2) ?? '–'}</td>
                       <td className="px-2 py-1">{o.status}{o.error ? ` · ${o.error}` : ''}</td>
                       <td className="px-2 py-1 font-sans">{positions?.some((p) => p.symbol === o.symbol && p.netQty) ? (
-                        <button className="rounded border border-data-green/50 px-2 py-0.5 text-[11px] text-data-green disabled:opacity-40" disabled={!token || !!busy} onClick={() => pushExits(o)}
-                          title={`Place whichever of the stop (${o.stop.toFixed(2)}) and target (${o.target.toFixed(2)}) this position is missing; they cancel each other`}>
-                          {busy === `exits:${o.correlationId}` ? 'Placing…' : 'Push missing SL / TP'}
-                        </button>
+                        <span className="flex gap-1">
+                          <button className="rounded border border-data-red/50 px-2 py-0.5 text-[11px] text-data-red-text disabled:opacity-40" disabled={!token || !!busy} onClick={() => pushExits(o, 'sl')}
+                            title={`Place this position's stop at ${o.stop.toFixed(2)} (stop-limit), if it has none; it and the target cancel each other`}>
+                            {busy === `exits:sl:${o.correlationId}` ? 'Placing…' : 'Push SL'}
+                          </button>
+                          <button className="rounded border border-data-green/50 px-2 py-0.5 text-[11px] text-data-green disabled:opacity-40" disabled={!token || !!busy} onClick={() => pushExits(o, 'tp')}
+                            title={`Place this position's target at ${o.target.toFixed(2)}, if it has none; it and the stop cancel each other`}>
+                            {busy === `exits:tp:${o.correlationId}` ? 'Placing…' : 'Push TP'}
+                          </button>
+                        </span>
                       ) : <span className="text-ink-4">–</span>}</td>
                     </tr>
                   ))}
