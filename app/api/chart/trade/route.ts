@@ -13,8 +13,9 @@ export const maxDuration = 60;
  *   book       its position and working orders (the chart draws them as lines)
  *   flatten    cancel its stop / target / other working orders (waiting until Dhan shows them gone), then close the
  *              position at market
- *   addstop    the position has no stop: a stop-limit at Algo Live's stop for this stock today and a target limit at its
- *              target, as a pair (trading-scaler cancels the other when one fills)
+ *   addstop    whichever of the position's stop (stop-limit) and target (limit) is missing, at Algo Live's levels for
+ *              this stock today ({ correlationId } picks one Algo Live order), as a pair (trading-scaler cancels the
+ *              other when one fills)
  *   clearall   cancel its working orders (the position stays)
  *   breakeven  move its stop(s) to where an exit pays Dhan's charges and the usual stop slippage (the same "move stop to"
  *              as Algo Live: lib/algoLive/levels.ts), so the trade cannot end red after costs
@@ -25,7 +26,7 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const g = guard(req);
   if (!g.ok) return g.res;
-  const b = await req.json().catch(() => ({})) as { action?: string; securityId?: string; symbol?: string; id?: string; price?: number };
+  const b = await req.json().catch(() => ({})) as { action?: string; securityId?: string; symbol?: string; id?: string; price?: number; correlationId?: string };
   const sid = String(b.securityId ?? '');
   if (!/^\d{1,10}$/.test(sid)) return NextResponse.json({ error: 'BAD_REQUEST', message: 'Need the stock\'s Dhan security id.' }, { status: 400 });
   try {
@@ -36,9 +37,9 @@ export async function POST(req: Request) {
       case 'move': return NextResponse.json(await scaler.move(g.token, sid, String(b.id ?? ''), Number(b.price)));
       case 'cancel': return NextResponse.json(await scaler.cancel(g.token, sid, String(b.id ?? '')));
       case 'addstop': {
-        // Algo Live's stop and target for this stock today (its latest order that has them)
+        // Algo Live's stop and target for this stock today (the order asked for, else its latest one that has them)
         const state = await loadState(liveStore, istNow().date).catch(() => undefined);
-        const o = [...(state?.orders ?? [])].reverse().find((x) => (x.securityId === sid || x.symbol === b.symbol) && x.stop > 0);
+        const o = [...(state?.orders ?? [])].reverse().find((x) => (b.correlationId ? x.correlationId === b.correlationId : x.securityId === sid || x.symbol === b.symbol) && x.stop > 0);
         if (!o) return NextResponse.json({ error: 'NO_ALGO_STOP', message: `Algo Live has no stop for ${b.symbol ?? 'this stock'} today.` }, { status: 409 });
         return NextResponse.json({ ...(await scaler.addStop(g.token, sid, o.stop, o.target > 0 ? o.target : undefined)), stop: o.stop, target: o.target });
       }

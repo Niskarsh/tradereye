@@ -374,9 +374,9 @@ export function Workspace({ initialSymbol, algoDate }: { initialSymbol?: string;
           title={pnlHover ? 'P&L on hover is on: the crosshair shows your open position\'s P&L at that price' : 'Show your open position\'s P&L at the price under the crosshair'}>
           P&amp;L hover {pnlHover ? 'on' : 'off'}
         </button>
-        <button className={`${tradeBtn} text-data-green`} disabled={!trade.hasPosition || trade.hasStop || !!trade.busy} onClick={trade.actions.addStop}
-          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop ? 'The position already has a stop' : 'Add a stop (stop-limit, 0.5% limit buffer) and a target at Algo Live\'s levels for this stock (they cancel each other)'}>
-          {trade.busy === 'addstop' ? 'Adding…' : 'Add stop'}
+        <button className={`${tradeBtn} text-data-green`} disabled={!trade.hasPosition || (trade.hasStop && trade.hasTarget) || !!trade.busy} onClick={trade.actions.addStop}
+          title={!trade.hasPosition ? `No open ${symbol} position` : trade.hasStop && trade.hasTarget ? 'The position has a stop and a target' : 'Add what is missing at Algo Live\'s levels for this stock: the stop (stop-limit, 0.5% limit buffer) and / or the target. They cancel each other'}>
+          {trade.busy === 'addstop' ? 'Adding…' : !trade.hasPosition || (!trade.hasStop && !trade.hasTarget) ? 'Add SL + TP' : !trade.hasStop ? 'Add SL' : !trade.hasTarget ? 'Add TP' : 'SL + TP set'}
         </button>
         {trade.hasPosition && !trade.hasStop && <span className="tb font-semibold text-data-red-text" title="This position has no stop order: press Add stop, or add one in Dhan">⚠ no stop</span>}
         {trade.bookErr && <span className="tb text-data-caution" title={`Orders could not be read: ${trade.bookErr}`}>⚠ orders off</span>}

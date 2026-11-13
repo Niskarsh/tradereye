@@ -89,13 +89,16 @@ export function useTrading(symbol: string, token: string) {
 
   const pos = book?.position && book.position.netQty ? book.position : null;
   const stops = book?.working.filter((w) => w.role === 'stop') ?? [];
+  // a target: an exit limit on the closing side (Algo Live's TP, or one placed by hand)
+  const exitSide = pos ? (pos.netQty > 0 ? 'SELL' : 'BUY') : null;
+  const targets = book?.working.filter((w) => w.side === exitSide && (w.role === 'target' || w.role === 'limit')) ?? [];
   // no confirmations (his call): every press acts at once; the result shows in the bar under the strip
   const actions = {
     flatten: () => { if (pos) void run('Flatten', 'flatten'); },
     clearAll: () => { if (book?.working.length) void run('Clear all', 'clearall'); },
     breakEven: () => { if (pos && stops.length) void run('Break-even', 'breakeven'); },
-    // no stop on the position: a stop at Algo Live's stop plus its target, linked (trading-scaler)
-    addStop: () => { if (pos && !stops.length) void run('Add stop', 'addstop'); },
+    // whichever of the stop and target the position is missing, at Algo Live's levels, linked (trading-scaler)
+    addStop: () => { if (pos && (!stops.length || !targets.length)) void run('Add SL/TP', 'addstop'); },
     move: (id: string, price: number) => {
       if (!book?.working.some((x) => x.id === id)) { setRev((x) => x + 1); return; }
       void run('Move', 'move', { id, price });
@@ -106,5 +109,5 @@ export function useTrading(symbol: string, token: string) {
     },
   };
   const pnlPos = pos && pos.avgPrice > 0 ? { avgPrice: pos.avgPrice, qty: pos.netQty } : null;
-  return { book, lines: orderLinesOf(book), pnlPos, rev, msg, busy, bookErr, hasPosition: !!pos, hasOrders: (book?.working.length ?? 0) > 0, hasStop: stops.length > 0, actions, clearMsg: () => setMsg(null) };
+  return { book, lines: orderLinesOf(book), pnlPos, rev, msg, busy, bookErr, hasPosition: !!pos, hasOrders: (book?.working.length ?? 0) > 0, hasStop: stops.length > 0, hasTarget: targets.length > 0, actions, clearMsg: () => setMsg(null) };
 }
