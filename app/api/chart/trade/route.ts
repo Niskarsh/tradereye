@@ -12,7 +12,9 @@ export const maxDuration = 60;
  * The Charts page's order buttons, for ONE stock, through trading-scaler (Dhan only takes orders from its fixed IP):
  *   book       its position and working orders (the chart draws them as lines)
  *   flatten    cancel its stop / target / other working orders (waiting until Dhan shows them gone), then close the
- *              position with a limit through the market, re-priced until flat (trading-scaler exitNow)
+ *              position at market
+ *   addstop    the position has no stop: an SL-M at Algo Live's stop for this stock today and a target limit at its
+ *              target, as a pair (trading-scaler cancels the other when one fills)
  *   clearall   cancel its working orders (the position stays)
  *   breakeven  move its stop(s) to where an exit pays Dhan's charges and the usual stop slippage (the same "move stop to"
  *              as Algo Live: lib/algoLive/levels.ts), so the trade cannot end red after costs
@@ -33,6 +35,13 @@ export async function POST(req: Request) {
       case 'clearall': return NextResponse.json(await scaler.clearAll(g.token, sid));
       case 'move': return NextResponse.json(await scaler.move(g.token, sid, String(b.id ?? ''), Number(b.price)));
       case 'cancel': return NextResponse.json(await scaler.cancel(g.token, sid, String(b.id ?? '')));
+      case 'addstop': {
+        // Algo Live's stop and target for this stock today (its latest order that has them)
+        const state = await loadState(liveStore, istNow().date).catch(() => undefined);
+        const o = [...(state?.orders ?? [])].reverse().find((x) => (x.securityId === sid || x.symbol === b.symbol) && x.stop > 0);
+        if (!o) return NextResponse.json({ error: 'NO_ALGO_STOP', message: `Algo Live has no stop for ${b.symbol ?? 'this stock'} today.` }, { status: 409 });
+        return NextResponse.json({ ...(await scaler.addStop(g.token, sid, o.stop, o.target > 0 ? o.target : undefined)), stop: o.stop, target: o.target });
+      }
       case 'breakeven': {
         const bk: ScalerBook = await scaler.book(g.token, sid);
         const p = bk.position;
