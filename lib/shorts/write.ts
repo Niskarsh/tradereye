@@ -219,8 +219,8 @@ export function toSocialText(j: Record<string, unknown>, kind: 'mystery' | 'vs')
     ...(kind === 'mystery'
       ? { tell: clip(j.tell, 90), marks: Array.isArray(j.marks) ? j.marks.slice(0, 3) : [] }
       : { notes: { me: clip(n.me, 40), algo: clip(n.algo, 40) }, vsMarks: { me: vm.me ?? [], algo: vm.algo ?? [] } }),
-    youtube: { title: clip(yt.title, 100), description: withDisclaimer(clip(yt.description, 4000), 'youtube', kind), tags },
-    instagram: { caption: capHashtags(withDisclaimer(clip(ig.caption, 1700), 'instagram', kind)) },
+    youtube: { title: clip(yt.title, 100), description: withDisclaimer(clip(yt.description, 4000), 'youtube'), tags },
+    instagram: { caption: capHashtags(withDisclaimer(clip(ig.caption, 1700), 'instagram')) },
   };
 }
 

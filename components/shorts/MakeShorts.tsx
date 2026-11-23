@@ -11,7 +11,8 @@ import { istDay, nextSlotPairs } from '@/lib/shorts/slots';
  * "Make a short" on the Socials page. Pick up to 3 shorts in total from either tab (any mix: 3 mystery charts, 2 + 1,
  * the same week twice...), each with its own tell / notes, then Generate them all. Every row opens to the journal's own
  * chart of that trade (entries, adds, exits, stop, target), so an old trade can be recalled before writing its tell.
- * Rendering runs on GitHub Actions; each short shows below when ready. Nothing stops a trade or week being used again.
+ * Rendering runs on GitHub Actions; each short shows below when ready. A trade or week that already has a short is
+ * marked Used (and hidden while "Hide used" is on); it can still be used again.
  */
 
 const MAX_PICKS = 3;
@@ -19,7 +20,9 @@ const MAX_PICKS = 3;
 type Kind = 'mystery' | 'vs';
 interface Result { value: number; unit: 'R' | '%' }
 interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; securityId?: string; initialStop?: string; lastStop?: string; target?: string; fills: { time: string; side: 'BUY' | 'SELL'; qty: number; price: number }[] }
-interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo; hasStop?: boolean }
+/** a short was already made from it (lib/shorts/used.ts): how many, whether one is scheduled / posted, the latest made */
+interface Used { n: number; scheduled: boolean; lastAt: number }
+interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo; hasStop?: boolean; used?: Used }
 interface Side { r: number; n: number; uncounted: number }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
 type Winner = 'me' | 'algo' | 'tie' | 'none';
@@ -27,6 +30,7 @@ interface Week {
   week: string; label: string; me: Side; algo: Side; winner: Winner; meTrade?: WeekTrade; algoTrade?: WeekTrade;
   /** the season ledger: frozen the first time a short uses the week; `drift` = today's data would score it differently */
   frozenAt?: number; rescoredAt?: number; drift?: boolean; now?: { me: Side; algo: Side; winner: Winner };
+  used?: Used;
 }
 interface SocialText { tell?: string; notes?: { me: string; algo: string }; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
 interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string }; post?: PostPlan }
@@ -53,7 +57,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   const { token } = useAuth();
   const [kind, setKind] = useState<Kind>('mystery');
   const [trades, setTrades] = useState<MysteryTrade[] | null>(null);
-  const [cutoff, setCutoff] = useState('');
+  const [hideUsed, setHideUsed] = useState(true);
   const [weeks, setWeeks] = useState<Week[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);        // the expanded row
   const [picks, setPicks] = useState<Pick[]>([]);
@@ -87,7 +91,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
     if (kind === 'mystery' && !trades) {
       fetch('/api/shorts/candidates?kind=mystery', { cache: 'no-store' }).then(async (r) => {
         const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
-        setTrades(j.trades); setCutoff(j.cutoff);
+        setTrades(j.trades);
       }).catch((e) => setErr((e as Error).message));
     }
     if (kind === 'vs' && !weeks) {
@@ -132,6 +136,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
       setGhosts((g) => g.filter((x) => x.key !== p.key));
     }
     if (picks.some((p) => p.kind === 'vs')) setWeeks(null); // a Me vs Algo short freezes weeks: show them frozen
+    if (picks.some((p) => p.kind === 'mystery')) setTrades(null); // reload so the trades just used show as Used
     setPicks(left); setChartFor(null); setBusy(false);
     if (left.length) setErr(`${left.length} of them could not start; the reason is on each.`);
     void loadShorts();
@@ -206,6 +211,22 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
     </button>
   );
 
+  /** "Used" (×n, scheduled / posted) on a row that already has a short */
+  const usedBadge = (u?: Used) => u && (
+    <span title={`Short made ${new Date(u.lastAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })}${u.scheduled ? ' · scheduled or posted' : ' · not scheduled yet'}`}
+      className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase ${u.scheduled ? 'border-brand-accent/60 text-brand-accent' : 'border-line-strong text-ink-3'}`}>
+      Used{u.n > 1 ? ` ×${u.n}` : ''}{u.scheduled ? ' · posted' : ''}
+    </span>
+  );
+  const shownTrades = trades?.filter((t) => !hideUsed || !t.used);
+  const shownWeeks = weeks?.filter((w) => !hideUsed || !w.used);
+  const hideToggle = (n: number) => (
+    <label className="ml-auto flex items-center gap-2 text-xs text-ink-3">
+      <input type="checkbox" checked={hideUsed} onChange={(e) => setHideUsed(e.target.checked)} className="accent-[var(--color-brand-accent)]" />
+      Hide used{n ? ` (${n})` : ''}
+    </label>
+  );
+
   return (
     <section className="mt-4">
       <h2 className="text-xl font-semibold text-white">Make shorts</h2>
@@ -218,10 +239,13 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
 
         {kind === 'mystery' && (
           <>
-            <p className="mb-2 text-xs text-ink-3">Trades from {cutoff ? dateFmt(cutoff) : '…'} or earlier: the ticker is revealed at the end, so only trades over 3 months old (SEBI).</p>
-            {!trades ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !trades.length ? <p className="text-sm text-ink-3">No trades that old yet.</p> : (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-ink-3">Your trades with a stop in the journal, newest first.</p>
+              {hideToggle(trades?.filter((t) => t.used).length ?? 0)}
+            </div>
+            {!trades || !shownTrades ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !shownTrades.length ? <p className="text-sm text-ink-3">{trades.length ? 'Every trade with a stop already has a short: untick Hide used to see them.' : 'No trades with a stop in the journal yet.'}</p> : (
               <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-line">
-                {trades.map((t) => (
+                {shownTrades.map((t) => (
                   <div key={t.id} className="border-b border-line last:border-0">
                     <div className={`flex items-center gap-3 px-3 py-2 text-sm ${open === t.id ? 'bg-white/5' : ''}`}>
                       {chevron(t.id)}
@@ -234,6 +258,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
                         <span title="No InitialStop in the journal and not closed by a stop order: the video has no stop line"
                           className="rounded-md border border-data-caution/50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-data-caution">no stop</span>
                       )}
+                      {usedBadge(t.used)}
                       <span className={`ml-auto w-16 text-right font-semibold ${tone(t.result.value)}`}>{fmt(t.result)}</span>
                       {addBtn(() => addMystery(t), added(t.id))}
                     </div>
@@ -246,20 +271,23 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
         )}
 
         {kind === 'vs' && (
-          !weeks ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !weeks.length ? <p className="text-sm text-ink-3">No finished week since Algo Live started yet.</p> : (
+          !weeks || !shownWeeks ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !weeks.length ? <p className="text-sm text-ink-3">No finished week since Algo Live started yet.</p> : (
             <>
+            <div className="mb-2 flex justify-end">{hideToggle(weeks.filter((w) => w.used).length)}</div>
             <p className="mb-2 text-xs text-ink-3">
               Season ledger: a week&apos;s result is frozen the first time a short uses it (with every earlier week), so the score in the videos never changes on its own.
               {' '}Season so far: <b className="text-white">Me {weeks.filter((w) => w.frozenAt && w.winner === 'me').length} – {weeks.filter((w) => w.frozenAt && w.winner === 'algo').length} Algo</b> (frozen weeks).
             </p>
+            {!shownWeeks.length && <p className="text-sm text-ink-3">Every week already has a short: untick Hide used to see them.</p>}
             <div className="rounded-xl border border-line">
-              {weeks.map((w) => (
+              {shownWeeks.map((w) => (
                 <div key={w.week} className="border-b border-line last:border-0">
                   <div className={`flex flex-wrap items-center gap-3 px-3 py-2 text-sm ${open === w.week ? 'bg-white/5' : ''}`}>
                     {chevron(w.week)}
                     <span className="w-36 font-semibold text-white">{w.label}</span>
                     <span>Me <b className={tone(w.me.r)}>{fmtR(w.me.r)}</b> <span className="text-ink-4">({w.me.n})</span></span>
                     <span>Algo <b className={tone(w.algo.r)}>{fmtR(w.algo.r)}</b> <span className="text-ink-4">({w.algo.n})</span></span>
+                    {usedBadge(w.used)}
                     <span className="ml-auto text-xs font-bold uppercase text-brand-accent">{w.winner === 'none' ? 'no trades' : w.winner === 'tie' ? 'tie' : `${w.winner} wins`}</span>
                     <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase ${w.frozenAt ? 'border-brand-accent/50 text-brand-accent' : 'border-line-strong text-ink-4'}`}
                       title={w.frozenAt ? 'Locked: later shorts always show this result' : 'Freezes when its first short is made'}>

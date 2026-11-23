@@ -38,10 +38,10 @@ export function chartInfo(t: ShortTrade): ChartInfo {
 
 export interface MysteryCandidate { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: { value: number; unit: 'R' | '%' }; chart: ChartInfo; hasStop: boolean }
 
-/** Trades old enough to show with their ticker, newest first. */
+/** Trades with a real stop in the journal, newest first (any age: latest trades included). */
 export async function mysteryCandidates(now = Date.now()): Promise<MysteryCandidate[]> {
   const trades = await journalTradesBetween('2020-01', istToday(now).slice(0, 7));
-  return trades.filter((t) => mysteryEligible(t, now)).reverse()
+  return trades.filter((t) => mysteryEligible(t)).reverse()
     .map((t) => ({ id: t.id, date: t.date, symbol: t.symbol, dir: t.dir, entryTime: t.entryTime.slice(0, 5), holdMin: t.holdMin, result: resultOf(t), chart: chartInfo(t), hasStop: stopFor(t) !== null }));
 }
 
@@ -59,7 +59,7 @@ export function weekdays(from: string, to: string): string[] {
 
 export async function algoOrders(days: string[]): Promise<AlgoOrder[]> {
   const states = await Promise.all(days.map((d) => loadState(liveStore, d).catch(() => undefined)));
-  return days.flatMap((d, i) => (states[i]?.orders ?? []).map((o) => ({ date: d, symbol: o.symbol, sentAt: o.sentAt, risk: o.risk, stop: o.stop, status: o.status, avgPrice: o.avgPrice })));
+  return days.flatMap((d, i) => (states[i]?.orders ?? []).map((o) => ({ date: d, symbol: o.symbol, sentAt: o.sentAt, risk: o.risk, stop: o.stop, status: o.status, avgPrice: o.avgPrice, qty: o.qty })));
 }
 
 export interface Season {

@@ -7,7 +7,7 @@ import { dateLabel, mysterySpec, toMarks, vsPanel, vsSpec, type MysterySpec, typ
 import { addShort, setStatus, store, textKey } from '@/lib/shorts/store';
 import { putJson } from '@/lib/setups/store';
 import { mysteryMessage, vsMessage, writeText, type WrittenText } from '@/lib/shorts/write';
-import { mysteryEligible, MYSTERY_MIN_AGE_DAYS } from '@/lib/shorts/trades';
+import { mysteryEligible } from '@/lib/shorts/trades';
 import { freezeThrough, loadLedger, mergedWeeks, saveLedger } from '@/lib/shorts/season';
 
 export const dynamic = 'force-dynamic';
@@ -29,15 +29,16 @@ export async function POST(req: Request) {
   try {
     const b = await req.json().catch(() => ({})) as { kind?: string; tradeId?: string; date?: string; tell?: string; week?: string; notes?: { me?: string; algo?: string }; ai?: boolean };
     const ai = b.ai !== false;
-    let spec: ShortSpec, label: string;
+    let spec: ShortSpec, label: string, ref: string;
     let text: WrittenText | { error: string } | undefined;
     if (b.kind === 'mystery') {
       if (!b.tradeId || !/^\d{4}-\d{2}-\d{2}$/.test(b.date ?? '')) return bad('Pick a trade first.');
       const t = await findTrade(b.tradeId, b.date!);
       if (!t) return bad('That trade is no longer in the journal.');
-      if (!mysteryEligible(t)) return bad(`Mystery charts show the ticker, so the trade must be over ${MYSTERY_MIN_AGE_DAYS} days old (SEBI's 3-month rule).`);
+      if (!mysteryEligible(t)) return bad('That trade has no stop in the journal (no InitialStop, not closed by a stop), so the video would have no stop line.');
       spec = mysterySpec(newId('mystery'), t, await tradeDay(t, g.dhan), String(b.tell ?? ''));
       label = `Mystery: ${t.symbol} · ${dateLabel(t.date)}`;
+      ref = t.id;
       const c = spec.content as MysterySpec;
       if (ai) {
         text = await writeText('mystery', mysteryMessage(t, c.panel, c.tell), t.symbol).catch((e) => ({ error: (e as Error).message }));
@@ -63,6 +64,7 @@ export async function POST(req: Request) {
       const score = seasonBeforeAfter(weeks, w.week);
       spec = vsSpec(newId('vs'), { week: { week: fw.week, me: fw.me, algo: fw.algo, winner: fw.winner }, ...score, me, algo });
       label = `Me vs Algo · Week of ${dateLabel(w.week)}`;
+      ref = w.week;
       if (ai) {
         const msg = vsMessage({
           weekNo: weeks.findIndex((x) => x.week === w.week) + 1, weekLabel: label, week: fw, after: score.after,
@@ -83,7 +85,7 @@ export async function POST(req: Request) {
     } else return bad('kind must be mystery or vs');
 
     if (text) await putJson(store, textKey(spec.id), text);
-    const item = await addShort(spec, label);
+    const item = await addShort(spec, label, ref);
     try { await dispatchWorkflow(RENDER_WORKFLOW, { short_id: spec.id }, 'the render job'); }
     catch (e) {
       const msg = e instanceof DispatchError ? e.message : (e as Error).message;

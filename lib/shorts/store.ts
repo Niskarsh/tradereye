@@ -24,7 +24,8 @@ export const store: Store = {
   put: putChunk,
 };
 
-export interface ShortItem { id: string; kind: Template; label: string; createdAt: number }
+/** `ref`: what it was made from (mystery: the journal TradeGroupId, vs: the week's Monday). Shorts made before it existed have none. */
+export interface ShortItem { id: string; kind: Template; label: string; createdAt: number; ref?: string }
 export interface ShortStatus { state: 'queued' | 'rendering' | 'done' | 'failed'; updatedAt: number; error?: string }
 
 export const INDEX_KEY = 'shorts/index.json';
@@ -47,8 +48,8 @@ export async function listShorts(): Promise<ShortItem[]> {
   return (await getJson<ShortItem[]>(store, INDEX_KEY)) ?? [];
 }
 
-export async function addShort(spec: ShortSpec, label: string): Promise<ShortItem> {
-  const item: ShortItem = { id: spec.id, kind: spec.content.kind, label, createdAt: spec.createdAt };
+export async function addShort(spec: ShortSpec, label: string, ref?: string): Promise<ShortItem> {
+  const item: ShortItem = { id: spec.id, kind: spec.content.kind, label, createdAt: spec.createdAt, ...(ref ? { ref } : {}) };
   await putJson(store, specKey(spec.id), spec);
   await putJson(store, statusKey(spec.id), { state: 'queued', updatedAt: Date.now() } satisfies ShortStatus);
   const all = await listShorts();
