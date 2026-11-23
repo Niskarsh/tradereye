@@ -723,11 +723,14 @@ def boom(vol=0.9):
     return b
 
 
-def whoosh(dur, vol=0.12):
-    """the fast-forward to the entry: filtered noise that swells and fades"""
-    n = smooth(noise(dur, 5), 0.6)
-    env = np.sin(np.pi * np.linspace(0, 1, len(n))) ** 1.5
-    return vol * n / (np.max(np.abs(n)) or 1) * env
+def whoosh(dur, vol=0.06):
+    """the fast-forward to the entry: a rising tone (a slow noise swell read as breathing, so no noise here), fading out
+    before the order fills"""
+    t = np.arange(int(SR * dur)) / SR
+    f = 220 * 2 ** (2.0 * t / dur)                         # up two octaves across the fast-forward
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    env = np.minimum(1, t / 0.15) * (1 - t / dur) ** 0.6
+    return vol * env * (np.sin(ph) + 0.3 * np.sin(2 * ph))
 
 
 def fill_ding(vol=0.35):
