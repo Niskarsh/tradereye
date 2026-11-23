@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { botFacts, botReady, botRef, buildBotSpec, fallbackLine, parseBotRef } from '../lib/shorts/bot';
-import { checkTake, MIN_PITCH_SPREAD, pitchSpread, speechBounds, wordMatch, wordsOf } from '../lib/shorts/voice';
+import { botFacts, botReady, botRef, buildBotSpec, fallbackLine, parseBotRef, spoken } from '../lib/shorts/bot';
 import { toBotText } from '../lib/shorts/write';
 import type { MeVsAlgoRow } from '../lib/algoLive/meVsAlgo';
 
@@ -44,68 +43,29 @@ test('bot short: ref round-trips; the fallback line says the real money; facts c
   assert.deepEqual(parseBotRef('2026-11-18_FSL_1010'), { date: '2026-11-18', symbol: 'FSL', time: '10:10' });
   assert.equal(parseBotRef('nope'), undefined);
   const s = buildBotSpec(ROW, day(), '');
-  assert.equal(fallbackLine(s), 'I touched my bot\'s trade. Cost me ₹520.');
-  assert.equal(fallbackLine({ ...s, stepped: false }), 'My bot made +₹300. I didn\'t touch it.');
+  assert.equal(fallbackLine(s), 'He touched my trade. Cost him ₹520.');
+  assert.equal(fallbackLine({ ...s, stepped: false }), 'He left me alone. I made ₹300.');
   const f = botFacts(s, ROW.date);
   for (const x of ['342.6', '344.1', '339.6', '+₹300', '+₹820', 'COST']) assert.ok(f.includes(x), x);
 });
 
-test('bot text: YouTube only, line capped, missing line falls back', () => {
-  const t = toBotText({ line: '', context: ['a', 'b', 'c'], delivery: 'Annoyed at yourself.', youtube: { title: 'I touched my bot', description: 'd', tags: ['algo trading'] } }, 'fallback line');
-  assert.equal(t.voice?.line, 'fallback line');
-  assert.equal(t.voice?.context.length, 2);
-  assert.equal(t.instagram.caption, '');
+test('bot voice: the line as text-to-speech reads it; no voice when switched off', () => {
+  assert.equal(spoken('He touched my trade. Cost him ₹1,520.'), 'He touched my trade. Cost him 1520 rupees.');
+  assert.equal(spoken('Saved ₹310. Annoying.'), 'Saved 310 rupees. Annoying.');
+  const s = buildBotSpec(ROW, day(), 'He touched my trade. Cost him ₹520.');
+  assert.equal(s.line, 'He touched my trade. Cost him ₹520.');
+  assert.equal(s.say, 'He touched my trade. Cost him 520 rupees.');
+  assert.equal(buildBotSpec(ROW, day(), 'x', false).say, '');
+});
+
+test('bot text: YouTube text and an Instagram caption, both with the disclaimer; missing parts fall back', () => {
+  const t = toBotText({ line: '', youtube: { title: 'I touched my bot', description: 'd', tags: ['algo trading'] }, instagram: { caption: 'He touched my trade.\n#algotrading #tradingbot' } }, 'fallback line');
+  assert.equal(t.botLine, 'fallback line');
+  assert.ok(t.instagram.caption.startsWith('He touched my trade.'));
+  assert.ok(t.instagram.caption.includes('not a SEBI-registered'));
+  assert.ok(t.instagram.caption.trimEnd().endsWith('#algotrading #tradingbot'));
+  const none = toBotText({ line: 'He touched my trade. Cost him ₹520.', youtube: { title: 'x' } }, 'f');
+  assert.ok(none.instagram.caption.startsWith('He touched my trade. Cost him ₹520.\nMy voice is AI-generated.'));
   assert.ok(t.youtube.description.includes('not a SEBI-registered'));
 });
 
-/* ---------------- voice checks ---------------- */
-
-const SR = 16000;
-/** a voiced sound (harmonics) at a pitch that follows `hz(t)`, between silences */
-function voiced(seconds: number, hz: (t: number) => number, amp = 0.4, lead = 0.4) {
-  const n = Math.round((seconds + 2 * lead) * SR), x = new Float32Array(n);
-  let ph = 0;
-  for (let i = 0; i < n; i++) {
-    const t = i / SR - lead;
-    if (t < 0 || t > seconds) continue;
-    ph += (2 * Math.PI * hz(t)) / SR;
-    x[i] = amp * (Math.sin(ph) + 0.5 * Math.sin(2 * ph) + 0.25 * Math.sin(3 * ph)) / 1.75;
-  }
-  return x;
-}
-
-test('voice: speech is found between the silences', () => {
-  const b = speechBounds(voiced(2, () => 150), SR)!;
-  assert.ok(Math.abs(b.start - 0.3) < 0.06, String(b.start));
-  assert.ok(Math.abs(b.end - 2.55) < 0.06, String(b.end));
-  assert.equal(speechBounds(new Float32Array(SR), SR), null);
-});
-
-test('voice: a monotone reads flat, a voice that rises and falls does not', () => {
-  const flat = pitchSpread(voiced(2, () => 140), SR, 0.4, 2.4)!;
-  const lively = pitchSpread(voiced(2, (t) => 140 + 70 * Math.sin(2 * Math.PI * t / 1.3)), SR, 0.4, 2.4)!;
-  assert.ok(flat < 0.5, `flat ${flat}`);
-  assert.ok(lively > 2, `lively ${lively}`);
-});
-
-test('voice: words match however the amount is written; the full check names what to fix', () => {
-  assert.deepEqual(wordsOf("Cost me ₹420."), ['cost', 'me', '420']);
-  assert.equal(wordMatch("I touched my bot's trade. Cost me ₹420.", 'i touched my bots trade cost me rupees 420'), 1);
-  assert.ok(wordMatch("I touched my bot's trade. Cost me ₹420.", 'hello there') < 0.3);
-  const line = "I touched my bot's trade. Cost me ₹420.";
-  const good = checkTake(voiced(2.4, (t) => 140 + 70 * Math.sin(2 * Math.PI * t / 1.3)), SR, line, 'I touched my bots trade cost me 420');
-  assert.equal(good.ok, true, JSON.stringify(good.checks));
-  const flat = checkTake(voiced(2.4, () => 140), SR, line, 'I touched my bots trade cost me 420');
-  assert.deepEqual(flat.checks.filter((c) => !c.ok).map((c) => c.key), ['flat']);
-  const long = checkTake(voiced(5.5, (t) => 140 + 70 * Math.sin(t * 4)), SR, line, null);
-  assert.deepEqual(long.checks.filter((c) => !c.ok).map((c) => c.key).sort(), ['length']);
-  assert.ok(long.checks.find((c) => c.key === 'words')?.skipped);
-  const quiet = checkTake(voiced(2.4, (t) => 140 + 70 * Math.sin(t * 4), 0.02), SR, line, null);
-  assert.ok(quiet.checks.some((c) => c.key === 'loud' && !c.ok));
-});
-
-test('voice: octave jumps in the pitch track do not make a flat take look lively', () => {
-  // a flat voice whose every 6th 40 ms stretch reads an octave up (the classic tracking error)
-  const x = voiced(2.4, (t) => (Math.floor(t / 0.04) % 6 === 0 ? 280 : 140));
-  assert.ok(pitchSpread(x, SR, 0.4, 2.8)! < MIN_PITCH_SPREAD);
-});

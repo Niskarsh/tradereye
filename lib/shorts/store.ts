@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getChunk, putChunk } from '../book/s3';
 import { getJson, putJson, type Store } from '../setups/store';
@@ -14,7 +14,6 @@ import type { ShortSpec, Template } from './spec';
  *   shorts/<id>/poster.jpg         a still for the list
  *   shorts/<id>/text.json          its words: title, description, tags, Instagram caption (Claude, at Generate)
  *   shorts/<id>/thumb.jpg / .json  the cover frame he picked (YouTube thumbnail, Instagram cover)
- *   shorts/<id>/voice.audio        his recorded line (my bot's trade), as the browser recorded it (webm / mp4)
  */
 
 export const store: Store = {
@@ -27,8 +26,7 @@ export const store: Store = {
 
 /** `ref`: what it was made from (mystery: the journal TradeGroupId, vs: the week's Monday). Shorts made before it existed have none. */
 export interface ShortItem { id: string; kind: Template; label: string; createdAt: number; ref?: string }
-/** voice: a my-bot's-trade short made but not rendered yet: it waits for his recorded line (or Render without voice) */
-export interface ShortStatus { state: 'voice' | 'queued' | 'rendering' | 'done' | 'failed'; updatedAt: number; error?: string }
+export interface ShortStatus { state: 'queued' | 'rendering' | 'done' | 'failed'; updatedAt: number; error?: string }
 
 export const INDEX_KEY = 'shorts/index.json';
 export const specKey = (id: string) => `shorts/${id}/spec.json`;
@@ -40,7 +38,6 @@ export const textKey = (id: string) => `shorts/${id}/text.json`;
 /** the cover he picked: the frame as a JPEG, and where in the video it is ({ ms, image }) */
 export const thumbKey = (id: string) => `shorts/${id}/thumb.jpg`;
 export const thumbMetaKey = (id: string) => `shorts/${id}/thumb.json`;
-export const voiceKey = (id: string) => `shorts/${id}/voice.audio`;
 export interface ThumbMeta { ms: number; image: boolean; at: number }
 export const validId = (id: string) => /^[a-z0-9-]{6,40}$/.test(id);
 
@@ -51,10 +48,10 @@ export async function listShorts(): Promise<ShortItem[]> {
   return (await getJson<ShortItem[]>(store, INDEX_KEY)) ?? [];
 }
 
-export async function addShort(spec: ShortSpec, label: string, ref?: string, state: 'queued' | 'voice' = 'queued'): Promise<ShortItem> {
+export async function addShort(spec: ShortSpec, label: string, ref?: string): Promise<ShortItem> {
   const item: ShortItem = { id: spec.id, kind: spec.content.kind, label, createdAt: spec.createdAt, ...(ref ? { ref } : {}) };
   await putJson(store, specKey(spec.id), spec);
-  await putJson(store, statusKey(spec.id), { state, updatedAt: Date.now() } satisfies ShortStatus);
+  await putJson(store, statusKey(spec.id), { state: 'queued', updatedAt: Date.now() } satisfies ShortStatus);
   const all = await listShorts();
   await putJson(store, INDEX_KEY, [item, ...all.filter((x) => x.id !== item.id)].slice(0, 200));
   return item;
@@ -78,11 +75,6 @@ const s3 = () => (client ??= new S3Client({
 }));
 const bucket = () => process.env.AWS_S3_BUCKET_NAME!;
 
-/** His recorded line, stored as the browser sent it (the render job's ffmpeg reads any of these). */
-export async function putVoice(id: string, body: Uint8Array, contentType: string): Promise<void> {
-  await s3().send(new PutObjectCommand({ Bucket: bucket(), Key: voiceKey(id), Body: body, ContentType: contentType }));
-}
-
 /** A private, time-limited link to the video or poster (for the preview, and for Instagram to fetch the video). */
 export async function signedGet(key: string, seconds = 3600, contentType?: string): Promise<string> {
   return getSignedUrl(s3(), new GetObjectCommand({ Bucket: bucket(), Key: key, ...(contentType ? { ResponseContentType: contentType } : {}) }), { expiresIn: seconds });
@@ -91,7 +83,7 @@ export async function signedGet(key: string, seconds = 3600, contentType?: strin
 export async function deleteShort(id: string): Promise<void> {
   const all = await listShorts();
   await putJson(store, INDEX_KEY, all.filter((x) => x.id !== id));
-  for (const key of [specKey(id), statusKey(id), videoKey(id), posterKey(id), textKey(id), thumbKey(id), thumbMetaKey(id), voiceKey(id)]) {
+  for (const key of [specKey(id), statusKey(id), videoKey(id), posterKey(id), textKey(id), thumbKey(id), thumbMetaKey(id)]) {
     await s3().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key })).catch(() => {});
   }
 }

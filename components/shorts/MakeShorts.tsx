@@ -4,7 +4,6 @@ import { Check, ChevronDown, ChevronRight, Loader2, Plus, Trash2, X } from 'luci
 import { useAuth } from '@/context/AuthContext';
 import { TradeCharts } from '@/components/journal/TradeCharts';
 import { PostStatus, ScheduleEditor } from '@/components/shorts/SchedulePanel';
-import VoiceRecorder, { type VoiceText } from '@/components/shorts/VoiceRecorder';
 import { blocksDelete, takenSlots, type PostPlan } from '@/lib/shorts/posts';
 import { istDay, nextSlotPairs } from '@/lib/shorts/slots';
 
@@ -26,7 +25,7 @@ interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; secur
 interface Used { n: number; scheduled: boolean; lastAt: number }
 interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo; hasStop?: boolean; used?: Used }
 interface Side { r: number; n: number; uncounted: number }
-/** an Algo Live trade for "My bot's trade" (YouTube only): what he did vs what the bracket would have done, after charges */
+/** an Algo Live trade for "My bot's trade": what he did vs what the bracket would have done, after charges */
 interface BotTrade { ref: string; date: string; symbol: string; time: string; entry: number; stop: number; target: number; myInr: number; myHow: string; myTime: string; planInr: number | null; planOutcome: string | null; diffInr: number | null; steppedIn: boolean | null; note?: string; used?: Used }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
 type Winner = 'me' | 'algo' | 'tie' | 'none';
@@ -36,8 +35,8 @@ interface Week {
   frozenAt?: number; rescoredAt?: number; drift?: boolean; now?: { me: Side; algo: Side; winner: Winner };
   used?: Used;
 }
-interface SocialText { tell?: string; notes?: { me: string; algo: string }; voice?: VoiceText; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
-interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'voice' | 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string }; post?: PostPlan }
+interface SocialText { tell?: string; notes?: { me: string; algo: string }; botLine?: string; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
+interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string }; post?: PostPlan }
 
 type Pick =
   | { key: number; kind: 'mystery'; trade: MysteryTrade; tell: string; state?: 'sending' | 'sent' | string }
@@ -144,7 +143,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
         if (!r.ok) left.push({ ...p, state: j.message ?? `HTTP ${r.status}` });
         else {
           if (j.textError) setErr(`Made, but Claude could not write the text: ${j.textError}`);
-          ghostStep(p.key, p.kind === 'bot' ? 'Ready for your voice' : 'Starting the render');
+          ghostStep(p.key, 'Starting the render');
           await loadShorts();  // its real card (rendering) takes the placeholder's place
         }
       } catch (e) { left.push({ ...p, state: (e as Error).message }); }
@@ -202,9 +201,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   const defaultAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.youtube]));
   const defaultIgAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.instagram]));
   const editingShort = shorts.find((s) => s.id === editing);
-  // not scheduled yet (scheduled ones are in the Posting tab); a bot short waiting for his voice gets the recorder instead
-  const drafts = shorts.filter((s) => !s.post && s.status.state !== 'voice');
-  const needVoice = shorts.filter((s) => s.status.state === 'voice');
+  const drafts = shorts.filter((s) => !s.post);  // not scheduled yet (scheduled ones are in the Posting tab)
 
   const tab = (k: Kind, label: string) => (
     <button onClick={() => setKind(k)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${kind === k ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>{label}</button>
@@ -292,7 +289,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
         {kind === 'bot' && (
           <>
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-ink-3">Algo Live trades, newest first. <b className="text-ink-2">YouTube only.</b> After Generate, you record one line, then it renders.</p>
+              <p className="text-xs text-ink-3">Algo Live trades, newest first. The bot narrates its own trade (AI voice, disclosed on YouTube and in the caption). Schedules to YouTube and Instagram like a mystery chart.</p>
               {hideToggle(botTrades?.filter((t) => t.used).length ?? 0)}
             </div>
             {!botTrades || !shownBots ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !shownBots.length ? <p className="text-sm text-ink-3">{botTrades.length ? 'Every bot trade already has a short: untick Hide used to see them.' : 'No closed Algo Live trades yet.'}</p> : (
@@ -390,9 +387,9 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
                 {p.state && p.state !== 'sending' && p.state !== 'sent' && <p className="mt-1 text-xs text-data-red-text">{p.state}</p>}
                 {p.kind === 'bot' ? (
                   <label className="mt-2 block text-xs text-ink-3">
-                    The line you will say (first person, max 8 words){ai ? ' (leave empty and Claude writes it)' : ' (empty: a plain line from the numbers)'}
+                    The bot&apos;s line (it talks about you, max 8 words){ai ? ' (leave empty and Claude writes it)' : ' (empty: a plain line from the numbers)'}
                     <input value={p.line} disabled={busy} onChange={(e) => { const v = e.target.value.slice(0, 80); update(p.key, (x) => ({ ...x, line: v } as Pick)); }}
-                      placeholder="e.g. I touched my bot's trade. Cost me ₹420." className={input} />
+                      placeholder="e.g. He touched my trade. Cost him ₹420." className={input} />
                   </label>
                 ) : p.kind === 'mystery' ? (
                   <>
@@ -424,7 +421,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
           </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-ink-2">
             <input type="checkbox" checked={ai} disabled={busy} onChange={(e) => setAi(e.target.checked)} className="accent-[var(--color-brand-accent)]" />
-            Claude writes the tell (or the line you say), YouTube title, description, tags and Instagram caption (one call per short, about ₹1–2)
+            Claude writes the tell (or the bot's line), YouTube title, description, tags and Instagram caption (one call per short, about ₹1–2)
           </label>
           <div className="mt-3 flex items-center gap-3">
             <button onClick={generate} disabled={!picks.length || busy}
@@ -442,13 +439,6 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
           {shorts.filter((s) => s.post).length} scheduled or posted{' '}
           <button onClick={onOpenPosting} className="font-semibold text-brand-accent hover:underline">see Posting</button>
         </p>
-      )}
-      {needVoice.length > 0 && (
-        <div className="mt-6 grid gap-4">
-          {needVoice.map((s) => (
-            <VoiceRecorder key={s.id} id={s.id} label={s.label} text={s.text && 'voice' in s.text ? s.text.voice : undefined} onDone={() => void loadShorts()} onDelete={() => void remove(s.id)} />
-          ))}
-        </div>
       )}
       {(drafts.length > 0 || ghosts.length > 0 || editingShort) && (
         <div id="shorts-grid" className="mt-6 grid scroll-mt-24 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">

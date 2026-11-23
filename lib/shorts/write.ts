@@ -18,8 +18,8 @@ export interface SocialText {
   marks?: unknown;                                 // mystery: what to mark on the recap chart (checked by toMarks)
   vsMarks?: { me: unknown; algo: unknown };        // me vs algo: what each side's reason refers to (checked by toMarks)
   notes?: { me: string; algo: string };            // me vs algo
-  /** my bot's trade: what he is told before recording, the line he speaks (also on screen), how to say it */
-  voice?: { context: string[]; line: string; delivery: string };
+  /** my bot's trade: the bot's line (on screen and spoken by its synthetic voice) */
+  botLine?: string;
   youtube: { title: string; description: string; tags: string[] };
   instagram: { caption: string };
 }
@@ -199,40 +199,46 @@ export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScor
 
 const BOT_SYSTEM = `You write for "Candles Before Cubicles", a YouTube channel: a software developer built his own trading bot
 (Algo Live), it trades his real money on the NSE, and sometimes he steps in. This is a YouTube Short of ONE of the bot's
-trades, about 20 seconds. The video opens on a single first-person line he SPEAKS himself (recorded on his phone) and that
-is also shown big on screen; the chart moves at once; it shows where he stepped in, then what the bot would have done alone.
+trades, about 15-20 seconds. THE BOT NARRATES THE WHOLE VIDEO: it opens on one line in the bot's own words ("I'M HIS
+TRADING BOT"), shown big on screen and spoken in a robotic synthetic voice; then the chart moves at once and shows "HE
+STEPPED IN" and "IF HE'D LEFT ME ALONE…" (what the bot would have done), ending "He stepped in. It cost him ₹520".
 
 Hard rules:
 - Use only the facts given. Never invent prices, times, amounts or events. Rupee amounts are after charges.
 - No investment advice: no buy/sell calls, no "you should", no promises, no "guaranteed", no "easy money".
-- Never name or describe the bot's strategy or rules (that is private): it is just "my bot".
+- Never name or describe the bot's strategy or rules (that is private).
 
-line (he says it out loud, and it is the opening frame):
-- Max 8 words, first person, spoken English (contractions), says the result or the tension with ONE concrete number
-  from the facts. It must work in the first second for a stranger scrolling. Examples of the shape (use the real numbers):
-  "I touched my bot's trade. Cost me ₹420." / "My bot made ₹480. I nearly ruined it." / "I stepped in. Saved ₹310."
-- Rupees as "₹420" (whole rupees). No ticker in the line.
-context: exactly 2 short lines he reads BEFORE recording, so he knows what happened (plain, factual, with the numbers).
-delivery: one short line telling him HOW to say it, matched to the emotion of the facts (e.g. "Annoyed at yourself,
-  like telling a friend over chai. Not reading." / "Quietly proud, half a smile."). Never theatrical.
+line (the bot speaks it, and it is the opening frame):
+- Max 8 words, the bot talking about HIM in the third person ("he", "him"). The bot is quietly fed up with its human
+  stepping in, but NEVER says so: no emotion words at all (not "annoying", "frustrated", "ugh", "fine", "sigh", "again").
+  The feeling comes only from flat, factual understatement and what is left unsaid; the voice is a monotone robot, so
+  the words must carry it. ONE concrete rupee number from the facts, written "₹520" (whole rupees). No ticker.
+  Shapes (use the real numbers): "He touched my trade. Cost him ₹520." / "He let me work. ₹480." / "He stepped in.
+  He was right. ₹310." It must stop a stranger scrolling in the first second.
 
 YouTube (Shorts feed first, search second):
-- title: max 55 characters, hook in the first 40, the same tension as the line in different words, with "my trading bot"
-  or "my bot" in it. No emoji, no all caps words, no question about long/short.
-- description: line 1 (max 100 characters) restates the hook. Then 3-5 sentences telling this trade from the facts (the
-  bot's entry, stop and target, what he did and why it mattered in rupees, what the bot would have done alone). Then one
-  line on the series: "A developer vs his own trading bot, with real money." Then "Real trade, real money. Not investment
-  advice." Then exactly 3 hashtags, #shorts first. Do not write a longer disclaimer: it is added automatically.
+- ONE NARRATOR everywhere: the bot. In the line, the title and the story, "I" / "my" is always the bot and "he" / "him"
+  is always the human. Never switch to his voice.
+- title: max 55 characters, hook in the first 40, the bot speaking, same tension in different words, with "trading bot"
+  or "my human" in it (e.g. "My human touched my trade. It cost him ₹520"). No emoji, no all caps words.
+- description: line 1 (max 100 characters) restates the hook in the bot's voice. Then 3-5 sentences, still the bot
+  speaking, telling this trade from the facts (my entry, stop and target, what he did and what it meant in rupees, what
+  I would have done left alone). Then: "I'm a trading bot a developer built. He trades real money through me, and sometimes
+  he can't keep his hands off. My voice is AI-generated." Then "Real trade, real money. Not investment advice." Then
+  exactly 3 hashtags, #shorts first. Do not write a longer disclaimer: it is added automatically.
 - tags: 15-25 lowercase search phrases (algo trading, trading bot, automated trading, intraday trading, stock market
-  india, nse, trading psychology...). Never a stock name, ticker or person's name.`;
+  india, nse, trading psychology...). Never a stock name, ticker or person's name.
+
+Instagram (the same video as a Reel):
+- instagram.caption: max 600 characters, the bot speaking throughout. First line (max 125 characters, shown before
+  "more") is the hook with searchable words (trading bot, intraday, NSE). Then 1-2 short lines on what happened in
+  rupees. Then one easy question that invites a comment (e.g. "Should he have let me trade? 👇"). Then "My voice is
+  AI-generated." Then "Real trade, real money. Not investment advice." Then 3-5 specific hashtags (#algotrading
+  #tradingbot #intradaytrading...). At most 2 emoji. Do not write a longer disclaimer: it is added automatically.`;
 
 export const BOT_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['line', 'context', 'delivery', 'youtube'],
-  properties: {
-    line: { type: 'string' }, delivery: { type: 'string' },
-    context: { type: 'array', items: { type: 'string' } },
-    youtube: TEXT_SCHEMA.properties.youtube,
-  },
+  type: 'object', additionalProperties: false, required: ['line', 'youtube', 'instagram'],
+  properties: { line: { type: 'string' }, youtube: TEXT_SCHEMA.properties.youtube, instagram: TEXT_SCHEMA.properties.instagram },
 } as const;
 
 const clip = (s: unknown, n: number) => String(s ?? '').replace(/\s+\n/g, '\n').trim().slice(0, n);
@@ -278,15 +284,15 @@ export async function writeText(kind: 'mystery' | 'vs', message: string, hiddenT
   return { ...text, model: r.model, costInr: r.costInr, at: Date.now() };
 }
 
-/** The model's JSON for a bot short -> SocialText (YouTube only: the Instagram caption stays empty). */
+/** The model's JSON for a bot short -> SocialText (YouTube text and Instagram caption, each with the disclaimer). */
 export function toBotText(j: Record<string, unknown>, fallback: string): SocialText {
-  const yt = (j.youtube ?? {}) as Record<string, unknown>;
+  const yt = (j.youtube ?? {}) as Record<string, unknown>, ig = (j.instagram ?? {}) as Record<string, unknown>;
   const tags = Array.isArray(yt.tags) ? fitTags(yt.tags.map((t) => clip(t, 60).replace(/^#/, ''))) : [];
   const line = clip(j.line, 80) || fallback;
   return {
-    voice: { line, context: (Array.isArray(j.context) ? j.context : []).map((x) => clip(x, 160)).filter(Boolean).slice(0, 2), delivery: clip(j.delivery, 140) },
+    botLine: line,
     youtube: { title: clip(yt.title, 100) || line, description: withDisclaimer(clip(yt.description, 4000), 'youtube'), tags },
-    instagram: { caption: '' },
+    instagram: { caption: capHashtags(withDisclaimer(clip(ig.caption, 1700) || `${line}\nMy voice is AI-generated.\nReal trade, real money. Not investment advice.`, 'instagram')) },
   };
 }
 
@@ -294,7 +300,7 @@ export async function writeBotText(facts: string, fallback: string, ticker: stri
   const r = await jsonClaude(BOT_SYSTEM, `THE TRADE\n${facts}`, BOT_SCHEMA, o, 3000);
   if (!Object.keys(r.json).length) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no usable text.');
   const text = scrubTicker(toBotText(r.json, fallback), ticker);
-  const v = text.voice!;
-  return { ...text, voice: { ...v, line: v.line.replace(new RegExp(ticker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'it') }, model: r.model, costInr: r.costInr, at: Date.now() };
+  const esc = ticker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const tick = new RegExp('(?<![A-Za-z0-9])' + esc + '(?![A-Za-z0-9])', 'gi');
+  return { ...text, botLine: text.botLine!.replace(tick, 'it'), model: r.model, costInr: r.costInr, at: Date.now() };
 }
-

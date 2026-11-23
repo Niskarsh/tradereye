@@ -21,7 +21,7 @@ export const READ_SCHEMA = {
 export const SYSTEM = `You are the growth analyst for "Candles Before Cubicles": YouTube Shorts and Instagram Reels rendered by code from one
 person's real NSE day trades. Goal: more subscribers and followers. You decide what the next batch of shorts should change.
 
-Formats that can be made now: Mystery chart (YouTube and Instagram) and My bot's trade (YouTube only: one Algo Live trade,
+Formats that can be made now: Mystery chart (YouTube and Instagram) and My bot's trade (YouTube and Instagram: one Algo Live trade, narrated by the bot,
 opens on a first-person line he records, e.g. "I touched my bot's trade. Cost me ₹420.", then where he stepped in and what
 the bot would have done alone). Me vs Algo is retired (he trades only through his bot now, so his side is always empty):
 never suggest it, even though older posts may show it.

@@ -103,11 +103,13 @@ export interface UploadMeta {
   categoryId?: string;         // default 22 = People & Blogs (a personal trade journal, not education)
   privacy: 'private' | 'unlisted' | 'public';
   publishAt?: string;          // ISO time; YouTube makes a private video public then
+  /** Studio's "altered or synthetic content": yes when the video has an AI-generated voice (My bot's trade) */
+  synthetic?: boolean;
 }
 
 /**
- * The questions YouTube Studio asks on every upload, answered the same way each time: not made for kids, and no
- * realistic altered or synthetic (AI) content (the videos are drawn from real trade data by code).
+ * The questions YouTube Studio asks on every upload: not made for kids, and no realistic altered or synthetic (AI)
+ * content (the videos are drawn from real trade data by code). A short with the bot's AI voice says yes (meta.synthetic).
  */
 export const AUDIENCE = { selfDeclaredMadeForKids: false, containsSyntheticMedia: false } as const;
 /** Studio's "Paid promotion" question: no paid product placement, sponsorship or endorsement. */
@@ -139,7 +141,7 @@ export async function uploadVideo(accessToken: string, bytes: Uint8Array, meta: 
   if (meta.publishAt && meta.privacy !== 'private') throw new YouTubeError('A scheduled video must be uploaded as private.');
   const body = {
     snippet: snippetOf(meta),
-    status: { privacyStatus: meta.privacy, ...AUDIENCE, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+    status: { privacyStatus: meta.privacy, ...AUDIENCE, containsSyntheticMedia: !!meta.synthetic, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
     paidProductPlacementDetails: NO_PAID_PROMOTION,
   };
   const start = await fetchImpl(`${UPLOAD}?uploadType=resumable&part=${PARTS}`, {
@@ -180,7 +182,7 @@ export async function updateVideo(accessToken: string, id: string, meta: UploadM
   if (meta.publishAt && meta.privacy !== 'private') throw new YouTubeError('A scheduled video must stay private until its time.');
   const body = {
     id, snippet: snippetOf(meta),
-    status: { privacyStatus: meta.privacy, ...AUDIENCE, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
+    status: { privacyStatus: meta.privacy, ...AUDIENCE, containsSyntheticMedia: !!meta.synthetic, ...(meta.publishAt ? { publishAt: meta.publishAt } : {}) },
     paidProductPlacementDetails: NO_PAID_PROMOTION,
   };
   const res = await fetchImpl(`${API}/videos?part=${PARTS}`, {

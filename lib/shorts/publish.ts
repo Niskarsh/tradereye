@@ -5,7 +5,8 @@ import { addToPlaylist, canManage, deleteVideo, removeFromPlaylist, setThumbnail
 import { igStep, MAX_ATTEMPTS, nextWake, pending, POSTS_KEY, youtubeState, type PlatformPost, type PlaylistItem, type PostPlan, type Posts } from './posts';
 import { createWake, deleteWake, wakeName } from '../social/scheduler';
 import { MIN_LEAD_MS } from './slots';
-import { signedGet, store, textKey, thumbKey, thumbMetaKey, videoKey, type ThumbMeta } from './store';
+import { signedGet, specKey, store, textKey, thumbKey, thumbMetaKey, videoKey, type ThumbMeta } from './store';
+import type { ShortSpec } from './spec';
 import type { WrittenText } from './write';
 
 /**
@@ -35,9 +36,15 @@ export async function saveText(id: string, t: PostText): Promise<void> {
   });
 }
 
-const meta = (t: PostText, at: number): UploadMeta => ({
-  title: t.title, description: t.description, tags: t.tags, privacy: 'private', publishAt: new Date(at).toISOString(),
+const meta = (t: PostText, at: number, synthetic = false): UploadMeta => ({
+  title: t.title, description: t.description, tags: t.tags, privacy: 'private', publishAt: new Date(at).toISOString(), synthetic,
 });
+
+/** A "My bot's trade" short speaks with an AI voice (the bot's): YouTube's altered / synthetic content question is yes. */
+async function hasAiVoice(id: string): Promise<boolean> {
+  const spec = await getJson<ShortSpec>(store, specKey(id)).catch(() => undefined);
+  return spec?.content.kind === 'bot' && !!spec.content.say;
+}
 
 /**
  * Schedule, re-time or re-word the YouTube upload, and put it in the chosen playlists. Returns the new YouTube part of
@@ -55,15 +62,16 @@ export async function scheduleYouTube(id: string, at: number, t: PostText, old: 
   if (old?.videoId && state === 'scheduled' && sameTime && wordsSame && samePlaylists && sameThumb && sameMeta) return { post: old, problems: [] };  // nothing to change
   if (!sameTime && at < now + MIN_LEAD_MS) throw new YouTubeError('Pick a YouTube time at least 15 minutes from now.');
   const { conn, accessToken } = await liveYouTube();
+  const ai = await hasAiVoice(id);
   let post: PlatformPost;
   if (old?.videoId && state === 'scheduled') {
     if (!canManage(conn.scope)) throw new YouTubeError('Connect YouTube again (top of this page) to allow changing a scheduled video, then save again.');
-    if (!sameTime || !wordsSame || !sameMeta) await updateVideo(accessToken, old.videoId, meta(t, at));
+    if (!sameTime || !wordsSame || !sameMeta) await updateVideo(accessToken, old.videoId, meta(t, at, ai));
     post = { ...old, at, updatedAt: now, error: undefined, metaV: META_V };
   } else {
     const bytes = await store.get(videoKey(id));
     if (!bytes) throw new YouTubeError('The video file is missing. Generate the short again.');
-    const v = await uploadVideo(accessToken, bytes, meta(t, at));
+    const v = await uploadVideo(accessToken, bytes, meta(t, at, ai));
     post = { at, state: 'scheduled', updatedAt: now, videoId: v.id, url: v.url, playlists: [], metaV: META_V };
   }
   const synced = await syncPlaylists(accessToken, post.videoId!, post.playlists ?? [], want);
