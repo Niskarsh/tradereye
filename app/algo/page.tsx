@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, pct, rr } from '@/components/setups/parts';
-import { WideRunCard } from '@/components/algo/WideRunCard';
+import { Iter17RunCard } from '@/components/algo/Iter17RunCard';
+import { Iter17Card, type Iter17 } from '@/components/algo/Iter17Card';
 import type { WideBlock, WideCell, WideLiquid } from '@/lib/ml/wide';
 import { exportFileName, mlToMarkdown, type ExportMl } from '@/lib/ml/exportMd';
 import { relabelSized } from '@/lib/ml/sized';
@@ -59,6 +60,7 @@ interface Ml {
   management?: Mgmt[]; managementError?: string;
   noiseAll?: Noise[];
   wide?: WideResult;
+  iter17?: Iter17;
   narrowStocks?: number;
   volChoice?: { id: string | null; name: string | null; rule: { netR: number; t: number; n: number }; order: string[]; tried: { id: string; name: string; netR: number; t: number; n: number; perMonth?: number | null; ok: boolean }[] } | null;
   capChoice?: { id: string | null; name: string | null; rule: { netR: number; t: number }; order: string[]; tried: { id: string; name: string; netR: number; t: number; n: number; ok: boolean }[] } | null;
@@ -829,7 +831,7 @@ export default function AlgoPage() {
         </header>
         {(history.length > 0 || live) && <Picker history={history} live={live} ml={ml} run={run ?? ''} open={open} />}
         {ml && <div className="flex justify-end"><DownloadResults ml={ml} /></div>}
-        <WideRunCard onDone={() => setReload((n) => n + 1)} />
+        <Iter17RunCard onDone={() => setReload((n) => n + 1)} />
         {err && <p className="text-xs text-data-red-text">{err}</p>}
         {ml === undefined && !err && <p className="flex items-center gap-2 text-xs text-ink-3"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>}
         {ml === null && <Card title="No results yet" sub="Made by the backtest run: press Re-run on My Analysis → My Setups. The model step adds about an hour after the backtest."><span /></Card>}
@@ -846,6 +848,7 @@ export default function AlgoPage() {
               </p>
             </Card>
             <WideCard ml={v2} />
+            {v2.iter17 && <Iter17Card it={v2.iter17} onPick={(id) => setPick(id)} />}
             {(Array.isArray(v2.untouched) ? v2.untouched : v2.untouched ? [v2.untouched] : []).filter((u) => !v2.wide && !['f1055', 'fCap3', 'fCap2', 'fStrict', 'vAll', 'v3m', 'v5m', 'v7m', 'v10m'].includes(u.id)).map((u) => <UntouchedCard key={u.id} u={u} />)}
             {v2.noise && v2.noise.draws.length > 1 && (
               <Card title="How much is luck in the training?" sub={`The locked strategy trained ${v2.noise.draws.length} times with different random draws (same data, same rules). The spread is the noise: differences smaller than this between iterations mean nothing.`}>

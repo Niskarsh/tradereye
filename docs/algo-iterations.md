@@ -36,6 +36,14 @@ target ¾, out by 15:15). "Earlier" is the months before May 2026; "exam" is May
 | 14 | ₹10 lakh positions, ₹100 cr+ a day, 4 a day passed (+0.08R, t 4.2, 3.9R a month ≈ ₹90,000; draws +0.04 to +0.08R; untouched +0.13R); sweet spot ₹100–340 cr; size-aware +0.04R (dropped). But only 4 of 27 cells profitable on the exam, two of the pick's neighbours lost there, Jul–Sep 2026 lost almost everywhere, pick stood aside Oct–Nov: Algo Live not changed | | | | | | | done 10 Nov |
 | 15 | The ₹10 lakh block with the market gate held (5/6 good on decide, 4/6 exam profitable); pick ₹100 cr+, 3 a day, gated: +0.09R, t 3.5, ≈ ₹55,000 a month, draws +0.04 to +0.09R. ₹100 cr+ best at every size, 3 a day beat 4, ₹50 cr failed the exam everywhere; ungated blocks held at ₹5 and ₹8 lakh only. Costs ~half the edge at ₹10 lakh; 2026 ~flat after costs; same version moved ±0.03R between runs; stood aside Oct–Nov | | | | | | | done 11 Nov |
 | 16 | Not better; every version failed the exam. Iteration 15's pick re-run: +0.06R (t 2.2), exam lost every month after costs (−11.9R, iteration 15's run had +3.6R: training luck around zero). 2026 after costs negative at every size; before costs ~+0.03R. Liquidity sizing made positions bigger (₹12–25 lakh), not better. Never standing aside: +7.6R on the decide months stood aside, −5.9R in Oct 2026. Placebo clean | | | | | | | done 11 Nov |
+| 17 | Back to iteration 10 (F as live, real fills) as the control A, against B learning from losses (veto + early exit after candle 1-3, lessons gated by four checks), C chart structures (sweep, FVG, BOS/CHoCH, flip, supply; plus a random-lines twin), D results days + sector, in every combination (B, C, D, B+C, B+D, C+D, B+C+D), each with break-even after costs at 80% / 90%. Own workflow (algo-lab-17.yml), Run button on Algo Lab | | | | | | | to run |
 
 Iterations 5–6 shorts (reversal: fading a failed morning pop): mostly at 09:35, in volatile stocks that ran up over 5 and 20 days, made the day's high in
 the first 20 minutes and are already 1.6 ATR below it.
+
+Iteration 17 (research only; `.github/workflows/algo-lab-17.yml`, started by the Run button on Algo Lab): the dataset is the
+normal backtest's Algo Lab rows unchanged (`lib/ml/grid.ts`, so A is iteration 10) with the new facts appended
+(`lib/ml/iter17.ts`) and F's 1-minute trade paths in `paths.bin`; the entry arms (A, C, D, C+D, C-placebo) run
+`scripts/ml_iter17.py` on top of `ml_walkforward.py` (not changed: the Re-run and the Algo Live model workflows are
+untouched); `scripts/ml_iter17_layers.py` adds B, the break-even versions and the rule fixed before the run. Sector and
+results data are best effort (`lib/ml/iter17Data.ts`): the result says whether each came through.
