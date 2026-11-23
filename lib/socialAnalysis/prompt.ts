@@ -21,7 +21,11 @@ export const READ_SCHEMA = {
 export const SYSTEM = `You are the growth analyst for "Candles Before Cubicles": YouTube Shorts and Instagram Reels rendered by code from one
 person's real NSE day trades. Goal: more subscribers and followers. You decide what the next batch of shorts should change.
 
-What can actually be changed: the format (Mystery chart / Me vs Algo), the opening hook line, how long the hook holds before the chart
+Formats that can be made now: Mystery chart (YouTube and Instagram) and My bot's trade (YouTube only: one Algo Live trade,
+opens on a first-person line he records, e.g. "I touched my bot's trade. Cost me ₹420.", then where he stepped in and what
+the bot would have done alone). Me vs Algo is retired (he trades only through his bot now, so his side is always empty):
+never suggest it, even though older posts may show it.
+What can actually be changed: the format (from the ones that can be made now), the opening hook line, how long the hook holds before the chart
 moves, the pacing, the share of winning and losing trades, the title and caption style, the "tell" text, the length, and the posting day and time.
 What cannot change: the shorts are real trades only, never AI footage; losing trades stay in for honesty; no investment advice; the
 Mystery ticker stays hidden until the reveal.
@@ -30,6 +34,8 @@ How to reason:
 - Only numbers given here. Never invent one.
 - Few posts means noise. One or two posts prove nothing: say so. A group below ${MIN_PER_SIDE} posts is a hint at most, and confidence is "low".
   "Comparisons the numbers support" lists only gaps the code found large enough. If it is empty, do not claim one format beats another.
+- "kept past the first seconds" (YouTube engaged views / views) is the swipe-away test and the first thing to fix when it is low:
+  a stranger in the Shorts feed decides in the opening second. Judge hooks by it before anything else.
 - Retention is the strongest signal: "still watching at 3s" judges the hook, the steepest fall shows which beat loses people (match it
   to the seconds given and the format's structure). A value over 100% means rewatching. On Instagram a high skip rate means the first 3 seconds failed.
 - subscribers per 1000 views on a single Short undercounts (YouTube credits only subscribes on that video's own page): compare it between posts, never read it as the true total.
@@ -45,17 +51,17 @@ const pct = (x: number | undefined) => (x === undefined ? 'n/a' : `${Math.round(
 
 function groupLine(g: Group): string {
   const y = g.youtube, i = g.instagram;
-  return `${g.label} | YouTube (${y.n} posts): views ${f1(y.views)}, avg watched ${f1(y.avgPct, '%')}, at 3s ${pct(y.at3s)}, subs per 1000 ${f1(y.subsPer1k)} | Instagram (${i.n} posts): views ${f1(i.views)}, avg watch ${f1(i.avgWatchSec, 's')}, skip ${f1(i.skipPct, '%')}, shares+saves per 1000 reached ${f1(i.sharesSavesPer1k)}`;
+  return `${g.label} | YouTube (${y.n} posts): views ${f1(y.views)}, kept past the first seconds ${pct(y.keptPct)}, avg watched ${f1(y.avgPct, '%')}, at 3s ${pct(y.at3s)}, subs per 1000 ${f1(y.subsPer1k)} | Instagram (${i.n} posts): views ${f1(i.views)}, avg watch ${f1(i.avgWatchSec, 's')}, skip ${f1(i.skipPct, '%')}, shares+saves per 1000 reached ${f1(i.sharesSavesPer1k)}`;
 }
 
 function rowLine(r: Row): string {
   const y = r.youtube, i = r.instagram, f = r.facts;
-  const parts = [`${f.kind === 'mystery' ? 'Mystery' : 'Me vs Algo'} (${f.outcome}${f.resultR !== undefined ? `, ${f.resultR}R` : ''})`, `title: "${f.title ?? ''}"`];
-  if (f.tell) parts.push(`tell: "${f.tell}"`);
+  const parts = [`${f.kind === 'mystery' ? 'Mystery' : f.kind === 'bot' ? "My bot's trade" : 'Me vs Algo'} (${f.outcome}${f.resultR !== undefined ? `, ${f.resultR}R` : ''})`, `title: "${f.title ?? ''}"`];
+  if (f.tell) parts.push(`${f.kind === 'bot' ? 'spoken opening line' : 'tell'}: "${f.tell}"`);
   if (f.captionHook) parts.push(`caption opens: "${f.captionHook}"`);
   if (y) {
     const posted = new Date(y.at + 19_800_000).toISOString().slice(0, 16).replace('T', ' ');
-    parts.push(`YouTube ${posted} IST${y.mature ? '' : ' (under 7 days old)'}: ${y.durationSec ?? '?'}s long, views ${f1(viewsToJudge(y))}, avg watched ${f1(y.avgPct, '%')}, at 3s ${pct(y.retention?.at3s)}, at end ${pct(y.retention?.atEnd)}, steepest fall at ${y.retention?.steepestAtSec ?? '?'}s, likes ${f1(y.likes)}, comments ${f1(y.comments)}, shares ${f1(y.shares)}, net subs ${f1(y.subs)}`);
+    parts.push(`YouTube ${posted} IST${y.mature ? '' : ' (under 7 days old)'}: ${y.durationSec ?? '?'}s long, views ${f1(viewsToJudge(y))}, kept past the first seconds ${pct(y.keptPct)}, avg watched ${f1(y.avgPct, '%')}, at 3s ${pct(y.retention?.at3s)}, at end ${pct(y.retention?.atEnd)}, steepest fall at ${y.retention?.steepestAtSec ?? '?'}s, likes ${f1(y.likes)}, comments ${f1(y.comments)}, shares ${f1(y.shares)}, net subs ${f1(y.subs)}`);
   }
   if (i) parts.push(`Instagram${i.mature ? '' : ' (under 7 days old)'}: views ${f1(viewsToJudge(i))}, reach ${f1(i.reach)}, avg watch ${f1(i.avgWatchSec, 's')}, skip ${f1(i.skipPct, '%')}, likes ${f1(i.likes)}, comments ${f1(i.comments)}, shares ${f1(i.shares)}, saves ${f1(i.saved)}`);
   return parts.join('; ');

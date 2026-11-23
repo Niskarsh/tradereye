@@ -1,4 +1,5 @@
 import type { Candles } from '../dhan';
+import type { BotSpec } from './bot';
 import { mysteryCutoff, resultOf, scoreR, secOfDay, type ShortTrade, type WeekScore } from './trades';
 
 /**
@@ -8,7 +9,7 @@ import { mysteryCutoff, resultOf, scoreR, secOfDay, type ShortTrade, type WeekSc
  */
 
 export const SPEC_VERSION = 2; // 2: candles are 1-minute, drawn as live-forming candles of `tf` minutes (5)
-export type Template = 'mystery' | 'vs';
+export type Template = 'mystery' | 'vs' | 'bot';
 
 export interface PanelSpec {
   tf: number;                                   // minutes per DRAWN candle (10): the renderer builds them live
@@ -37,7 +38,7 @@ export interface VsSpec {
 }
 /** one side's panel: its trade, the one-line reason, and the candles that reason refers to (marked in the "why" beat) */
 export type VsPanel = PanelSpec & { note: string; marks?: ChartMark[]; symbol?: string };
-export interface ShortSpec { v: number; id: string; createdAt: number; handle: string; content: MysterySpec | VsSpec }
+export interface ShortSpec { v: number; id: string; createdAt: number; handle: string; content: MysterySpec | VsSpec | BotSpec }
 
 const IST = 19800;
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -178,6 +179,10 @@ export function vsPanel(t: ShortTrade & { orderRisk?: number }, day: Candles, no
     // the ticker is shown only once the trade is over 3 months old (SEBI); recent weeks keep it hidden
     ...(t.date <= mysteryCutoff(now) ? { symbol: t.symbol } : {}),
   };
+}
+
+export function botShortSpec(id: string, content: BotSpec, now = Date.now()): ShortSpec {
+  return { v: SPEC_VERSION, id, createdAt: now, handle: '@candlesbeforecubicles', content };
 }
 
 export function vsSpec(id: string, p: { week: WeekScore; before: { me: number; algo: number }; after: { me: number; algo: number }; me?: VsPanel; algo?: VsPanel }, now = Date.now()): ShortSpec {

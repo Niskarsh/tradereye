@@ -51,8 +51,18 @@ jobs:
         run: |
           printf '{"state":"rendering","updatedAt":%s}' "$(date +%s%3N)" | aws s3 cp - "s3://$BUCKET/shorts/$SHORT_ID/status.json" --content-type application/json --only-show-errors
           aws s3 cp "s3://$BUCKET/shorts/$SHORT_ID/spec.json" spec.json --only-show-errors
+      - name: Fetch his recorded line (My bot's trade only)
+        run: |
+          VOICE=$(python -c "import json; v=json.load(open('spec.json'))['content'].get('voice'); print(f\"{v['start']} {v['end']}\" if v else '')")
+          if [ -n "$VOICE" ]; then
+            set -- $VOICE
+            aws s3 cp "s3://$BUCKET/shorts/$SHORT_ID/voice.audio" voice.audio --only-show-errors
+            ffmpeg -y -loglevel error -i voice.audio -ss "$1" -to "$2" -ac 1 -ar 44100 voice.wav
+          fi
       - name: Render
-        run: python scripts/shorts/render.py spec.json short.mp4 poster.jpg
+        run: |
+          if [ -f voice.wav ]; then python scripts/shorts/render.py spec.json short.mp4 poster.jpg voice.wav
+          else python scripts/shorts/render.py spec.json short.mp4 poster.jpg; fi
       - name: Upload the video and mark as done
         run: |
           aws s3 cp short.mp4 "s3://$BUCKET/shorts/$SHORT_ID/short.mp4" --content-type video/mp4 --only-show-errors
