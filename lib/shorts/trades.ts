@@ -91,35 +91,46 @@ export const istToday = (now = Date.now()) => new Date(now + IST).toISOString().
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
 
 /**
- * SEBI: price data used in market education must be at least three months old. Mystery charts reveal the ticker and
- * date, so only trades older than this can be used. Kept a little over 3 months on purpose.
+ * SEBI: price data used in market education must be at least three months old. Mystery charts no longer wait for this
+ * (his call, Nov 2026: not at that point yet); the cutoff is still used by Medium and by Me vs Algo's ticker hiding.
  */
 export const MYSTERY_MIN_AGE_DAYS = 92;
 export const mysteryCutoff = (now = Date.now()) => addDays(istToday(now), -MYSTERY_MIN_AGE_DAYS);
-export const mysteryEligible = (t: ShortTrade, now = Date.now()) => t.date <= mysteryCutoff(now) && t.holdMin >= 3;
+/** a stop really in the data: the InitialStop he logged, or a trade closed by its stop order (same rule as spec's stopFor) */
+export const hasRealStop = (t: Pick<ShortTrade, 'stop' | 'exitType'>) => !!t.stop || t.exitType === 'STOP';
+/** Mystery charts: any age (newest first in the picker), but only trades with a real stop to draw, held 3+ minutes. */
+export const mysteryEligible = (t: ShortTrade) => t.holdMin >= 3 && hasRealStop(t);
 
 /* ---------------- Me vs Algo ---------------- */
 
-export interface AlgoOrder { date: string; symbol: string; sentAt: number; risk?: number; stop: number; status: string; avgPrice?: number }
+export interface AlgoOrder { date: string; symbol: string; sentAt: number; risk?: number; stop: number; status: string; avgPrice?: number; qty?: number }
 
 /** Monday of the week a date falls in. */
 export const weekOf = (date: string) => { const d = new Date(`${date}T00:00:00Z`); const wd = (d.getUTCDay() + 6) % 7; return addDays(date, -wd); };
 const istSecOfDay = (ms: number) => { const d = new Date(ms + IST); return d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds(); };
 
+/** how far apart (seconds) an Algo Live order and its journal entry may be */
+export const MATCH_WINDOW_SEC = 15 * 60;
+
 /**
  * Splits journal trades into his own and Algo Live's: a trade is the algo's when an Algo Live order for the same day,
- * stock and side filled (the nearest one in time, within 5 minutes). Everything else is his.
+ * stock and side was not rejected / cancelled and a journal trade sits next to it (the nearest one in time, within
+ * MATCH_WINDOW_SEC). The journal trade itself is the proof of the fill: Dhan's avgPrice only reaches the order record
+ * when the Algo Live page reconciles, so requiring it left every algo trade on his side (Algo always 0).
+ * Everything else is his.
  */
 export function splitMeAlgo(trades: ShortTrade[], orders: AlgoOrder[]): { me: ShortTrade[]; algo: (ShortTrade & { orderRisk?: number })[] } {
-  const filled = orders.filter((o) => !/REJECT|CANCEL/i.test(o.status) && (o.avgPrice ?? 0) > 0);
+  const live = orders.filter((o) => !/REJECT|CANCEL/i.test(o.status));
   const taken = new Set<string>();
   const algo: (ShortTrade & { orderRisk?: number })[] = [];
-  for (const o of filled) {
+  for (const o of live) {
     const cands = trades.filter((t) => !taken.has(t.id) && t.date === o.date && t.symbol === o.symbol.trim().toUpperCase() && t.dir === 'SHORT');
     const best = cands.map((t) => ({ t, d: Math.abs(secOfDay(t.entryTime) - istSecOfDay(o.sentAt)) })).sort((a, b) => a.d - b.d)[0];
-    if (!best || best.d > 300) continue;
+    if (!best || best.d > MATCH_WINDOW_SEC) continue;
     taken.add(best.t.id);
-    algo.push({ ...best.t, orderRisk: o.risk });
+    // the risk the order was sized for; older orders without it: qty × (stop − his actual entry)
+    const derived = o.qty && o.stop > best.t.avgEntry ? r2(o.qty * (o.stop - best.t.avgEntry)) : undefined;
+    algo.push({ ...best.t, orderRisk: o.risk ?? derived });
   }
   return { me: trades.filter((t) => !taken.has(t.id)), algo };
 }

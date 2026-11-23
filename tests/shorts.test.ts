@@ -37,12 +37,12 @@ test('without a logged risk the short shows the price move, never an assumed R',
   assert.deepEqual(resultOf(t), { value: 0.92, unit: '%' });
 });
 
-test('mystery charts only use trades over 3 months old (SEBI)', () => {
-  const now = Date.parse('2026-10-24T10:00:00Z');
-  const t = { date: '2026-07-15', holdMin: 64 } as ShortTrade;
-  assert.equal(mysteryEligible(t, now), true);
-  assert.equal(mysteryEligible({ ...t, date: '2026-07-30' }, now), false);
-  assert.equal(mysteryEligible({ ...t, holdMin: 1 }, now), false);
+test('mystery charts use any recent trade, but only ones with a real stop in the data', () => {
+  const t = { date: '2026-11-20', holdMin: 64, stop: 292.45, exitType: 'TARGET' } as ShortTrade;
+  assert.equal(mysteryEligible(t), true);                                            // days old is fine now
+  assert.equal(mysteryEligible({ ...t, stop: undefined }), false);                     // no stop logged, not stopped out
+  assert.equal(mysteryEligible({ ...t, stop: undefined, exitType: 'STOP' }), true);    // closed by its stop order
+  assert.equal(mysteryEligible({ ...t, holdMin: 1 }), false);
 });
 
 const T = (o: Partial<ShortTrade>): ShortTrade => ({ id: 'x', date: '2026-10-23', symbol: 'ABC', dir: 'SHORT', entryTime: '09:40:05', exitTime: '09:52:00', avgEntry: 100, avgExit: 99, fills: [], net: 300, risk: 300, netR: 1, movePct: 1, holdMin: 12, exitType: 'TARGET', ...o });
@@ -56,6 +56,17 @@ test('Algo Live orders claim their journal trade; everything else is his', () =>
   ]);
   assert.deepEqual(algo.map((t) => t.id), ['a']);
   assert.deepEqual(me.map((t) => t.id).sort(), ['b', 'c']);
+});
+
+test('an Algo Live order without avgPrice still claims its journal trade, with risk from qty × stop distance', () => {
+  // avgPrice reaches the order record only when the Algo Live page reconciles: requiring it made Algo always 0
+  const sentAt = Date.parse('2026-11-18T10:10:00+05:30');
+  const trades = [T({ id: 'a', date: '2026-11-18', symbol: 'FSL', entryTime: '10:10:04', avgEntry: 100, netR: undefined, risk: undefined, net: 150 })];
+  const { me, algo } = splitMeAlgo(trades, [{ date: '2026-11-18', symbol: 'FSL', sentAt, stop: 101, status: 'PENDING', qty: 300 }]);
+  assert.deepEqual(algo.map((t) => t.id), ['a']);
+  assert.equal(me.length, 0);
+  assert.equal(algo[0].orderRisk, 300);
+  assert.equal(scoreWeek('2026-11-17', me, algo).algo.r, 0.5);
 });
 
 test('weekly score and season table', () => {
@@ -235,4 +246,19 @@ test('stop line: only a stop he really had (InitialStop, or the stop order that 
   assert.equal(stopFor({ stop: undefined, exitType: 'STOP', avgExit: 272.34 }), 272.34);                // where the stop order filled
   assert.equal(stopFor({ stop: undefined, exitType: 'MANUAL', avgExit: 272.34 }), null);               // a manual exit is not a stop
   assert.equal(stopFor({ stop: undefined, exitType: 'UNKNOWN', avgExit: 272.34 }), null);
+});
+
+test('used: a trade / week with a short is marked, by ref or (older shorts) by label; scheduled when it has a post plan', async () => {
+  const { usedBy } = await import('../lib/shorts/used');
+  const items = [
+    { id: 'mystery-1', kind: 'mystery' as const, label: 'Mystery: FSL · 18 Nov 2026', createdAt: 10, ref: 'G1' },
+    { id: 'mystery-2', kind: 'mystery' as const, label: 'Mystery: SCI · 3 Jul 2026', createdAt: 5 },
+    { id: 'mystery-3', kind: 'mystery' as const, label: 'Mystery: FSL · 18 Nov 2026', createdAt: 20, ref: 'G1' },
+  ];
+  const posts = { 'mystery-3': { youtube: { at: 1 } } } as never;
+  assert.deepEqual(usedBy(items, posts, 'mystery', 'G1', 'Mystery: FSL · 18 Nov 2026'), { n: 2, scheduled: true, lastAt: 20 });
+  assert.deepEqual(usedBy(items, posts, 'mystery', 'G9', 'Mystery: SCI · 3 Jul 2026'), { n: 1, scheduled: false, lastAt: 5 });
+  // a different trade on the same day and stock (new shorts carry ref) is not marked
+  assert.equal(usedBy(items, posts, 'mystery', 'G2', 'Mystery: FSL · 18 Nov 2026'), undefined);
+  assert.equal(usedBy(items, posts, 'vs', 'G1', 'x'), undefined);
 });

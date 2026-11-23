@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { ownerRequired } from '@/lib/auth/owner';
 import { capHashtags, pending, youtubeState, type PlatformPost } from '@/lib/shorts/posts';
 import { dropWake, loadPosts, loadThumb, saveText, scheduleYouTube, syncWake, unscheduleYouTube, updatePlan, type PostText } from '@/lib/shorts/publish';
-import { listShorts, statusOf, store, textKey, validId } from '@/lib/shorts/store';
+import { statusOf, store, textKey, validId } from '@/lib/shorts/store';
 import { withDisclaimer } from '@/lib/shorts/disclaimer';
 import { getJson } from '@/lib/setups/store';
 import type { WrittenText } from '@/lib/shorts/write';
@@ -31,9 +31,8 @@ export async function POST(req: Request) {
     caption: capHashtags(String(b.text?.caption ?? '').slice(0, 2200)),  // Instagram allows 5 hashtags
   };
   // the risk disclaimer is always there, whatever was edited (shorts made before it existed get it here)
-  const kind = (await listShorts()).find((x) => x.id === id)?.kind;
-  text.description = withDisclaimer(text.description, 'youtube', kind);
-  text.caption = capHashtags(withDisclaimer(text.caption, 'instagram', kind));
+  text.description = withDisclaimer(text.description, 'youtube');
+  text.caption = capHashtags(withDisclaimer(text.caption, 'instagram'));
   const now = Date.now();
   const ytAt = b.youtube?.at, igAt = b.instagram?.at;
   if (b.youtube && !Number.isFinite(ytAt)) return bad('Pick a YouTube time.');
