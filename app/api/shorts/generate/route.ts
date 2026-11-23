@@ -19,9 +19,8 @@ const newId = (kind: string) => `${kind}-${new Date().toISOString().slice(0, 10)
 
 /**
  * POST { kind: 'mystery', tradeId, date, tell?, ai? }  or  { kind: 'vs', week, notes?: { me?, algo? }, ai? }
- *   or { kind: 'bot', ref, line?, ai? }: my bot's trade. Made but NOT rendered: it waits (state "voice") for his recorded
- *   line, then /api/shorts/render starts the job. Claude writes the line, what he is told before recording, how to say it,
- *   and the YouTube text (YouTube only).
+ *   or { kind: 'bot', ref, line?, ai? }: my bot's trade (YouTube only). Claude writes the bot's line (spoken by its
+ *   synthetic voice in the render job) and the YouTube text; a line he typed is used instead.
  * -> builds the short's spec from the journal / Algo Live / saved candles, saves it, and starts the render job on
  * GitHub Actions. A Dhan token (header) is used only when a trade day's candles are not saved yet.
  * With ai (the default), one Claude call writes the tell (or the two reasons) and the YouTube / Instagram text first;
@@ -40,22 +39,19 @@ export async function POST(req: Request) {
       const own = String(b.line ?? '').trim().slice(0, 80);
       const draft = buildBotSpec(row, day, own);
       const fallback = own || fallbackLine(draft);
-      let words: WrittenText | { error: string } | undefined;
-      if (ai) words = await writeBotText(botFacts(draft, row.date), fallback, row.symbol).catch((e) => ({ error: (e as Error).message }));
+      if (ai && !own) text = await writeBotText(botFacts(draft, row.date), fallback, row.symbol).catch((e) => ({ error: (e as Error).message }));
       // his own line wins; then Claude's; then the code's
-      const line = own || (words && 'voice' in words && words.voice?.line) || fallback;
-      if (words && 'voice' in words && words.voice) words.voice.line = line;
-      const bot = botShortSpec(newId('bot'), { ...draft, line });
-      // without Claude's words the recorder still needs the line and what happened: the facts, from code
-      const saved: WrittenText = words && 'voice' in words ? words : {
-        voice: { line, context: botFacts(draft, row.date).split('\n').slice(1, 3), delivery: 'Like telling a friend what just happened. Not reading.' },
-        youtube: { title: line, description: '', tags: [] }, instagram: { caption: '' }, model: 'none', costInr: 0, at: Date.now(),
-      };
-      await putJson(store, textKey(bot.id), saved);
-      const item = await addShort(bot, `My bot's trade: ${row.symbol} · ${dateLabel(row.date)}`, String(b.ref), 'voice');
-      return NextResponse.json({ item, textError: words && 'error' in words ? words.error : undefined });
-    }
-    if (b.kind === 'mystery') {
+      const line = own || (text && 'botLine' in text && text.botLine) || fallback;
+      spec = botShortSpec(newId('bot'), buildBotSpec(row, day, line));
+      label = `My bot's trade: ${row.symbol} · ${dateLabel(row.date)}`;
+      ref = String(b.ref);
+      if (!text || 'error' in text) {
+        // the schedule screen still needs a title: the line itself, until he edits it
+        const err = text && 'error' in text ? text.error : undefined;
+        await putJson(store, textKey(spec.id), { botLine: line, youtube: { title: line, description: '', tags: [] }, instagram: { caption: '' }, model: 'none', costInr: 0, at: Date.now() } satisfies WrittenText);
+        text = err ? { error: err } : undefined;
+      }
+    } else if (b.kind === 'mystery') {
       if (!b.tradeId || !/^\d{4}-\d{2}-\d{2}$/.test(b.date ?? '')) return bad('Pick a trade first.');
       const t = await findTrade(b.tradeId, b.date!);
       if (!t) return bad('That trade is no longer in the journal.');
@@ -108,7 +104,8 @@ export async function POST(req: Request) {
       }
     } else return bad('kind must be mystery, vs or bot');
 
-    if (text) await putJson(store, textKey(spec.id), text);
+    // (a bot short whose words failed already has its fallback text saved: the error is only reported)
+    if (text && !(spec.content.kind === 'bot' && 'error' in text)) await putJson(store, textKey(spec.id), text);
     const item = await addShort(spec, label, ref);
     try { await dispatchWorkflow(RENDER_WORKFLOW, { short_id: spec.id }, 'the render job'); }
     catch (e) {

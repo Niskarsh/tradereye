@@ -682,7 +682,8 @@ def render_vs(spec, out, poster):
 
 # =============== My bot's trade (YouTube only) ===============
 def read_voice(path):
-    """His recorded line (mono 44.1 kHz WAV cut by the workflow), peak-normalised; None without one."""
+    """The bot's line (Piper text-to-speech, mono 44.1 kHz WAV made by the workflow), given a plainly robotic edge so no
+    one takes it for a person: a ring modulator under the voice and a short metallic comb. None without one."""
     if not path or not os.path.exists(path): return None
     with wave.open(path, "rb") as w:
         n, ch, sw, sr = w.getnframes(), w.getnchannels(), w.getsampwidth(), w.getframerate()
@@ -690,8 +691,101 @@ def read_voice(path):
     if sw != 2 or sr != SR: raise SystemExit("voice.wav must be 16-bit 44.1 kHz")
     a = np.frombuffer(raw, dtype=np.int16).astype(np.float64) / 32768.0
     if ch > 1: a = a.reshape(-1, ch).mean(axis=1)
-    pk = np.max(np.abs(a)) if len(a) else 0
-    return a * (0.9 / pk) if pk > 0 else None
+    if not len(a) or np.max(np.abs(a)) == 0: return None
+    t = np.arange(len(a)) / SR
+    a = 0.65 * a + 0.35 * a * np.sin(2 * np.pi * 70 * t)          # ring mod: the "machine" colour, words stay clear
+    d = int(0.006 * SR)
+    a[d:] += 0.35 * a[:-d]                                          # 6 ms comb: metallic
+    return a * (0.95 / np.max(np.abs(a)))
+
+
+# ---- sound design (all synthesised here: no samples, nothing licensed) ----
+def noise(dur, seed=1):
+    return np.random.default_rng(seed).uniform(-1, 1, int(SR * dur))
+
+
+def smooth(x, ms):
+    """crude low-pass: moving average over `ms` milliseconds"""
+    k = max(1, int(SR * ms / 1000))
+    return np.convolve(x, np.ones(k) / k, mode="same")
+
+
+def sweep(f0, f1, dur, vol, decay=3.0, curve=1.0):
+    t = np.arange(int(SR * dur)) / SR
+    f = f0 + (f1 - f0) * (t / dur) ** curve
+    return vol * np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-decay * t)
+
+
+def boom(vol=0.9):
+    """frame one: a deep hit with a click on top, the jolt that stops the thumb"""
+    b = sweep(110, 38, 1.1, vol, 3.2, 0.5)
+    b[: int(SR * 0.03)] += 0.5 * vol * smooth(noise(0.03, 3), 0.3) * np.linspace(1, 0, int(SR * 0.03))
+    return b
+
+
+def whoosh(dur, vol=0.12):
+    """the fast-forward to the entry: filtered noise that swells and fades"""
+    n = smooth(noise(dur, 5), 0.6)
+    env = np.sin(np.pi * np.linspace(0, 1, len(n))) ** 1.5
+    return vol * n / (np.max(np.abs(n)) or 1) * env
+
+
+def fill_ding(vol=0.35):
+    """order filled: a tight click, then a bright two-note ding"""
+    out = np.zeros(int(SR * 0.6))
+    place(out, click(0.25), 0)
+    place(out, tone(1568, 0.5, vol, 7), 0.03); place(out, tone(2349, 0.4, vol * 0.6, 9), 0.06)
+    return out
+
+
+def scratch(vol=0.5):
+    """the record scratch at "I STEPPED IN": a buzzy tone dragged back and forth, with vinyl noise"""
+    dur = 0.42; t = np.arange(int(SR * dur)) / SR
+    f = 260 + 900 * np.abs(np.sin(2 * np.pi * 3.6 * t)) ** 1.5
+    saw = 2 * ((np.cumsum(f) / SR) % 1) - 1
+    env = np.minimum(1, t * 60) * np.exp(-2.2 * t)
+    return vol * (0.7 * saw + 0.5 * smooth(noise(dur, 9), 0.15)) * env
+
+
+def heartbeat(dur, bpm=84, vol=0.5):
+    """the "if I'd left it" beat: lub-dub"""
+    out = np.zeros(int(SR * dur)); step = 60 / bpm; at = 0.0
+    while at < dur - 0.3:
+        place(out, sweep(70, 45, 0.18, vol, 18), at); place(out, sweep(62, 40, 0.16, vol * 0.7, 20), at + 0.22)
+        at += step
+    return out
+
+
+def drone(dur, vol=0.1):
+    t = np.arange(int(SR * dur)) / SR
+    env = np.minimum(1, t / 0.4) * np.minimum(1, (dur - t) / 0.3)
+    return vol * env * (np.sin(2 * np.pi * 55 * t) + 0.6 * np.sin(2 * np.pi * 82.4 * t) + 0.25 * np.sin(2 * np.pi * 110 * t * (1 + 0.003 * np.sin(2 * np.pi * 0.5 * t))))
+
+
+def kaching(vol=0.4):
+    """target hit: the drawer "cha" then a bright bell"""
+    out = np.zeros(int(SR * 1.0))
+    place(out, 0.5 * vol * smooth(noise(0.08, 11), 0.05) * np.linspace(1, 0, int(SR * 0.08)), 0)
+    for k, (f, v) in enumerate(((2093, 1.0), (2637, 0.7), (3136, 0.5), (4186, 0.3))):
+        place(out, tone(f, 0.8, vol * v, 5), 0.07 + k * 0.004)
+    return out
+
+
+def thud(vol=0.7):
+    """stop hit: a dull low thump"""
+    out = sweep(90, 40, 0.5, vol, 9)
+    out[: int(SR * 0.05)] += 0.3 * vol * smooth(noise(0.05, 13), 1.5)
+    return out
+
+
+def bass_drop(vol=0.8):
+    """the end card's number lands"""
+    return sweep(140, 34, 0.9, vol, 2.6, 0.6)
+
+
+def limit(buf):
+    """soft limiter: everything stacked never clips"""
+    return 0.9 * np.tanh(buf * 1.1)  # never above -0.9 dBFS, so the AAC encode has headroom
 
 
 def inr(x, sign=True):
@@ -702,11 +796,12 @@ def inr(x, sign=True):
 def render_bot(spec, out, poster, voice_path=None):
     c = spec["content"]; p = c["panel"]; mine = c["mine"]; plan = c.get("plan"); stepped = bool(c.get("stepped") and plan)
     voice = read_voice(voice_path)
-    VOICE_AT = 0.25
+    VOICE_AT = 0.35  # just after the boom
     vlen = len(voice) / SR if voice is not None else 0
-    # the opening: the line, big, while the chart runs fast to the entry (no freeze, no countdown)
-    HOOK = min(4.4, max(2.4, VOICE_AT + vlen + 0.4)) if voice is not None else 2.6
-    box = (20, 330, 700, 900)
+    # the opening: the bot's line, big, while the chart runs fast to the entry (no freeze, no countdown)
+    HOOK = min(4.6, max(2.4, VOICE_AT + vlen + 0.35)) if voice is not None else 2.6
+    box = (20, 330, 586, 900)   # candles; the strip from 586 to 700 holds the level tags, so no candle or marker sits on them
+    TAGS_X1 = 700
     # the Chart class reads entry / exit / stop from the panel like a journal panel: give it the fields it uses
     ch = Chart(box, {**p, "fills": []})
     e, m = p["entryIdx"], mine["idx"]
@@ -739,12 +834,13 @@ def render_bot(spec, out, poster, voice_path=None):
         if hook_lines: hook_size = size; break
     if not hook_lines: hook_lines, hook_size = [c["line"][:40]], 34
 
-    def level(d, py, price, col, label, x0):
+    def level(d, py, word, price, col, x0):
         y = py(price)
-        dashed(d, x0, box[2], y, col, 3)
-        f = F("Bold", 19); w = f.getlength(label) / K + 16
-        d.rounded_rectangle([u(box[2] - w - 6), u(y - 14), u(box[2] - 6), u(y + 14)], radius=u(6), fill=col)
-        T(d, (box[2] - 6 - w / 2, y), label, f, BG if col != RED else TXT)
+        dashed(d, x0, TAGS_X1 - 4, y, col, 3)
+        x = box[2] + 6; w = TAGS_X1 - 2 - x
+        d.rounded_rectangle([u(x), u(y - 22), u(x + w), u(y + 22)], radius=u(6), fill=col)
+        txt = BG if col != RED else TXT
+        T(d, (x + w / 2, y - 9), word, F("Black", 15), txt); T(d, (x + w / 2, y + 10), f"{price:.2f}", F("Bold", 17), txt)
 
     def frame(f):
         t = f / FPS
@@ -755,12 +851,15 @@ def render_bot(spec, out, poster, voice_path=None):
         T(d, (688, 70), ch.clock(up), F("Bold", 44), GOLD, "rm")
         pill(d, 610, 118, 140, 36, "MY BOT" if t < t_me or not stepped else ("ME" if t < t_ghost else "BOT ALONE"), (48, 46, 40), F("Bold", 18))
         header_common(d)
-        py, px = ch.draw(d, up, yr)
+        # the moving price tag only while something is still moving (it would sit on the exit labels after)
+        moving = (HOOK <= t < t_me) or (stepped and t_ghost <= t < t_done)
+        d.rectangle([u(box[2]), u(box[1]), u(TAGS_X1), u(box[3])], fill=PANEL)
+        py, px = ch.draw(d, up, yr, live=moving or t < HOOK)
         if up >= e:
             x0 = px(e) - 8
-            level(d, py, p["target"], EM, f"TARGET {p['target']:.2f}", x0)
-            level(d, py, p["stop"], RED, f"STOP {p['stop']:.2f}", x0)
-            level(d, py, entry, GOLD, f"BOT ENTRY {entry:.2f}", x0)
+            level(d, py, "TARGET", p["target"], EM, x0)
+            level(d, py, "STOP", p["stop"], RED, x0)
+            level(d, py, "BOT IN", entry, GOLD, x0)
             ex = px(e) - ch.half() - 12; ey = py(entry)
             d.polygon([(u(ex + 8), u(ey)), (u(ex - 8), u(ey - 6)), (u(ex - 8), u(ey + 6))], fill=GOLD)
         if up >= m + 0.999:  # where he got out
@@ -775,15 +874,21 @@ def render_bot(spec, out, poster, voice_path=None):
             gx, gy = px(x_end), py(plan["price"])
             d.ellipse([u(gx - 10), u(gy - 10), u(gx + 10), u(gy + 10)], fill=EM if plan["inr"] >= 0 else RED)
             word = {"TARGET": "TARGET HIT", "STOP": "STOPPED OUT", "15:15": "15:15 CLOSE"}[plan["outcome"]]
-            T(d, (gx, gy + 30 if gy + 30 < box[3] - Chart.AXIS - 10 else gy - 30), word, F("Black", 20), EM if plan["inr"] >= 0 else RED)
+            # left of the marker, a little above it: clear of the level tags on the right edge
+            f = F("Black", 20); w = f.getlength(word) / K + 18; cx = max(box[0] + w / 2 + 4, gx - 18 - w / 2)
+            cy = max(box[1] + 18, gy - 26)
+            d.rounded_rectangle([u(cx - w / 2), u(cy - 15), u(cx + w / 2), u(cy + 15)], radius=u(8), fill=EM if plan["inr"] >= 0 else RED)
+            T(d, (cx, cy), word, f, BG if plan["inr"] >= 0 else TXT)
 
         # top strip: the line during the opening, then the running P&L
         if t < HOOK + 0.35:
             a = 1 - ease((t - HOOK) / 0.35) if t > HOOK else 1
-            hh = 40 + (hook_size + 12) * len(hook_lines)
+            hh = 70 + (hook_size + 12) * len(hook_lines)
+            pop = 1 + 0.06 * (1 - ease(t / 0.25))  # lands with the boom
             d.rounded_rectangle([u(30), u(196), u(690), u(196 + hh)], radius=u(16), fill=mix(BG, DARKGOLD, a))
+            T(d, (360, 222), "MY BOT SAYS", F("Black", 20), mix(BG, GOLD, a))
             for i, ln in enumerate(hook_lines):
-                T(d, (360, 196 + 20 + (hook_size + 12) * (i + 0.5)), ln, F("Black", hook_size), mix(BG, TXT, a))
+                T(d, (360, 196 + 50 + (hook_size + 12) * (i + 0.5)), ln, F("Black", int(hook_size * pop)), mix(BG, TXT, a))
         elif up >= e:
             price = ch.price_at(up) if t < t_me or (stepped and t_ghost <= t < t_done) else (mine["price"] if t < t_ghost or not stepped else plan["price"])
             gross = qty * (entry - price)
@@ -824,20 +929,36 @@ def render_bot(spec, out, poster, voice_path=None):
         return img
 
     nf = int(total * FPS)
-    buf = np.zeros(int(SR * total) + SR); last = -1
+    buf = np.zeros(int(SR * total) + SR)
+    risk = qty * abs(p["stop"] - entry) or 1.0
+    # the money you can hear: a tick on every new 1-minute candle while the trade plays, its pitch rising with the P&L
+    # (one octave per 2R) and falling as it drops
+    last = -1
     for f in range(nf):
         tt = f / FPS; uu = int(upto_at(tt))
-        if uu != last and HOOK <= tt < t_done and not (t_me <= tt < t_ghost): place(buf, click(0.035), tt)
+        playing = t_play <= tt < t_me or (stepped and t_ghost <= tt < t_done)
+        if uu != last and playing:
+            r = max(-1.5, min(2.5, qty * (entry - ch.price_at(upto_at(tt))) / risk))
+            place(buf, tone(700 * 2 ** (r / 2), 0.07, 0.11, 30), tt)
         last = uu
-    place(buf, tone(560, 0.3, 0.3, 8), HOOK)
-    if stepped: place(buf, tone(330, 0.45, 0.35, 5), t_me)
-    good = (plan["inr"] if stepped else mine["inr"]) >= 0
-    for kk, fr in enumerate([523, 659, 784] if good else [330, 262, 220]): place(buf, tone(fr, 0.5, 0.22, 5), t_done + kk * 0.08)
-    for kk, fr in enumerate([784, 988, 1175]): place(buf, tone(fr, 0.5, 0.18, 4), t_card + kk * 0.07)
+    place(buf, boom(), 0.0)                                        # frame one
+    place(buf, whoosh(HOOK), 0.05)                                 # fast-forward to the entry
+    place(buf, fill_ding(), HOOK)                                  # the bot's order fills
+    if stepped:
+        place(buf, scratch(), t_me)                                # "I STEPPED IN": record scratch and freeze
+        place(buf, drone(PAUSE - 0.3, 0.07), t_me + 0.35)          # the freeze hums instead of going dead
+        place(buf, heartbeat(P2 + 0.2), t_ghost)                   # "if I'd left it..."
+        place(buf, drone(P2 + 0.2), t_ghost)
+    final = plan["outcome"] if stepped else ("TARGET" if mine["how"] == "TARGET" else "STOP" if mine["how"] == "STOP" else None)
+    final_inr = plan["inr"] if stepped else mine["inr"]
+    if final == "TARGET" or (final is None and final_inr >= 0): place(buf, kaching(), t_done)
+    else: place(buf, thud(), t_done)
+    place(buf, bass_drop(), t_card + 0.15)                         # the end card's number lands
     if voice is not None:
         i0 = int(VOICE_AT * SR); i1 = min(len(buf), i0 + len(voice))
-        buf[i0:i1] *= 0.3  # the ticks go quiet while he speaks
+        buf[i0:i1] *= 0.35  # everything else steps back while the bot talks
         buf[i0:i1] += voice[: i1 - i0]
+    buf = limit(buf)
     finish(frame, nf, buf, out, poster, poster_t=min(1.2, HOOK - 0.3))  # the line, not the result
 
 

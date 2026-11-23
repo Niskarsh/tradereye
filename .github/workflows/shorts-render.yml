@@ -51,13 +51,18 @@ jobs:
         run: |
           printf '{"state":"rendering","updatedAt":%s}' "$(date +%s%3N)" | aws s3 cp - "s3://$BUCKET/shorts/$SHORT_ID/status.json" --content-type application/json --only-show-errors
           aws s3 cp "s3://$BUCKET/shorts/$SHORT_ID/spec.json" spec.json --only-show-errors
-      - name: Fetch his recorded line (My bot's trade only)
+      # My bot's trade only: the bot's line, spoken by open-source text-to-speech (Piper, runs here, no API, no key).
+      # The text goes through a file, never the command line, and nothing about it is printed (public log). If anything
+      # here fails, the short still renders, without the voice (the line is on screen anyway).
+      - name: The bot's voice (My bot's trade only)
+        continue-on-error: true
         run: |
-          VOICE=$(python -c "import json; v=json.load(open('spec.json'))['content'].get('voice'); print(f\"{v['start']} {v['end']}\" if v else '')")
-          if [ -n "$VOICE" ]; then
-            set -- $VOICE
-            aws s3 cp "s3://$BUCKET/shorts/$SHORT_ID/voice.audio" voice.audio --only-show-errors
-            ffmpeg -y -loglevel error -i voice.audio -ss "$1" -to "$2" -ac 1 -ar 44100 voice.wav
+          python -c "import json; c=json.load(open('spec.json'))['content']; open('say.txt','w').write(c.get('say','') if c.get('kind')=='bot' else '')"
+          if [ -s say.txt ]; then
+            pip install --quiet piper-tts==1.8.0
+            python -m piper.download_voices --data-dir voices en_US-ryan-high > /dev/null
+            python -m piper -m en_US-ryan-high --data-dir voices -f say_raw.wav --input-file say.txt > /dev/null
+            ffmpeg -y -loglevel error -i say_raw.wav -ac 1 -ar 44100 voice.wav
           fi
       - name: Render
         run: |
