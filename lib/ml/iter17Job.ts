@@ -1,4 +1,4 @@
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DhanError, parseScripMaster, SCRIP_MASTER_URL, type Candles, type DhanClient } from '../dhan';
 import { toSessions, type Bar, type Session } from '../live/enrich';
@@ -11,7 +11,7 @@ import { GridWriter } from './writer';
 import { inLiveWindow, istDate, istMinute } from './wide';
 import { I17_COLS, I17_PATH_COLS, iter17Day } from './iter17';
 import { I17_STATUS_KEY } from './iter17Meta';
-import { fetchResultsDays, NIFTY500_LIST_URLS, parseIndexIds, parseIndustries, resultsFlag, sectorPlan } from './iter17Data';
+import { fetchResultsDays, NIFTY500_LIST_FILE, NIFTY500_LIST_URLS, parseIndexIds, parseIndustries, resultsFlag, sectorPlan } from './iter17Data';
 
 /**
  * Algo Lab iteration 17, step 1: the dataset. The universe, the period and every row are those of the normal backtest's
@@ -50,7 +50,7 @@ export interface I17Deps {
 
 /** what the extra sources gave (written to i17-data.json; shown with the results) */
 export interface I17DataNotes {
-  sectors: { ok: boolean; indices: string[]; missingIndustries: string[]; stocksWithSector: number; stockDaysWithSector: number; stockDays: number; error?: string };
+  sectors: { ok: boolean; source?: string; indices: string[]; missingIndustries: string[]; stocksWithSector: number; stockDaysWithSector: number; stockDays: number; error?: string };
   results: { ok: boolean; meetings: number; stocks: number; flaggedStockDays: number; error?: string };
 }
 
@@ -146,15 +146,19 @@ export async function runIter17Grid(runId: string, startedAt: number, deps: I17D
   };
   let plan17 = sectorPlan(new Map(), new Map());
   await status('Sectors: the Nifty 500 industries', undefined, undefined, true);
-  for (const url of NIFTY500_LIST_URLS) {
+  const lists: [string, () => Promise<string>][] = [
+    ...NIFTY500_LIST_URLS.map((u): [string, () => Promise<string>] => [new URL(u).host, () => deps.fetchText(u)]),
+    ['the copy in the repo', async () => readFileSync(NIFTY500_LIST_FILE, 'utf8')],
+  ];
+  for (const [where, read] of lists) {
     try {
-      const ind = parseIndustries(await deps.fetchText(url));
+      const ind = parseIndustries(await read());
       if (ind.size < 300) throw new Error(`only ${ind.size} stocks in the list`);
       plan17 = sectorPlan(ind, parseIndexIds(csv));
-      notes.sectors = { ...notes.sectors, ok: plan17.indices.length > 0, indices: plan17.indices.map((x) => x.name), missingIndustries: plan17.missing, stocksWithSector: plan17.bySymbol.size, error: undefined };
+      notes.sectors = { ...notes.sectors, ok: plan17.indices.length > 0, indices: plan17.indices.map((x) => x.name), missingIndustries: plan17.missing, stocksWithSector: plan17.bySymbol.size, error: undefined, source: where };
       if (!plan17.indices.length) notes.sectors.error = 'none of the sector indices was found in Dhan\'s instrument list';
       break;
-    } catch (e) { notes.sectors.error = `${new URL(url).host}: ${(e as Error).message}`; }
+    } catch (e) { notes.sectors.error = `${where}: ${(e as Error).message}`; }
   }
   log(`sectors: ${notes.sectors.ok ? `${plan17.bySymbol.size} stocks on ${plan17.indices.length} indices (${notes.sectors.indices.join(', ')}); no index for ${plan17.missing.join(', ') || '-'}` : `not available (${notes.sectors.error})`}`);
 

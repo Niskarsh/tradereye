@@ -15,25 +15,29 @@ export const NIFTY500_LIST_URLS = [
 
 /** NSE industry (the Nifty 500 list's "Industry" column) -> the index to read it from, by the names Dhan may list it under */
 export const INDUSTRY_INDEX: Record<string, string[]> = {
-  'Information Technology': ['NIFTY IT'],
+  // Dhan's own trading symbols first (its instrument list, Nov 2026), then other names NSE has used
+  'Information Technology': ['NIFTYIT', 'NIFTY IT'],
   'Automobile and Auto Components': ['NIFTY AUTO'],
-  'Financial Services': ['NIFTY FIN SERVICE', 'FINNIFTY', 'NIFTY FINANCIAL SERVICES'],
-  'Healthcare': ['NIFTY HEALTHCARE', 'NIFTY HEALTHCARE INDEX', 'NIFTY PHARMA'],
+  'Financial Services': ['FINNIFTY', 'NIFTY FIN SERVICE'],
+  'Healthcare': ['NIFTY HEALTHCARE', 'NIFTY PHARMA'],
   'Fast Moving Consumer Goods': ['NIFTY FMCG'],
   'Metals & Mining': ['NIFTY METAL'],
-  'Oil Gas & Consumable Fuels': ['NIFTY OIL AND GAS', 'NIFTY OIL & GAS', 'NIFTY ENERGY'],
+  'Oil Gas & Consumable Fuels': ['NIFTY OIL AND GAS', 'NIFTY ENERGY'],
   'Power': ['NIFTY ENERGY'],
   'Realty': ['NIFTY REALTY'],
   'Media Entertainment & Publication': ['NIFTY MEDIA'],
-  'Consumer Durables': ['NIFTY CONSR DURBL', 'NIFTY CONSUMER DURABLES'],
-  'Chemicals': ['NIFTY CHEMICALS'],
-  'Capital Goods': ['NIFTY INDIA MANUFACTURING', 'NIFTY IND MANUFACTURING', 'NIFTY INFRA'],
-  'Construction': ['NIFTY INFRA', 'NIFTY INFRASTRUCTURE'],
-  'Construction Materials': ['NIFTY INFRA', 'NIFTY INFRASTRUCTURE'],
-  'Telecommunication': ['NIFTY INFRA', 'NIFTY INFRASTRUCTURE'],
-  'Consumer Services': ['NIFTY CONSUMPTION', 'NIFTY INDIA CONSUMPTION'],
-  'Services': ['NIFTY SERV SECTOR', 'NIFTY SERVICES SECTOR'],
+  'Consumer Durables': ['NIFTY CONSR DURBL'],
+  'Chemicals': ['NIFTY COMMODITIES'], // no chemicals index on Dhan: the commodities index holds the big chemical names
+  'Capital Goods': ['NIFTY INDIA MFG', 'NIFTYINFRA'],
+  'Construction': ['NIFTYINFRA'],
+  'Construction Materials': ['NIFTYINFRA'],
+  'Telecommunication': ['NIFTYINFRA'],
+  'Consumer Services': ['NIFTY CONSUMPTION'],
+  'Services': ['NIFTY SERV SECTOR'],
+  // Textiles, Diversified, Forest Materials: no index (no sector facts)
 };
+/** a copy of NSE's Nifty 500 list kept in the repo (Nov 2026), used when NSE's site cannot be reached from GitHub */
+export const NIFTY500_LIST_FILE = 'scripts/data/ind_nifty500list.csv';
 
 const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
 

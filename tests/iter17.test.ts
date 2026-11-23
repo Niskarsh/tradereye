@@ -111,6 +111,36 @@ test('iter17: structure facts on hand-made candles', () => {
   assert.ok(I17_STRUCT_KEYS.some((k) => !(Object.is(g[k], f[k]))), 'the placebo is not the real thing');
 });
 
+test('iter17: liquidity sweeps of equal highs, the opening range high and the 5-day high', () => {
+  // equal highs at candles 1 and 3 (101.0 / 101.05), swept by the last candle (wick 101.4, close 100.7)
+  const t = [c(100, 100.6, 99.8, 100.4), c(100.4, 101, 100.2, 100.5), c(100.5, 100.7, 100.1, 100.3), c(100.3, 101.05, 100.2, 100.6), c(100.6, 100.8, 100.3, 100.5), c(100.5, 101.4, 100.4, 100.7)];
+  let f = structureFacts(t, 100.7, 0.5, 105, 0, 110);
+  assert.equal(f.sweepEq, 1); assert.equal(f.sweep5d, 0);
+  assert.equal(f.sweepOr, 1, 'the first 30 minutes\' high (101.0) swept too');
+  f = structureFacts(t, 100.7, 0.5, 105, 0, 101.2);
+  assert.equal(f.sweep5d, 1, 'the 5-day high (101.2) swept');
+  // not equal: 0.3 ATR apart
+  const u = t.map((x, i) => (i === 3 ? c(100.3, 101.15, 100.2, 100.6) : x));
+  assert.equal(structureFacts(u, 100.7, 0.5, 105, 0, 110).sweepEq, 0);
+  // a close above the level is a breakout, not a sweep
+  const v = [...t.slice(0, 5), c(100.6, 101.4, 100.4, 101.3)];
+  f = structureFacts(v, 101.3, 0.5, 105, 0, 101.2);
+  assert.equal(f.sweepEq, 0); assert.equal(f.sweep5d, 0);
+});
+
+test('iter17: every NSE industry with an index on Dhan resolves to one (Dhan\'s real list, NSE\'s real Nifty 500 list)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const ids = parseIndexIds(readFileSync(new URL('./fixtures/dhan-nse-indices.csv', import.meta.url), 'utf8'));
+  const ind = parseIndustries(readFileSync(new URL('../scripts/data/ind_nifty500list.csv', import.meta.url), 'utf8'));
+  assert.ok(ind.size >= 490);
+  const p = sectorPlan(ind, ids);
+  assert.deepEqual(p.missing, ['Diversified', 'Forest Materials', 'Textiles'].filter((x) => [...ind.values()].includes(x)));
+  const by = (sym: string) => p.bySymbol.get(sym)?.securityId;
+  assert.equal(by('INFY'), '29'); assert.equal(by('SBIN'), '27'); assert.equal(by('TATASTEEL'), '31'); assert.equal(by('NTPC'), '42');
+  assert.equal(by('BHARTIARTL'), '43'); assert.equal(by('DIXON'), '466'); assert.equal(by('ABB'), '474'); assert.equal(by('ONGC'), '470');
+  assert.ok(p.bySymbol.size >= 480, `${p.bySymbol.size} stocks with a sector`);
+});
+
 test('iter17: results days and sectors', () => {
   assert.equal(nseDate('05-Feb-2024'), '2024-02-05'); assert.equal(nseDate('05-02-2024'), '2024-02-05');
   const m = parseBoardMeetings([
@@ -127,7 +157,7 @@ test('iter17: results days and sectors', () => {
   const ind = parseIndustries('Company Name,Industry,Symbol,Series,ISIN Code\n"A Ltd.",Information Technology,AAA,EQ,X\nB,Textiles,BBB,EQ,Y\n');
   const ids = parseIndexIds('SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_TRADING_SYMBOL\nNSE,I,29,INDEX,NIFTY IT\nNSE,E,1,EQUITY,AAA\n');
   const p = sectorPlan(ind, ids);
-  assert.deepEqual(p.bySymbol.get('AAA'), { index: 'NIFTY IT', securityId: '29' });
+  assert.deepEqual(p.bySymbol.get('AAA'), { index: 'NIFTYIT', securityId: '29' });
   assert.ok(!p.bySymbol.has('BBB')); assert.deepEqual(p.missing, ['Textiles']); assert.equal(p.indices.length, 1);
 });
 

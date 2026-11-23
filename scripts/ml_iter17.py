@@ -25,13 +25,14 @@ sys.path.insert(0, os.path.dirname(__file__))
 import ml_walkforward as ml  # noqa: E402
 
 ITERATION = 17
-STRUCT = ['sweep', 'sweepAtr', 'sweepAgo', 'sweepPdh', 'fvgDistAtr', 'fvgSizeAtr', 'fvgIn', 'fvgCount', 'fvgTouch', 'lowerHigh',
+STRUCT = ['sweep', 'sweepAtr', 'sweepAgo', 'sweepPdh', 'sweepEq', 'sweepOr', 'sweep5d', 'fvgDistAtr', 'fvgSizeAtr', 'fvgIn', 'fvgCount', 'fvgTouch', 'lowerHigh',
           'bosDown', 'bosAgo', 'swingHiAtr', 'flipOpen', 'flipOr', 'flipDistAtr', 'supplyDistAtr', 'supplyBack']
 PLACEBO = ['p_' + k for k in STRUCT]
 SECTOR = ['secDay', 'sec30', 'stockVsSec', 'rs30Sec']
 LABELS = {
     'sweep': 'Swept a high and closed back below it in the last 3 candles', 'sweepAtr': 'How far above the swept high the wick went (ATR)',
     'sweepAgo': 'Candles since the sweep', 'sweepPdh': 'The swept high was yesterday\'s high',
+    'sweepEq': 'Liquidity sweep of equal highs', 'sweepOr': 'Liquidity sweep of the opening range high (first 30 min)', 'sweep5d': 'Liquidity sweep of the 5-day high',
     'fvgDistAtr': 'Nearest unfilled bearish fair value gap above price: distance (ATR)', 'fvgSizeAtr': 'That gap\'s size (ATR)',
     'fvgIn': 'Price inside an unfilled bearish gap', 'fvgCount': 'Unfilled bearish gaps above price',
     'fvgTouch': 'First return into an unfilled bearish gap, closed below its top', 'lowerHigh': 'Last swing high lower than the one before',
@@ -54,7 +55,7 @@ ARMS = {
 }
 DESC = {
     'A': 'Iteration 10 unchanged: short only, 09:35-10:55, first 2 a day, stop and target ½ the usual daily range, out by 15:15, on Algo Live\'s realistic fills. Every other version is judged against this one, in the same run.',
-    'C': 'The control plus 18 chart-structure facts on the 10-min chart: sweep and reclaim, fair value gap, break of structure / change of character, flip zone, supply zone.',
+    'C': 'The control plus 21 chart-structure facts on the 10-min chart: sweep and reclaim, liquidity sweeps (equal highs, opening range high, 5-day high), fair value gap, break of structure / change of character, flip zone, supply zone.',
     'D': 'The control plus the stock\'s sector (its NSE industry index: since the open, last 30 min, the stock against it), and no trade on a results day or the day after.',
     'CD': 'The control plus the chart-structure facts, the sector facts and the results-day skip.',
     'Cp': 'The chart-structure facts computed from lines shifted by a random amount (fixed per stock-day). If this helps as much as C, the structure facts are noise.',
@@ -63,7 +64,7 @@ DESC = {
 CHANGES = [
     'Built on iteration 10, not on iterations 11-16: F as Algo Live trades it, with its models, facts and bar recipe unchanged, priced on Algo Live\'s realistic fills (iteration 11). The control (A) is that, in the same run, with the old fills alongside for continuity.',
     'B, learning from losses: each losing trade is sorted (fast stop within 30 min, turned near the target after reaching 70%+ of it, drift to 15:15, shock = a 3+ ATR candle against it; shocks never teach). A veto model trained only on the trades F took in earlier months skips trades it expects to lose; an early-exit model looks at the 1st, 2nd and 3rd 10-min candle after entry (how far against, volume, Nifty, the close vs entry) and closes at market when holding is expected to lose. A lesson acts only once it passes four checks on earlier months: 20+ stocks with none over 10%, the same direction in 70%+ of quarters, holds with each stock left out, raises net R after the winners it cuts.',
-    'C, chart structures (the YouTuber\'s list, flipped to the short side): sweep and reclaim, fair value gap, break of structure / change of character, flip zone, supply zone, as new facts the model may combine. Level bounce and trend pullback were already covered, breakout and trend line left out. Random-lines check: the same facts from randomly shifted levels must not help as much.',
+    'C, chart structures (the YouTuber\'s list, flipped to the short side): sweep and reclaim, liquidity sweeps of equal highs / the opening range high / the 5-day high, fair value gap, break of structure / change of character, flip zone, supply zone, as new facts the model may combine. Level bounce and trend pullback were already covered, breakout and trend line left out. Random-lines check: the same facts from randomly shifted levels must not help as much.',
     'D, results days and sector: no trade on a company\'s results day or the day after (NSE\'s board-meeting calendar), and the stock against its sector index.',
     'Every combination: A, B, C, D, B+C, B+D, C+D, B+C+D; each with no stop move, and with the stop moved to break-even after costs at 80% and at 90% of the way to the target.',
     'Rule fixed before this run: a version passes only if it beats A by +0.03R a trade or more on the decide months with t 2+, passes the exam, is not worse than A on the untouched months, beats A in 4 of the 5 training draws and still beats A at ₹10 lakh positions; a combination must also beat its best single part, and C must beat its random-lines twin. Break-even at 80% / 90% passes only if it beats no move in the same version on the decide, exam and untouched months alike.',

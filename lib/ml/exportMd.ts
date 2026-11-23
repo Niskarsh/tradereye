@@ -44,7 +44,7 @@ export interface ExportIter17 {
   lessons?: Record<string, { final: Record<string, I17Check>; active: { month: string; active: string[] }[] }>;
   losses?: Record<string, Record<string, number>>;
   verdict: { message: string; outcome: string; versions: { id: string; name: string; gain: number; checks: { label: string; ok: boolean }[]; pass: boolean }[]; breakEven: { id: string; version: string; at: number; dev: number; exam: number; untouched: number | null; pass: boolean }[]; placeboClean?: boolean; placeboCGap?: number | null };
-  data?: { sectors?: { ok: boolean; indices?: string[]; missingIndustries?: string[]; stockDaysWithSector?: number; stockDays?: number; error?: string }; results?: { ok: boolean; meetings?: number; stocks?: number; flaggedStockDays?: number; error?: string } };
+  data?: { sectors?: { ok: boolean; source?: string; indices?: string[]; missingIndustries?: string[]; stockDaysWithSector?: number; stockDays?: number; error?: string }; results?: { ok: boolean; meetings?: number; stocks?: number; flaggedStockDays?: number; error?: string } };
   structureFacts?: Record<string, { inTop15: { label: string; share: number }[] }>;
 }
 export interface ExportMl {
@@ -108,7 +108,7 @@ function iter17Md(it: ExportIter17): string {
     parts.push('## How the trades ended (decide months)\nfast = stopped within 30 min · nearTarget = reached 70%+ of the target, then stopped · drift = losing at 15:15 · shock = a 3+ ATR candle against it\n\n' + table(['Version', ...kinds], Object.entries(it.losses).map(([k, x]) => [k, ...kinds.map((q) => x[q] ?? 0)])));
   }
   const d = it.data, lines: string[] = [];
-  if (d?.sectors) lines.push(`- Sector: ${d.sectors.ok ? `${d.sectors.indices?.join(', ')}; ${d.sectors.stockDaysWithSector} of ${d.sectors.stockDays} stock-days${d.sectors.missingIndustries?.length ? `; no index for ${d.sectors.missingIndustries.join(', ')}` : ''}` : `not available (${d.sectors.error})`}`);
+  if (d?.sectors) lines.push(`- Sector: ${d.sectors.ok ? `${d.sectors.source ? `industries from ${d.sectors.source}; ` : ''}${d.sectors.indices?.join(', ')}; ${d.sectors.stockDaysWithSector} of ${d.sectors.stockDays} stock-days${d.sectors.missingIndustries?.length ? `; no index for ${d.sectors.missingIndustries.join(', ')}` : ''}` : `not available (${d.sectors.error})`}`);
   if (d?.results) lines.push(`- Results days: ${d.results.ok ? `${d.results.meetings} meetings, ${d.results.stocks} companies, ${d.results.flaggedStockDays} stock-days skipped` : `not available (${d.results.error}); D ran on the sector alone`}`);
   for (const [k, x] of Object.entries(it.structureFacts ?? {})) lines.push(`- New facts in ${k}'s top 15: ${x.inTop15.map((y) => `${y.label} ${pct(y.share)}`).join(' · ') || 'none'}`);
   if (lines.length) parts.push('## Data behind C and D\n' + lines.join('\n'));

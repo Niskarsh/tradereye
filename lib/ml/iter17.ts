@@ -10,7 +10,8 @@ import { FAST_STOP_FRAC, gridDay, LATE_END, liqBand, NEAR_TARGET_ADR, OPEN_SLIP_
  * combination against it in one run:
  *   B  learning from losses: a veto model on the trades F takes, and an early exit after the first 1-3 candles of a trade
  *      (both trained only on earlier months' trades; done in scripts/ml_iter17_layers.py from the columns written here)
- *   C  chart-structure facts on the 10-min chart (the YouTuber's list): sweep and reclaim, fair value gap, break of
+ *   C  chart-structure facts on the 10-min chart (the YouTuber's list): sweep and reclaim (and liquidity sweeps of equal
+ *      highs, the opening range high and the 5-day high), fair value gap, break of
  *      structure / change of character, flip zone, supply zone; plus the same facts drawn from randomly shifted lines
  *      (the placebo: if they help as much, the structure facts are noise)
  *   D  results days (no trade on a company's results day or the day after) and the stock's sector index
@@ -26,6 +27,10 @@ export const I17_STRUCTURE = [
   ['sweepAtr', 'How far above the swept high the wick went (ATR)'],
   ['sweepAgo', 'Candles since the sweep (0 = the last candle)'],
   ['sweepPdh', 'The swept high was yesterday\'s high (1 / 0)'],
+  // liquidity sweeps at the highs where stops are said to cluster (each in the last 3 candles: a wick above, a close below)
+  ['sweepEq', 'Liquidity sweep of equal highs (two swing highs within 0.1 ATR) (1 / 0)'],
+  ['sweepOr', 'Liquidity sweep of the opening range high (first 30 minutes) (1 / 0)'],
+  ['sweep5d', 'Liquidity sweep of the 5-day high (1 / 0)'],
   ['fvgDistAtr', 'Nearest unfilled bearish fair value gap above price: distance to its bottom (ATR; 0 = inside)'],
   ['fvgSizeAtr', 'That gap\'s size (ATR)'],
   ['fvgIn', 'Price is inside an unfilled bearish gap (1 / 0)'],
@@ -94,9 +99,10 @@ function swings(t: B10[]) {
 
 /**
  * C's facts at a 10-min close. `t` = today's closed 10-min candles up to now, `atr` the 10-min ATR now, `pdh` yesterday's high,
- * `shift` a price added to every level (0 = the real facts; the placebo shifts every line by a random amount).
+ * `shift` a price added to every level (0 = the real facts; the placebo shifts every line by a random amount), `hi5d` the
+ * highest high of the 5 sessions before today.
  */
-export function structureFacts(t: B10[], price: number, atr: number, pdh: number, shift = 0): Record<string, number> {
+export function structureFacts(t: B10[], price: number, atr: number, pdh: number, shift = 0, hi5d = NaN): Record<string, number> {
   const out: Record<string, number> = Object.fromEntries(I17_STRUCT_KEYS.map((k) => [k, NaN]));
   const L = t.length;
   if (!L || !(atr > 0)) return out;
@@ -118,6 +124,24 @@ export function structureFacts(t: B10[], price: number, atr: number, pdh: number
     }
     if (hit) { out.sweep = 1; out.sweepAgo = L - 1 - j; break; } // the latest sweep
   }
+  // 1b. liquidity sweeps: equal highs, the opening range high, the 5-day high
+  const sweptAt = (lv: number, from: number) => {
+    for (let j = L - 1; j >= Math.max(from, L - 3); j--) if (t[j].h > lv && t[j].c < lv) return true;
+    return false;
+  };
+  out.sweepEq = 0;
+  for (let j = L - 1; j >= Math.max(1, L - 3) && !out.sweepEq; j--) {
+    const prior = sh.filter((x) => x.i <= j - 2).slice(-4);
+    for (let a = 0; a < prior.length && !out.sweepEq; a++) for (let b = a + 1; b < prior.length; b++) {
+      const top = Math.max(prior[a].v, prior[b].v);
+      if (Math.abs(prior[a].v - prior[b].v) > 0.1 * atr) continue;
+      let clean = true; // nothing traded above the pair between them, or after them before candle j
+      for (let i = prior[a].i + 1; i < j; i++) if (i !== prior[b].i && t[i].h > top) { clean = false; break; }
+      if (clean && t[j].h > top + shift && t[j].c < top + shift) { out.sweepEq = 1; break; }
+    }
+  }
+  out.sweepOr = L >= 4 && sweptAt(Math.max(t[0].h, t[1].h, t[2].h) + shift, 3) ? 1 : 0;
+  out.sweep5d = Number.isFinite(hi5d) && sweptAt(hi5d + shift, 0) ? 1 : 0;
   // 2. bearish fair value gaps (candle i-2's low above candle i's high), unfilled = no later high reached the gap's top
   const gaps: { i: number; bot: number; top: number }[] = [];
   for (let i = 2; i < L; i++) {
@@ -244,7 +268,7 @@ export function iter17Day(inp: I17Input): { rows: number[][]; paths: number[][];
   const atrC = new Atr();
   for (const b of tenMinuteBars(hist)) atrC.push(b);
   const adr = daily.h.slice(-10).reduce((a, h, i) => a + h - daily.l[nd - 10 + i], 0) / 10;
-  const pdh = daily.h[nd - 1];
+  const pdh = daily.h[nd - 1], hi5d = Math.max(...daily.h.slice(-5));
   const avgVol = daily.v.slice(-10).reduce((a, v) => a + v, 0) / 10, band = liqBand(avgVol);
   const medBase = tenMinuteBars(hist.slice(-2)).map((b) => b.v);
   const shift = placeboShift(inp.key, adr);
@@ -260,7 +284,7 @@ export function iter17Day(inp: I17Input): { rows: number[][]; paths: number[][];
     if (i === undefined) continue;
     const atr = atrC.peek()!;
     const price = day.c[k - 1], row = rows[i];
-    const real = structureFacts(tens, price, atr, pdh), fake = structureFacts(tens, price, atr, pdh, shift);
+    const real = structureFacts(tens, price, atr, pdh, 0, hi5d), fake = structureFacts(tens, price, atr, pdh, shift, hi5d);
     for (const key of I17_STRUCT_KEYS) { row[at(row, key)] = real[key]; row[at(row, `p_${key}`)] = fake[key]; }
     if (sector && sector.n >= k) {
       const so = sector.o[0], sc = sector.c[k - 1], s30 = sector.c[k - 31 >= 0 ? k - 31 : 0];

@@ -21,7 +21,7 @@ export interface Iter17 {
     versions: { id: string; name: string; gain: number; checks: { label: string; ok: boolean }[]; pass: boolean }[];
     breakEven: { id: string; version: string; at: number; dev: number; exam: number; untouched: number | null; pass: boolean }[];
   };
-  data?: { sectors?: { ok: boolean; indices?: string[]; missingIndustries?: string[]; stockDaysWithSector?: number; stockDays?: number; error?: string }; results?: { ok: boolean; meetings?: number; stocks?: number; flaggedStockDays?: number; error?: string } };
+  data?: { sectors?: { ok: boolean; source?: string; indices?: string[]; missingIndustries?: string[]; stockDaysWithSector?: number; stockDays?: number; error?: string }; results?: { ok: boolean; meetings?: number; stocks?: number; flaggedStockDays?: number; error?: string } };
   structureFacts?: Record<string, { inTop15: { f: string; label: string; share: number }[] }>;
 }
 
@@ -119,7 +119,7 @@ export function Iter17Card({ it, onPick }: { it: Iter17; onPick?: (id: string) =
 
       <Card title="Data behind C and D" sub="Where the new facts came from in this run.">
         <p className="text-xs text-ink-2">
-          <b>Sector:</b> {ds?.sectors?.ok ? `${ds.sectors.indices?.length ?? 0} NSE sector indices (${ds.sectors.indices?.join(', ')}); a sector on ${ds.sectors.stockDaysWithSector ?? 0} of ${ds.sectors.stockDays ?? 0} stock-days (stocks outside the Nifty 500 have none)${ds.sectors.missingIndustries?.length ? `; no index for ${ds.sectors.missingIndustries.join(', ')}` : ''}.` : `not available (${ds?.sectors?.error ?? 'unknown'}).`}
+          <b>Sector:</b> {ds?.sectors?.ok ? `${ds.sectors.source ? `industries from ${ds.sectors.source}; ` : ''}${ds.sectors.indices?.length ?? 0} NSE sector indices (${ds.sectors.indices?.join(', ')}); a sector on ${ds.sectors.stockDaysWithSector ?? 0} of ${ds.sectors.stockDays ?? 0} stock-days (stocks outside the Nifty 500 have none)${ds.sectors.missingIndustries?.length ? `; no index for ${ds.sectors.missingIndustries.join(', ')}` : ''}.` : `not available (${ds?.sectors?.error ?? 'unknown'}).`}
         </p>
         <p className="text-xs text-ink-2">
           <b>Results days:</b> {ds?.results?.ok ? `${ds.results.meetings} results meetings for ${ds.results.stocks} companies (NSE board meetings); ${ds.results.flaggedStockDays} stock-days skipped by D.` : `not available (${ds?.results?.error ?? 'unknown'}): D ran on the sector alone.`}
