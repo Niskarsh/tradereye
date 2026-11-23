@@ -1,12 +1,14 @@
-import type { DhanClient } from '../dhan';
+import type { Candles, DhanClient } from '../dhan';
 import { lookupSecurityId } from '../dhan';
 import { getSheetsClient } from '../sheetsApi';
 import { MONTHS } from '../live/time';
 import { getChunk, putChunk } from '../book/s3';
-import { loadTradeCandles } from '../candles/store';
+import { dayIsOver, loadDayMinutes, loadTradeCandles } from '../candles/store';
 import { loadState } from '../algoLive/engine';
-import { LIVE_FROM } from '../algoLive/fills';
+import { journalOf, LIVE_FROM, liveOrders } from '../algoLive/fills';
 import { liveStore } from '../algoLive/store';
+import { judge, meVsAlgo, type MeVsAlgoRow } from '../algoLive/meVsAlgo';
+import { botReady, botRef, parseBotRef } from './bot';
 import { dayCandles, stopFor } from './spec';
 import {
   istToday, journalShortTrades, mysteryEligible, resultOf, scoreWeek, seasonScore, splitMeAlgo, tradeOfWeek, weekOf,
@@ -96,3 +98,29 @@ export async function tradeDay(t: ShortTrade, dhan?: DhanClient) {
   return dayCandles(r.minute, t.date);
 }
 
+
+/* ---------------- My bot's trade ---------------- */
+
+/** Every closed Algo Live trade, newest first, as Me vs Algo sees it (what the bot proposed, what he did, untouched). */
+export async function botCandidates(dhan?: DhanClient, now = Date.now()) {
+  const deps = { store: { get: getChunk, put: putChunk }, dhan, lookupSecurityId: (s: string) => lookupSecurityId(s) };
+  const { rows } = await meVsAlgo(liveStore, getSheetsClient(), istToday(now), deps, (d) => dayIsOver(d, now));
+  return rows.filter(botReady);
+}
+
+/** One Algo Live trade (by its ref: date, stock, order time) with its day's 1-minute candles. */
+export async function botTrade(ref: string, dhan?: DhanClient, now = Date.now()): Promise<{ row: MeVsAlgoRow; day: Candles }> {
+  const key = parseBotRef(ref);
+  if (!key) throw new Error('Pick a trade first.');
+  const { orders, journal } = await liveOrders(liveStore, getSheetsClient(), istToday(now));
+  const deps = { store: { get: getChunk, put: putChunk }, dhan, lookupSecurityId: (s: string) => lookupSecurityId(s) };
+  for (const { d, o } of orders) {
+    const r0 = judge(d, o, journalOf(d, o, journal), undefined, dayIsOver(d, now));
+    if (!r0 || botRef(r0) !== ref) continue;
+    const c = await loadDayMinutes(deps, { symbol: o.symbol, date: d, securityId: o.securityId });
+    const row = judge(d, o, journalOf(d, o, journal), c, dayIsOver(d, now))!;
+    if (!botReady(row)) throw new Error('That trade is not closed in the journal yet.');
+    return { row, day: c };
+  }
+  throw new Error('That Algo Live trade was not found.');
+}

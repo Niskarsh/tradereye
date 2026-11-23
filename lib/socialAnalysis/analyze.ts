@@ -18,7 +18,7 @@ const DAY = 86_400_000;
 export interface YtPoint extends YtLive { stats?: YtStats }
 export interface Point { at: number; youtube?: YtPoint; instagram?: IgStats }
 export interface Facts {
-  label: string; kind: 'mystery' | 'vs'; outcome: 'win' | 'loss' | 'me' | 'algo' | 'tie' | 'none';
+  label: string; kind: 'mystery' | 'vs' | 'bot'; outcome: 'win' | 'loss' | 'me' | 'algo' | 'tie' | 'none';
   resultR?: number; title?: string; captionHook?: string; tell?: string;
 }
 export interface PostMetrics {
@@ -96,6 +96,8 @@ export function readRetention(curve: RetentionPoint[] | undefined, durationSec: 
 export interface YtRow {
   at: number; url?: string; mature: boolean; views?: number; viewsDay7?: number; likes?: number; comments?: number; shares?: number;
   avgSec?: number; avgPct?: number; subs?: number; subsPer1k?: number; durationSec?: number; retention?: RetentionRead; curve?: RetentionPoint[];
+  /** share of views that kept watching past the first seconds (YouTube's engaged views / views, 0-1): the swipe-away test */
+  keptPct?: number;
 }
 export interface IgRow {
   at: number; url?: string; mature: boolean; views?: number; viewsDay7?: number; reach?: number; likes?: number; comments?: number; shares?: number; saved?: number;
@@ -112,8 +114,9 @@ export function toRow(p: PostMetrics, now: number): Row {
     const views = latest(p.points, (x) => x.youtube?.views), viewsDay7 = dayN(p.points, at, (x) => x.youtube?.views);
     const gained = stat('subsGained'), lost = stat('subsLost');
     const subs = gained === undefined ? undefined : gained - (lost ?? 0);
-    const analyticsViews = stat('views');
+    const analyticsViews = stat('views'), engaged = stat('engagedViews');
     row.youtube = {
+      keptPct: engaged !== undefined && analyticsViews ? Math.min(1, engaged / analyticsViews) : undefined,
       at, url: p.youtube.url, mature, views, viewsDay7, durationSec,
       likes: latest(p.points, (x) => x.youtube?.likes), comments: latest(p.points, (x) => x.youtube?.comments), shares: stat('shares'),
       avgSec: stat('avgSec'), avgPct: stat('avgPct'), subs, subsPer1k: rate(subs, analyticsViews ?? views),
@@ -137,13 +140,14 @@ export const viewsToJudge = (x: { viewsDay7?: number; views?: number } | undefin
 
 export interface Group {
   key: string; label: string;
-  youtube: { n: number; views?: number; avgPct?: number; at3s?: number; subsPer1k?: number };
+  youtube: { n: number; views?: number; avgPct?: number; at3s?: number; subsPer1k?: number; keptPct?: number };
   instagram: { n: number; views?: number; avgWatchSec?: number; skipPct?: number; sharesSavesPer1k?: number };
 }
 
 const GROUPS: { key: string; label: string; test: (f: Facts) => boolean }[] = [
   { key: 'mystery', label: 'Mystery chart', test: (f) => f.kind === 'mystery' },
   { key: 'vs', label: 'Me vs Algo', test: (f) => f.kind === 'vs' },
+  { key: 'bot', label: "My bot's trade", test: (f) => f.kind === 'bot' },
   { key: 'win', label: 'Mystery: a win', test: (f) => f.kind === 'mystery' && f.outcome === 'win' },
   { key: 'loss', label: 'Mystery: a loss', test: (f) => f.kind === 'mystery' && f.outcome === 'loss' },
 ];
@@ -156,7 +160,7 @@ export function groupsOf(rows: Row[]): Group[] {
     const ig = rows.filter((r) => test(r.facts) && r.instagram?.mature).map((r) => r.instagram!);
     return {
       key, label,
-      youtube: { n: yt.length, views: median(pickNums(yt, viewsToJudge)), avgPct: median(pickNums(yt, (x) => x.avgPct)), at3s: median(pickNums(yt, (x) => x.retention?.at3s)), subsPer1k: median(pickNums(yt, (x) => x.subsPer1k)) },
+      youtube: { n: yt.length, views: median(pickNums(yt, viewsToJudge)), avgPct: median(pickNums(yt, (x) => x.avgPct)), at3s: median(pickNums(yt, (x) => x.retention?.at3s)), subsPer1k: median(pickNums(yt, (x) => x.subsPer1k)), keptPct: median(pickNums(yt, (x) => x.keptPct)) },
       instagram: { n: ig.length, views: median(pickNums(ig, viewsToJudge)), avgWatchSec: median(pickNums(ig, (x) => x.avgWatchSec)), skipPct: median(pickNums(ig, (x) => x.skipPct)), sharesSavesPer1k: median(pickNums(ig, (x) => x.sharesSavesPer1k)) },
     };
   });
@@ -167,7 +171,7 @@ export interface Finding { platform: 'YouTube' | 'Instagram'; a: string; b: stri
 /** Only differences with enough posts on both sides and a real gap. Empty is the normal answer early on. */
 export function findings(groups: Group[]): Finding[] {
   const out: Finding[] = [];
-  const pairs: [string, string][] = [['mystery', 'vs'], ['win', 'loss']];
+  const pairs: [string, string][] = [['mystery', 'vs'], ['mystery', 'bot'], ['win', 'loss']];
   const by = new Map(groups.map((g) => [g.key, g]));
   const check = (platform: Finding['platform'], a: Group, b: Group, metric: string, va?: number, vb?: number, na = 0, nb = 0, lowerBetter = false) => {
     if (na < MIN_PER_SIDE || nb < MIN_PER_SIDE || va === undefined || vb === undefined) return;

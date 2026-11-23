@@ -77,7 +77,7 @@ let playlistCache: Playlist[] | null = null;  // one fetch per page load
 
 /** The playlist a new short goes into by default: by its template's name ("Mystery…", "…Algo…"). */
 export function defaultPlaylists(kind: string | undefined, lists: Playlist[]): string[] {
-  const pat = kind === 'mystery' ? /myster/i : kind === 'vs' ? /algo/i : null;
+  const pat = kind === 'mystery' ? /myster/i : kind === 'vs' ? /algo/i : kind === 'bot' ? /bot/i : null;
   return pat ? lists.filter((p) => pat.test(p.title)).slice(0, 1).map((p) => p.id) : [];
 }
 
@@ -86,10 +86,12 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
   onClose: () => void; onSaved: () => void;
 }) {
   const yt = post?.youtube, ig = post?.instagram;
+  /** "My bot's trade" is made for YouTube only (Instagram keeps the Mystery chart) */
+  const ytOnly = kind === 'bot';
   const ytLive = ytState(yt, now) === 'live', igLive = ig?.state === 'live';
   const start = yt?.at ?? ig?.at ?? defaultAt ?? now + 3_600_000;
   const [ytOn, setYtOn] = useState(ytLive || !post || !!yt);
-  const [igOn, setIgOn] = useState(igLive || !post || !!ig);
+  const [igOn, setIgOn] = useState(igLive || (!ytOnly && (!post || !!ig)));
   // defaults: YouTube 15:30, Instagram 11:00 the same day, so not "same time" unless he sets it
   const [same, setSame] = useState(post ? (!ig || !yt || ig.at === yt.at) : false);
   const [ytAt, setYtAt] = useState(toIstInput(yt?.at ?? start));
@@ -195,7 +197,7 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
                 </>
               )}
             </div>
-            <div className="rounded-xl border border-line p-3">
+            {!ytOnly && <div className="rounded-xl border border-line p-3">
               {check(igOn, setIgOn, 'Instagram Reel', igLive)}
               {igLive ? <p className="mt-2 text-xs text-data-green">Live on Instagram.</p> : (
                 <div className="mt-2 space-y-2">
@@ -203,7 +205,7 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
                   {(!same || !ytOn || ytLive) && <div>{when(igAt, setIgAt, !igOn)}</div>}
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           <div className="mt-3"><ThumbPicker id={id} disabled={busy || (ytLive && igLive)} /></div>
@@ -220,10 +222,10 @@ export function ScheduleEditor({ id, kind, label, poster, text, post, defaultAt,
                 <input value={tags} disabled={busy || ytLive} onChange={(e) => setTags(e.target.value)} className={input} />
               </label>
             </div>
-            <label className="block text-xs text-ink-3">Instagram caption <span className="text-ink-4">({caption.length}/2200)</span>
+            {!ytOnly && <label className="block text-xs text-ink-3">Instagram caption <span className="text-ink-4">({caption.length}/2200)</span>
               <span className={hashtagCount(caption) > IG_MAX_HASHTAGS ? 'text-data-red-text' : 'text-ink-4'}> · {hashtagCount(caption)}/{IG_MAX_HASHTAGS} hashtags{hashtagCount(caption) > IG_MAX_HASHTAGS ? ' (extra ones are dropped)' : ''}</span>
               <textarea value={caption} rows={12} maxLength={2200} disabled={busy || igLive} onChange={(e) => setCaption(e.target.value)} className={input} />
-            </label>
+            </label>}
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-3">

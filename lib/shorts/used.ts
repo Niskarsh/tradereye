@@ -8,7 +8,7 @@ import type { ShortItem } from './store';
  */
 export interface Used { n: number; scheduled: boolean; lastAt: number }
 
-export function usedBy(items: ShortItem[], posts: Posts, kind: 'mystery' | 'vs', ref: string, label: string): Used | undefined {
+export function usedBy(items: ShortItem[], posts: Posts, kind: 'mystery' | 'vs' | 'bot', ref: string, label: string): Used | undefined {
   const mine = items.filter((it) => it.kind === kind && (it.ref ? it.ref === ref : it.label === label));
   if (!mine.length) return undefined;
   return {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { errorResponse, ownerGuard } from '@/lib/live/guard';
-import { chartInfo, mysteryCandidates, season } from '@/lib/shorts/source';
+import { botCandidates, chartInfo, mysteryCandidates, season } from '@/lib/shorts/source';
+import { botRef } from '@/lib/shorts/bot';
 import { scoreR, type ShortTrade } from '@/lib/shorts/trades';
 import { dateLabel } from '@/lib/shorts/spec';
 import { drifted, loadLedger, mergedWeeks } from '@/lib/shorts/season';
@@ -13,7 +14,8 @@ export const maxDuration = 60;
 
 /**
  * GET ?kind=mystery -> his trades with a real stop in the journal, newest first (any age).
- * Both kinds carry `used` when a short was already made from that trade / week (lib/shorts/used.ts).
+ * GET ?kind=bot     -> every closed Algo Live trade, newest first: what the bot proposed, what he did, what untouched did.
+ * Every kind carries `used` when a short was already made from that trade / week (lib/shorts/used.ts).
  * GET ?kind=vs      -> every finished week since Algo Live started: both sides' R (frozen weeks as frozen, see
  *                     lib/shorts/season.ts), the trade that decided each side.
  */
@@ -22,8 +24,18 @@ export async function GET(req: Request) {
   if (!g.ok) return g.res;
   try {
     const kind = new URL(req.url).searchParams.get('kind');
-    if (kind !== 'mystery' && kind !== 'vs') return NextResponse.json({ error: 'BAD_REQUEST', message: 'kind must be mystery or vs' }, { status: 400 });
+    if (kind !== 'mystery' && kind !== 'vs' && kind !== 'bot') return NextResponse.json({ error: 'BAD_REQUEST', message: 'kind must be mystery, vs or bot' }, { status: 400 });
     const [items, posts] = await Promise.all([listShorts(), loadPosts()]);
+    if (kind === 'bot') {
+      const rows = await botCandidates(g.dhan);
+      return NextResponse.json({
+        trades: rows.map((r) => ({
+          ref: botRef(r), date: r.date, symbol: r.symbol, time: r.time, entry: r.entry, stop: r.stop, target: r.target,
+          myInr: r.myInr, myHow: r.myHow, myTime: r.myTime, planInr: r.planInr, planOutcome: r.planOutcome, diffInr: r.diffInr, steppedIn: r.steppedIn, note: r.note,
+          used: usedBy(items, posts, 'bot', botRef(r), ''),
+        })),
+      });
+    }
     if (kind === 'mystery') {
       const trades = await mysteryCandidates();
       return NextResponse.json({ trades: trades.map((t) => ({ ...t, used: usedBy(items, posts, 'mystery', t.id, `Mystery: ${t.symbol} · ${dateLabel(t.date)}`) })) });

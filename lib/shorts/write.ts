@@ -18,6 +18,8 @@ export interface SocialText {
   marks?: unknown;                                 // mystery: what to mark on the recap chart (checked by toMarks)
   vsMarks?: { me: unknown; algo: unknown };        // me vs algo: what each side's reason refers to (checked by toMarks)
   notes?: { me: string; algo: string };            // me vs algo
+  /** my bot's trade: what he is told before recording, the line he speaks (also on screen), how to say it */
+  voice?: { context: string[]; line: string; delivery: string };
   youtube: { title: string; description: string; tags: string[] };
   instagram: { caption: string };
 }
@@ -195,6 +197,44 @@ export function vsMessage(p: { weekNo: number; weekLabel: string; week: WeekScor
   ].join('\n');
 }
 
+const BOT_SYSTEM = `You write for "Candles Before Cubicles", a YouTube channel: a software developer built his own trading bot
+(Algo Live), it trades his real money on the NSE, and sometimes he steps in. This is a YouTube Short of ONE of the bot's
+trades, about 20 seconds. The video opens on a single first-person line he SPEAKS himself (recorded on his phone) and that
+is also shown big on screen; the chart moves at once; it shows where he stepped in, then what the bot would have done alone.
+
+Hard rules:
+- Use only the facts given. Never invent prices, times, amounts or events. Rupee amounts are after charges.
+- No investment advice: no buy/sell calls, no "you should", no promises, no "guaranteed", no "easy money".
+- Never name or describe the bot's strategy or rules (that is private): it is just "my bot".
+
+line (he says it out loud, and it is the opening frame):
+- Max 8 words, first person, spoken English (contractions), says the result or the tension with ONE concrete number
+  from the facts. It must work in the first second for a stranger scrolling. Examples of the shape (use the real numbers):
+  "I touched my bot's trade. Cost me ₹420." / "My bot made ₹480. I nearly ruined it." / "I stepped in. Saved ₹310."
+- Rupees as "₹420" (whole rupees). No ticker in the line.
+context: exactly 2 short lines he reads BEFORE recording, so he knows what happened (plain, factual, with the numbers).
+delivery: one short line telling him HOW to say it, matched to the emotion of the facts (e.g. "Annoyed at yourself,
+  like telling a friend over chai. Not reading." / "Quietly proud, half a smile."). Never theatrical.
+
+YouTube (Shorts feed first, search second):
+- title: max 55 characters, hook in the first 40, the same tension as the line in different words, with "my trading bot"
+  or "my bot" in it. No emoji, no all caps words, no question about long/short.
+- description: line 1 (max 100 characters) restates the hook. Then 3-5 sentences telling this trade from the facts (the
+  bot's entry, stop and target, what he did and why it mattered in rupees, what the bot would have done alone). Then one
+  line on the series: "A developer vs his own trading bot, with real money." Then "Real trade, real money. Not investment
+  advice." Then exactly 3 hashtags, #shorts first. Do not write a longer disclaimer: it is added automatically.
+- tags: 15-25 lowercase search phrases (algo trading, trading bot, automated trading, intraday trading, stock market
+  india, nse, trading psychology...). Never a stock name, ticker or person's name.`;
+
+export const BOT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['line', 'context', 'delivery', 'youtube'],
+  properties: {
+    line: { type: 'string' }, delivery: { type: 'string' },
+    context: { type: 'array', items: { type: 'string' } },
+    youtube: TEXT_SCHEMA.properties.youtube,
+  },
+} as const;
+
 const clip = (s: unknown, n: number) => String(s ?? '').replace(/\s+\n/g, '\n').trim().slice(0, n);
 
 /** Keeps the hidden ticker out of the public texts (the mystery's reveal), whatever the model wrote. */
@@ -237,3 +277,24 @@ export async function writeText(kind: 'mystery' | 'vs', message: string, hiddenT
   const text = scrubTicker(toSocialText(r.json, kind), hiddenTicker);
   return { ...text, model: r.model, costInr: r.costInr, at: Date.now() };
 }
+
+/** The model's JSON for a bot short -> SocialText (YouTube only: the Instagram caption stays empty). */
+export function toBotText(j: Record<string, unknown>, fallback: string): SocialText {
+  const yt = (j.youtube ?? {}) as Record<string, unknown>;
+  const tags = Array.isArray(yt.tags) ? fitTags(yt.tags.map((t) => clip(t, 60).replace(/^#/, ''))) : [];
+  const line = clip(j.line, 80) || fallback;
+  return {
+    voice: { line, context: (Array.isArray(j.context) ? j.context : []).map((x) => clip(x, 160)).filter(Boolean).slice(0, 2), delivery: clip(j.delivery, 140) },
+    youtube: { title: clip(yt.title, 100) || line, description: withDisclaimer(clip(yt.description, 4000), 'youtube'), tags },
+    instagram: { caption: '' },
+  };
+}
+
+export async function writeBotText(facts: string, fallback: string, ticker: string, o: ClaudeOptions = claudeOptions()): Promise<WrittenText> {
+  const r = await jsonClaude(BOT_SYSTEM, `THE TRADE\n${facts}`, BOT_SCHEMA, o, 3000);
+  if (!Object.keys(r.json).length) throw new Error(r.cutOff ? 'Claude\'s answer was cut short.' : 'Claude returned no usable text.');
+  const text = scrubTicker(toBotText(r.json, fallback), ticker);
+  const v = text.voice!;
+  return { ...text, voice: { ...v, line: v.line.replace(new RegExp(ticker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'it') }, model: r.model, costInr: r.costInr, at: Date.now() };
+}
+

@@ -4,6 +4,7 @@ import { Check, ChevronDown, ChevronRight, Loader2, Plus, Trash2, X } from 'luci
 import { useAuth } from '@/context/AuthContext';
 import { TradeCharts } from '@/components/journal/TradeCharts';
 import { PostStatus, ScheduleEditor } from '@/components/shorts/SchedulePanel';
+import VoiceRecorder, { type VoiceText } from '@/components/shorts/VoiceRecorder';
 import { blocksDelete, takenSlots, type PostPlan } from '@/lib/shorts/posts';
 import { istDay, nextSlotPairs } from '@/lib/shorts/slots';
 
@@ -17,13 +18,16 @@ import { istDay, nextSlotPairs } from '@/lib/shorts/slots';
 
 const MAX_PICKS = 3;
 
-type Kind = 'mystery' | 'vs';
+/** 'vs' (Me vs Algo) is kept but has no tab: with him trading only through the algo, his side is always empty */
+type Kind = 'mystery' | 'vs' | 'bot';
 interface Result { value: number; unit: 'R' | '%' }
 interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; securityId?: string; initialStop?: string; lastStop?: string; target?: string; fills: { time: string; side: 'BUY' | 'SELL'; qty: number; price: number }[] }
 /** a short was already made from it (lib/shorts/used.ts): how many, whether one is scheduled / posted, the latest made */
 interface Used { n: number; scheduled: boolean; lastAt: number }
 interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo; hasStop?: boolean; used?: Used }
 interface Side { r: number; n: number; uncounted: number }
+/** an Algo Live trade for "My bot's trade" (YouTube only): what he did vs what the bracket would have done, after charges */
+interface BotTrade { ref: string; date: string; symbol: string; time: string; entry: number; stop: number; target: number; myInr: number; myHow: string; myTime: string; planInr: number | null; planOutcome: string | null; diffInr: number | null; steppedIn: boolean | null; note?: string; used?: Used }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
 type Winner = 'me' | 'algo' | 'tie' | 'none';
 interface Week {
@@ -32,14 +36,16 @@ interface Week {
   frozenAt?: number; rescoredAt?: number; drift?: boolean; now?: { me: Side; algo: Side; winner: Winner };
   used?: Used;
 }
-interface SocialText { tell?: string; notes?: { me: string; algo: string }; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
-interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string }; post?: PostPlan }
+interface SocialText { tell?: string; notes?: { me: string; algo: string }; voice?: VoiceText; youtube: { title: string; description: string; tags: string[] }; instagram: { caption: string }; costInr?: number }
+interface Short { id: string; kind: Kind; label: string; createdAt: number; status: { state: 'voice' | 'queued' | 'rendering' | 'done' | 'failed'; error?: string }; video?: string; poster?: string; text?: SocialText | { error: string }; post?: PostPlan }
 
 type Pick =
   | { key: number; kind: 'mystery'; trade: MysteryTrade; tell: string; state?: 'sending' | 'sent' | string }
-  | { key: number; kind: 'vs'; week: Week; notes: { me: string; algo: string }; state?: 'sending' | 'sent' | string };
+  | { key: number; kind: 'vs'; week: Week; notes: { me: string; algo: string }; state?: 'sending' | 'sent' | string }
+  | { key: number; kind: 'bot'; trade: BotTrade; line: string; state?: 'sending' | 'sent' | string };
 
 const fmt = (r: Result) => `${r.value > 0 ? '+' : ''}${r.value}${r.unit}`;
+const inr = (x: number | null) => (x === null ? '–' : `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`);
 const fmtR = (x?: number) => (x === undefined ? '–' : `${x > 0 ? '+' : ''}${x.toFixed(1)}R`);
 const tone = (x: number) => (x >= 0 ? 'text-data-green' : 'text-data-red-text');
 const dateFmt = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -57,6 +63,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   const { token } = useAuth();
   const [kind, setKind] = useState<Kind>('mystery');
   const [trades, setTrades] = useState<MysteryTrade[] | null>(null);
+  const [botTrades, setBotTrades] = useState<BotTrade[] | null>(null);
   const [hideUsed, setHideUsed] = useState(true);
   const [weeks, setWeeks] = useState<Week[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);        // the expanded row
@@ -94,22 +101,29 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
         setTrades(j.trades);
       }).catch((e) => setErr((e as Error).message));
     }
+    if (kind === 'bot' && !botTrades) {
+      fetch('/api/shorts/candidates?kind=bot', { cache: 'no-store', headers: { 'x-dhan-token': token ?? '' } }).then(async (r) => {
+        const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
+        setBotTrades(j.trades);
+      }).catch((e) => setErr((e as Error).message));
+    }
     if (kind === 'vs' && !weeks) {
       fetch('/api/shorts/candidates?kind=vs', { cache: 'no-store' }).then(async (r) => {
         const j = await r.json(); if (!r.ok) throw new Error(j.message ?? `HTTP ${r.status}`);
         setWeeks(j.weeks);
       }).catch((e) => setErr((e as Error).message));
     }
-  }, [kind, trades, weeks]);
+  }, [kind, trades, weeks, botTrades, token]);
 
   const full = picks.length >= MAX_PICKS;
   const addMystery = (t: MysteryTrade) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'mystery', trade: t, tell: '' }]);
+  const addBot = (t: BotTrade) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'bot', trade: t, line: '' }]);
   const addWeek = (w: Week) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'vs', week: w, notes: { me: '', algo: '' } }]);
   const update = (key: number, f: (p: Pick) => Pick) => setPicks((ps) => ps.map((p) => (p.key === key ? f(p) : p)));
   const removePick = (key: number) => setPicks((ps) => ps.filter((p) => p.key !== key));
   /** how many times a trade / week is already in the tray (the row's Add button shows it) */
-  const added = (id: string) => picks.filter((p) => (p.kind === 'mystery' ? p.trade.id === id : p.week.week === id)).length;
-  const pickLabel = (p: Pick) => (p.kind === 'mystery' ? `Mystery: ${p.trade.symbol} · ${dateFmt(p.trade.date)}` : `Me vs Algo · ${p.week.label}`);
+  const added = (id: string) => picks.filter((p) => (p.kind === 'mystery' ? p.trade.id === id : p.kind === 'bot' ? p.trade.ref === id : p.week.week === id)).length;
+  const pickLabel = (p: Pick) => (p.kind === 'mystery' ? `Mystery: ${p.trade.symbol} · ${dateFmt(p.trade.date)}` : p.kind === 'bot' ? `My bot's trade: ${p.trade.symbol} · ${dateFmt(p.trade.date)}` : `Me vs Algo · ${p.week.label}`);
 
   /** one request per pick, in order; a failed pick stays in the tray with its reason */
   const generate = async () => {
@@ -122,14 +136,15 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
     for (const p of picks) {
       update(p.key, (x) => ({ ...x, state: 'sending' }));
       ghostStep(p.key, ai ? 'Claude is writing the text' : 'Building the chart');
-      const body = p.kind === 'mystery' ? { kind: 'mystery', tradeId: p.trade.id, date: p.trade.date, tell: p.tell, ai } : { kind: 'vs', week: p.week.week, notes: p.notes, ai };
+      const body = p.kind === 'mystery' ? { kind: 'mystery', tradeId: p.trade.id, date: p.trade.date, tell: p.tell, ai }
+        : p.kind === 'bot' ? { kind: 'bot', ref: p.trade.ref, line: p.line, ai } : { kind: 'vs', week: p.week.week, notes: p.notes, ai };
       try {
         const r = await fetch('/api/shorts/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-dhan-token': token ?? '' }, body: JSON.stringify(body) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) left.push({ ...p, state: j.message ?? `HTTP ${r.status}` });
         else {
           if (j.textError) setErr(`Made, but Claude could not write the text: ${j.textError}`);
-          ghostStep(p.key, 'Starting the render');
+          ghostStep(p.key, p.kind === 'bot' ? 'Ready for your voice' : 'Starting the render');
           await loadShorts();  // its real card (rendering) takes the placeholder's place
         }
       } catch (e) { left.push({ ...p, state: (e as Error).message }); }
@@ -137,6 +152,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
     }
     if (picks.some((p) => p.kind === 'vs')) setWeeks(null); // a Me vs Algo short freezes weeks: show them frozen
     if (picks.some((p) => p.kind === 'mystery')) setTrades(null); // reload so the trades just used show as Used
+    if (picks.some((p) => p.kind === 'bot')) setBotTrades(null);
     setPicks(left); setChartFor(null); setBusy(false);
     if (left.length) setErr(`${left.length} of them could not start; the reason is on each.`);
     void loadShorts();
@@ -186,7 +202,9 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   const defaultAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.youtube]));
   const defaultIgAt = new Map(waiting.map((s, i) => [s.id, slots[i]?.instagram]));
   const editingShort = shorts.find((s) => s.id === editing);
-  const drafts = shorts.filter((s) => !s.post);  // not scheduled yet (scheduled ones are in the Posting tab)
+  // not scheduled yet (scheduled ones are in the Posting tab); a bot short waiting for his voice gets the recorder instead
+  const drafts = shorts.filter((s) => !s.post && s.status.state !== 'voice');
+  const needVoice = shorts.filter((s) => s.status.state === 'voice');
 
   const tab = (k: Kind, label: string) => (
     <button onClick={() => setKind(k)} className={`rounded-full px-4 py-1.5 text-sm font-semibold ${kind === k ? 'bg-brand-accent text-brand-bg' : 'text-ink-3 hover:text-white'}`}>{label}</button>
@@ -220,6 +238,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   );
   const shownTrades = trades?.filter((t) => !hideUsed || !t.used);
   const shownWeeks = weeks?.filter((w) => !hideUsed || !w.used);
+  const shownBots = botTrades?.filter((t) => !hideUsed || !t.used);
   const hideToggle = (n: number) => (
     <label className="ml-auto flex items-center gap-2 text-xs text-ink-3">
       <input type="checkbox" checked={hideUsed} onChange={(e) => setHideUsed(e.target.checked)} className="accent-[var(--color-brand-accent)]" />
@@ -234,7 +253,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
 
       <div className="mt-4 rounded-2xl border border-line-strong bg-brand-card p-4">
         <div className="mb-4 inline-flex gap-1 rounded-full border border-line-strong p-1">
-          {tab('mystery', 'Mystery chart')}{tab('vs', 'Me vs Algo')}
+          {tab('mystery', 'Mystery chart')}{tab('bot', 'My bot\'s trade')}
         </div>
 
         {kind === 'mystery' && (
@@ -263,6 +282,35 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
                       {addBtn(() => addMystery(t), added(t.id))}
                     </div>
                     {open === t.id && <div className="bg-zinc-950/30 px-1 pb-3"><Chart c={t.chart} token={token} /></div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {kind === 'bot' && (
+          <>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-ink-3">Algo Live trades, newest first. <b className="text-ink-2">YouTube only.</b> After Generate, you record one line, then it renders.</p>
+              {hideToggle(botTrades?.filter((t) => t.used).length ?? 0)}
+            </div>
+            {!botTrades || !shownBots ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !shownBots.length ? <p className="text-sm text-ink-3">{botTrades.length ? 'Every bot trade already has a short: untick Hide used to see them.' : 'No closed Algo Live trades yet.'}</p> : (
+              <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-line">
+                {shownBots.map((t) => (
+                  <div key={t.ref} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2 text-sm last:border-0">
+                    <span className="w-24 text-ink-3">{dateFmt(t.date)}</span>
+                    <span className="w-28 font-semibold text-white">{t.symbol}</span>
+                    <span className="hidden w-12 text-ink-3 sm:inline">{t.time}</span>
+                    <span className="text-xs text-ink-3">You <b className={tone(t.myInr)}>{inr(t.myInr)}</b></span>
+                    {t.planInr !== null && <span className="text-xs text-ink-3">Untouched <b className={tone(t.planInr)}>{inr(t.planInr)}</b></span>}
+                    {t.steppedIn && t.diffInr !== null && (
+                      <span title="You closed it before the bot's own stop / target" className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase ${t.diffInr < 0 ? 'border-data-red/60 text-data-red-text' : 'border-data-green/60 text-data-green'}`}>
+                        stepped in {t.diffInr < 0 ? 'cost' : 'saved'} {inr(Math.abs(t.diffInr)).slice(1)}
+                      </span>
+                    )}
+                    {usedBadge(t.used)}
+                    <span className="ml-auto">{addBtn(() => addBot(t), added(t.ref))}</span>
                   </div>
                 ))}
               </div>
@@ -332,7 +380,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
                 <div className="flex items-center gap-2 text-sm">
                   <span className="flex size-6 items-center justify-center rounded-full bg-brand-accent text-xs font-black text-brand-bg">{i + 1}</span>
                   <span className="font-semibold text-white">
-                    {p.kind === 'mystery' ? `Mystery: ${p.trade.symbol} · ${dateFmt(p.trade.date)} · ${fmt(p.trade.result)}` : `Me vs Algo · ${p.week.label}`}
+                    {p.kind === 'mystery' ? `Mystery: ${p.trade.symbol} · ${dateFmt(p.trade.date)} · ${fmt(p.trade.result)}` : p.kind === 'bot' ? `My bot's trade: ${p.trade.symbol} · ${dateFmt(p.trade.date)} · ${inr(p.trade.myInr)}` : `Me vs Algo · ${p.week.label}`}
                   </span>
                   {p.kind === 'mystery' && (
                     <button onClick={() => setChartFor(chartFor === p.key ? null : p.key)} className="text-xs text-brand-accent hover:underline">{chartFor === p.key ? 'Hide chart' : 'Chart'}</button>
@@ -340,7 +388,13 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
                   <button onClick={() => removePick(p.key)} disabled={busy} aria-label="Remove" className="ml-auto text-ink-4 hover:text-data-red-text disabled:opacity-30"><X className="size-4" /></button>
                 </div>
                 {p.state && p.state !== 'sending' && p.state !== 'sent' && <p className="mt-1 text-xs text-data-red-text">{p.state}</p>}
-                {p.kind === 'mystery' ? (
+                {p.kind === 'bot' ? (
+                  <label className="mt-2 block text-xs text-ink-3">
+                    The line you will say (first person, max 8 words){ai ? ' (leave empty and Claude writes it)' : ' (empty: a plain line from the numbers)'}
+                    <input value={p.line} disabled={busy} onChange={(e) => { const v = e.target.value.slice(0, 80); update(p.key, (x) => ({ ...x, line: v } as Pick)); }}
+                      placeholder="e.g. I touched my bot's trade. Cost me ₹420." className={input} />
+                  </label>
+                ) : p.kind === 'mystery' ? (
                   <>
                     {chartFor === p.key && <div className="mt-2"><Chart c={p.trade.chart} token={token} /></div>}
                     <label className="mt-2 block text-xs text-ink-3">
@@ -370,7 +424,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
           </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-ink-2">
             <input type="checkbox" checked={ai} disabled={busy} onChange={(e) => setAi(e.target.checked)} className="accent-[var(--color-brand-accent)]" />
-            Claude writes the tell, YouTube title, description, tags and Instagram caption (one call per short, about ₹1–2)
+            Claude writes the tell (or the line you say), YouTube title, description, tags and Instagram caption (one call per short, about ₹1–2)
           </label>
           <div className="mt-3 flex items-center gap-3">
             <button onClick={generate} disabled={!picks.length || busy}
@@ -388,6 +442,13 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
           {shorts.filter((s) => s.post).length} scheduled or posted{' '}
           <button onClick={onOpenPosting} className="font-semibold text-brand-accent hover:underline">see Posting</button>
         </p>
+      )}
+      {needVoice.length > 0 && (
+        <div className="mt-6 grid gap-4">
+          {needVoice.map((s) => (
+            <VoiceRecorder key={s.id} id={s.id} label={s.label} text={s.text && 'voice' in s.text ? s.text.voice : undefined} onDone={() => void loadShorts()} onDelete={() => void remove(s.id)} />
+          ))}
+        </div>
       )}
       {(drafts.length > 0 || ghosts.length > 0 || editingShort) && (
         <div id="shorts-grid" className="mt-6 grid scroll-mt-24 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">

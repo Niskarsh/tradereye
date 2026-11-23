@@ -13,14 +13,14 @@ export const FOLLOW_DAYS = 90;
 export function factsOf(item: ShortItem | undefined, spec: ShortSpec | undefined, text: WrittenText | { error: string } | undefined, old?: Facts): Facts {
   const words = text && 'youtube' in text ? text : undefined;
   const c = spec?.content;
-  const r = c?.kind === 'mystery' ? c.panel.result.value : undefined;
+  const r = c?.kind === 'mystery' ? c.panel.result.value : c?.kind === 'bot' ? c.mine.inr : undefined;
   const outcome: Facts['outcome'] = c?.kind === 'vs' ? c.week.winner : r === undefined ? old?.outcome ?? 'none' : r < 0 ? 'loss' : 'win';
   return {
     label: item?.label ?? old?.label ?? '', kind: c?.kind ?? item?.kind ?? old?.kind ?? 'mystery', outcome,
     resultR: r !== undefined && c?.kind === 'mystery' && c.panel.result.unit === 'R' ? r : old?.resultR,
     title: words?.youtube.title ?? old?.title,
     captionHook: words?.instagram.caption.split('\n')[0]?.slice(0, 160) ?? old?.captionHook,
-    tell: (c?.kind === 'mystery' ? c.tell : undefined) ?? old?.tell,
+    tell: (c?.kind === 'mystery' ? c.tell : c?.kind === 'bot' ? c.line : undefined) ?? old?.tell,
   };
 }
 

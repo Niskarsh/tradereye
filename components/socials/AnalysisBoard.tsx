@@ -193,7 +193,7 @@ function Formats({ groups, findings, mature }: { groups: Group[]; findings: Find
         <ul className="mt-3 space-y-1 text-sm text-data-green">{findings.map((f) => <li key={`${f.platform}${f.a}${f.metric}`}>{f.platform}: {f.better} ahead on {f.metric} by {f.gapPct}%</li>)}</ul>
       ) : <p className="mt-3 text-sm text-ink-2">No clear winner yet: that needs 5 posts on each side and a gap of 25% or more.</p>}
       <div className="mt-5 grid gap-6 lg:grid-cols-2">
-        <Compare name="YouTube" heads={['Views', 'Watched', 'At 3s', 'Subs / 1k']} rows={groups.map((g) => ({ key: g.key, label: g.label, n: g.youtube.n, cells: [n(g.youtube.views), d1(g.youtube.avgPct, '%'), pc(g.youtube.at3s), d1(g.youtube.subsPer1k)] }))} />
+        <Compare name="YouTube" heads={['Views', 'Kept', 'Watched', 'At 3s', 'Subs / 1k']} rows={groups.map((g) => ({ key: g.key, label: g.label, n: g.youtube.n, cells: [n(g.youtube.views), pc(g.youtube.keptPct), d1(g.youtube.avgPct, '%'), pc(g.youtube.at3s), d1(g.youtube.subsPer1k)] }))} />
         <Compare name="Instagram" heads={['Views', 'Watch', 'Skip', 'Sh+Sv / 1k']} rows={groups.map((g) => ({ key: g.key, label: g.label, n: g.instagram.n, cells: [n(g.instagram.views), d1(g.instagram.avgWatchSec, 's'), d1(g.instagram.skipPct, '%'), d1(g.instagram.sharesSavesPer1k)] }))} />
       </div>
     </section>
@@ -212,11 +212,11 @@ function PostCard({ r }: { r: Row }) {
         {r.poster ? <img src={r.poster} alt="" className="h-20 w-[45px] shrink-0 rounded-md object-cover" /> : <div className="h-20 w-[45px] shrink-0 rounded-md bg-brand-raised" />}
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold text-white">{f.title || f.label}</p>
-          <p className="mt-0.5 text-xs text-ink-3">{f.kind === 'mystery' ? 'Mystery chart' : 'Me vs Algo'} · {OUTCOME[f.outcome] ?? f.outcome}{f.resultR !== undefined ? ` ${f.resultR > 0 ? '+' : ''}${f.resultR}R` : ''}</p>
+          <p className="mt-0.5 text-xs text-ink-3">{f.kind === 'mystery' ? 'Mystery chart' : f.kind === 'bot' ? 'My bot\'s trade' : 'Me vs Algo'} · {OUTCOME[f.outcome] ?? f.outcome}{f.resultR !== undefined ? ` ${f.resultR > 0 ? '+' : ''}${f.resultR}R` : ''}</p>
           {y && (
             <div className="mt-2 flex flex-wrap items-start gap-x-5 gap-y-1">
               <PlatformTag name="YouTube" at={y.at} url={y.url} mature={y.mature} />
-              <Stat k="Views" v={n(y.views)} /><Stat k="Watched" v={d1(y.avgPct, '%')} /><Stat k="At 3s" v={pc(y.retention?.at3s)} /><Stat k="Net subs" v={n(y.subs)} />
+              <Stat k="Views" v={n(y.views)} /><Stat k="Kept" v={pc(y.keptPct)} /><Stat k="Watched" v={d1(y.avgPct, '%')} /><Stat k="At 3s" v={pc(y.retention?.at3s)} /><Stat k="Net subs" v={n(y.subs)} />
             </div>
           )}
           {g && (

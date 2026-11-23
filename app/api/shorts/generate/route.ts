@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import { errorResponse, ownerGuard } from '@/lib/live/guard';
 import { NeedsDhanError } from '@/lib/candles/store';
 import { DispatchError, dispatchWorkflow } from '@/lib/setups/github';
-import { findTrade, season, seasonBeforeAfter, tradeDay } from '@/lib/shorts/source';
-import { dateLabel, mysterySpec, toMarks, vsPanel, vsSpec, type MysterySpec, type ShortSpec } from '@/lib/shorts/spec';
+import { botTrade, findTrade, season, seasonBeforeAfter, tradeDay } from '@/lib/shorts/source';
+import { botFacts, buildBotSpec, fallbackLine } from '@/lib/shorts/bot';
+import { botShortSpec, dateLabel, mysterySpec, toMarks, vsPanel, vsSpec, type MysterySpec, type ShortSpec } from '@/lib/shorts/spec';
 import { addShort, setStatus, store, textKey } from '@/lib/shorts/store';
 import { putJson } from '@/lib/setups/store';
-import { mysteryMessage, vsMessage, writeText, type WrittenText } from '@/lib/shorts/write';
+import { mysteryMessage, vsMessage, writeBotText, writeText, type WrittenText } from '@/lib/shorts/write';
 import { mysteryEligible } from '@/lib/shorts/trades';
 import { freezeThrough, loadLedger, mergedWeeks, saveLedger } from '@/lib/shorts/season';
 
@@ -18,6 +19,9 @@ const newId = (kind: string) => `${kind}-${new Date().toISOString().slice(0, 10)
 
 /**
  * POST { kind: 'mystery', tradeId, date, tell?, ai? }  or  { kind: 'vs', week, notes?: { me?, algo? }, ai? }
+ *   or { kind: 'bot', ref, line?, ai? }: my bot's trade. Made but NOT rendered: it waits (state "voice") for his recorded
+ *   line, then /api/shorts/render starts the job. Claude writes the line, what he is told before recording, how to say it,
+ *   and the YouTube text (YouTube only).
  * -> builds the short's spec from the journal / Algo Live / saved candles, saves it, and starts the render job on
  * GitHub Actions. A Dhan token (header) is used only when a trade day's candles are not saved yet.
  * With ai (the default), one Claude call writes the tell (or the two reasons) and the YouTube / Instagram text first;
@@ -27,10 +31,30 @@ export async function POST(req: Request) {
   const g = ownerGuard(req);
   if (!g.ok) return g.res;
   try {
-    const b = await req.json().catch(() => ({})) as { kind?: string; tradeId?: string; date?: string; tell?: string; week?: string; notes?: { me?: string; algo?: string }; ai?: boolean };
+    const b = await req.json().catch(() => ({})) as { kind?: string; tradeId?: string; date?: string; tell?: string; week?: string; notes?: { me?: string; algo?: string }; ai?: boolean; ref?: string; line?: string };
     const ai = b.ai !== false;
     let spec: ShortSpec, label: string, ref: string;
     let text: WrittenText | { error: string } | undefined;
+    if (b.kind === 'bot') {
+      const { row, day } = await botTrade(String(b.ref ?? ''), g.dhan);
+      const own = String(b.line ?? '').trim().slice(0, 80);
+      const draft = buildBotSpec(row, day, own);
+      const fallback = own || fallbackLine(draft);
+      let words: WrittenText | { error: string } | undefined;
+      if (ai) words = await writeBotText(botFacts(draft, row.date), fallback, row.symbol).catch((e) => ({ error: (e as Error).message }));
+      // his own line wins; then Claude's; then the code's
+      const line = own || (words && 'voice' in words && words.voice?.line) || fallback;
+      if (words && 'voice' in words && words.voice) words.voice.line = line;
+      const bot = botShortSpec(newId('bot'), { ...draft, line });
+      // without Claude's words the recorder still needs the line and what happened: the facts, from code
+      const saved: WrittenText = words && 'voice' in words ? words : {
+        voice: { line, context: botFacts(draft, row.date).split('\n').slice(1, 3), delivery: 'Like telling a friend what just happened. Not reading.' },
+        youtube: { title: line, description: '', tags: [] }, instagram: { caption: '' }, model: 'none', costInr: 0, at: Date.now(),
+      };
+      await putJson(store, textKey(bot.id), saved);
+      const item = await addShort(bot, `My bot's trade: ${row.symbol} · ${dateLabel(row.date)}`, String(b.ref), 'voice');
+      return NextResponse.json({ item, textError: words && 'error' in words ? words.error : undefined });
+    }
     if (b.kind === 'mystery') {
       if (!b.tradeId || !/^\d{4}-\d{2}-\d{2}$/.test(b.date ?? '')) return bad('Pick a trade first.');
       const t = await findTrade(b.tradeId, b.date!);
@@ -82,7 +106,7 @@ export async function POST(req: Request) {
           if (me?.marks) me.marks = me.marks.slice(0, 2);
         }
       }
-    } else return bad('kind must be mystery or vs');
+    } else return bad('kind must be mystery, vs or bot');
 
     if (text) await putJson(store, textKey(spec.id), text);
     const item = await addShort(spec, label, ref);

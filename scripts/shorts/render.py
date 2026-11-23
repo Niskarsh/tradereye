@@ -680,6 +680,167 @@ def render_vs(spec, out, poster):
     finish(frame, nf, buf, out, poster, poster_t=1.2)  # the hook, not the result
 
 
+# =============== My bot's trade (YouTube only) ===============
+def read_voice(path):
+    """His recorded line (mono 44.1 kHz WAV cut by the workflow), peak-normalised; None without one."""
+    if not path or not os.path.exists(path): return None
+    with wave.open(path, "rb") as w:
+        n, ch, sw, sr = w.getnframes(), w.getnchannels(), w.getsampwidth(), w.getframerate()
+        raw = w.readframes(n)
+    if sw != 2 or sr != SR: raise SystemExit("voice.wav must be 16-bit 44.1 kHz")
+    a = np.frombuffer(raw, dtype=np.int16).astype(np.float64) / 32768.0
+    if ch > 1: a = a.reshape(-1, ch).mean(axis=1)
+    pk = np.max(np.abs(a)) if len(a) else 0
+    return a * (0.9 / pk) if pk > 0 else None
+
+
+def inr(x, sign=True):
+    s = f"₹{abs(round(x)):,}"
+    return (("+" if x >= 0 else "−") + s) if sign else s
+
+
+def render_bot(spec, out, poster, voice_path=None):
+    c = spec["content"]; p = c["panel"]; mine = c["mine"]; plan = c.get("plan"); stepped = bool(c.get("stepped") and plan)
+    voice = read_voice(voice_path)
+    VOICE_AT = 0.25
+    vlen = len(voice) / SR if voice is not None else 0
+    # the opening: the line, big, while the chart runs fast to the entry (no freeze, no countdown)
+    HOOK = min(4.4, max(2.4, VOICE_AT + vlen + 0.4)) if voice is not None else 2.6
+    box = (20, 330, 700, 900)
+    # the Chart class reads entry / exit / stop from the panel like a journal panel: give it the fields it uses
+    ch = Chart(box, {**p, "fills": []})
+    e, m = p["entryIdx"], mine["idx"]
+    x_end = plan["idx"] if stepped else m
+    end = ch.n
+    yr = ch.yrange(0, None, (p["entry"], p["stop"], p["target"], mine["price"], plan["price"] if plan else None))
+    rate = 1 / 0.12  # minutes of the trade per second of video while it plays
+    P1 = min(8.0, max(4.0, (m - e) / rate))
+    t_play = HOOK + 0.5                      # a beat for the BOT SHORTS flash, the chart keeps forming
+    t_me = t_play + P1
+    PAUSE = 1.2 if stepped else 0.0
+    P2 = min(5.0, max(2.5, (x_end - m) / rate)) if stepped else 0.0
+    t_ghost = t_me + PAUSE
+    t_done = t_ghost + P2
+    t_card = t_done + (0.9 if stepped else 0.7)
+    total = t_card + 4.2
+    qty, entry = p["qty"], p["entry"]
+
+    def upto_at(t):
+        if t < HOOK: return e * (t / HOOK)
+        if t < t_play: return e + (t - HOOK) * 0.4
+        if t < t_me: return lerp(e + 0.2, m + 0.999, (t - t_play) / P1)
+        if t < t_ghost: return m + 0.999
+        if stepped and t < t_done: return lerp(m + 0.999, x_end + 0.999, (t - t_ghost) / P2)
+        return x_end + 0.999
+
+    hook_lines, hook_size = None, 46
+    for size in (50, 46, 42, 38, 34):
+        hook_lines = wrap_lines(c["line"], F("Black", size), u(640), 2)
+        if hook_lines: hook_size = size; break
+    if not hook_lines: hook_lines, hook_size = [c["line"][:40]], 34
+
+    def level(d, py, price, col, label, x0):
+        y = py(price)
+        dashed(d, x0, box[2], y, col, 3)
+        f = F("Bold", 19); w = f.getlength(label) / K + 16
+        d.rounded_rectangle([u(box[2] - w - 6), u(y - 14), u(box[2] - 6), u(y + 14)], radius=u(6), fill=col)
+        T(d, (box[2] - 6 - w / 2, y), label, f, BG if col != RED else TXT)
+
+    def frame(f):
+        t = f / FPS
+        up = min(end, upto_at(t))
+        img = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(img)
+        T(d, (32, 70), c["symbol"], F("Black", 40), GOLD, "lm")
+        T(d, (32, 114), f"NSE  ·  {p['tf']}-min  ·  {c['dateLabel']}", F("Medium", 23), MUTED, "lm")
+        T(d, (688, 70), ch.clock(up), F("Bold", 44), GOLD, "rm")
+        pill(d, 610, 118, 140, 36, "MY BOT" if t < t_me or not stepped else ("ME" if t < t_ghost else "BOT ALONE"), (48, 46, 40), F("Bold", 18))
+        header_common(d)
+        py, px = ch.draw(d, up, yr)
+        if up >= e:
+            x0 = px(e) - 8
+            level(d, py, p["target"], EM, f"TARGET {p['target']:.2f}", x0)
+            level(d, py, p["stop"], RED, f"STOP {p['stop']:.2f}", x0)
+            level(d, py, entry, GOLD, f"BOT ENTRY {entry:.2f}", x0)
+            ex = px(e) - ch.half() - 12; ey = py(entry)
+            d.polygon([(u(ex + 8), u(ey)), (u(ex - 8), u(ey - 6)), (u(ex - 8), u(ey + 6))], fill=GOLD)
+        if up >= m + 0.999:  # where he got out
+            mx, my = px(m), py(mine["price"])
+            d.ellipse([u(mx - 10), u(my - 10), u(mx + 10), u(my + 10)], fill=TXT, outline=GOLD, width=u(3))
+            if stepped:
+                lab = "I STEPPED IN"; fw = F("Black", 20).getlength(lab) / K + 20
+                lx = min(max(mx, box[0] + fw / 2 + 4), box[2] - fw / 2 - 4); ly = my - 34 if my - 34 > box[1] + 20 else my + 34
+                d.rounded_rectangle([u(lx - fw / 2), u(ly - 16), u(lx + fw / 2), u(ly + 16)], radius=u(8), fill=GOLD)
+                T(d, (lx, ly), lab, F("Black", 20), BG)
+        if stepped and up >= x_end + 0.999:  # where the bot's own bracket would have closed it
+            gx, gy = px(x_end), py(plan["price"])
+            d.ellipse([u(gx - 10), u(gy - 10), u(gx + 10), u(gy + 10)], fill=EM if plan["inr"] >= 0 else RED)
+            word = {"TARGET": "TARGET HIT", "STOP": "STOPPED OUT", "15:15": "15:15 CLOSE"}[plan["outcome"]]
+            T(d, (gx, gy + 30 if gy + 30 < box[3] - Chart.AXIS - 10 else gy - 30), word, F("Black", 20), EM if plan["inr"] >= 0 else RED)
+
+        # top strip: the line during the opening, then the running P&L
+        if t < HOOK + 0.35:
+            a = 1 - ease((t - HOOK) / 0.35) if t > HOOK else 1
+            hh = 40 + (hook_size + 12) * len(hook_lines)
+            d.rounded_rectangle([u(30), u(196), u(690), u(196 + hh)], radius=u(16), fill=mix(BG, DARKGOLD, a))
+            for i, ln in enumerate(hook_lines):
+                T(d, (360, 196 + 20 + (hook_size + 12) * (i + 0.5)), ln, F("Black", hook_size), mix(BG, TXT, a))
+        elif up >= e:
+            price = ch.price_at(up) if t < t_me or (stepped and t_ghost <= t < t_done) else (mine["price"] if t < t_ghost or not stepped else plan["price"])
+            gross = qty * (entry - price)
+            label = "BOT ALONE" if stepped and t >= t_ghost else ("MY RESULT" if t >= t_me else "LIVE P&L")
+            T(d, (360, 222), label, F("Bold", 22), MUTED)
+            if t >= t_me and not (stepped and t_ghost <= t < t_done):
+                val = mine["inr"] if (t < t_ghost or not stepped) else plan["inr"]
+                T(d, (360, 272), inr(val), F("Black", 56), EM if val >= 0 else RED)
+                T(d, (360, 314), "after charges", F("Medium", 18), MUTED)
+            else:
+                T(d, (360, 272), inr(gross), F("Black", 56), EM if gross >= 0 else RED)
+                T(d, (360, 314), "before charges", F("Medium", 18), MUTED)
+        if HOOK <= t < t_play + 0.6:
+            k = 1 - ease((t - t_play) / 0.6) if t > t_play else ease((t - HOOK) / 0.25)
+            pill(d, 360, 960, 360, 70, "MY BOT SHORTS", mix(BG, RED, k), F("Black", 32), mix(BG, TXT, k))
+        if stepped and t_ghost <= t < t_done:
+            pill(d, 360, 960, 420, 66, "IF I'D LEFT IT…", (48, 46, 40), F("Black", 30))
+
+        if t >= t_card:  # the end card
+            k = ease((t - t_card) / 0.45)
+            img = dim(img, 0.88 * k); d = ImageDraw.Draw(img)
+            if stepped:
+                diff = mine["inr"] - plan["inr"]
+                T(d, (360, 330), "Stepping in cost me" if diff < 0 else "Stepping in saved me", F("Black", 40), mix(BG, TXT, k))
+                T(d, (360, 420), inr(abs(diff), sign=False), F("Black", 96), mix(BG, RED if diff < 0 else EM, k))
+                for row, (name, val) in enumerate((("ME", mine["inr"]), ("MY BOT, UNTOUCHED", plan["inr"]))):
+                    y = 540 + row * 64
+                    T(d, (90, y), name, F("Black", 32), mix(BG, TXT, k), "lm")
+                    T(d, (630, y), inr(val), F("Black", 38), mix(BG, EM if val >= 0 else RED, k), "rm")
+                T(d, (360, 675), "after charges  ·  untouched = backtest fill rules", F("Medium", 19), mix(BG, MUTED, k))
+            else:
+                T(d, (360, 330), "My bot's trade", F("Black", 40), mix(BG, TXT, k))
+                T(d, (360, 430), inr(mine["inr"]), F("Black", 104), mix(BG, EM if mine["inr"] >= 0 else RED, k))
+                T(d, (360, 540), "I didn't touch it.", F("Black", 36), mix(BG, GOLD, k))
+                T(d, (360, 600), "after charges", F("Medium", 20), mix(BG, MUTED, k))
+            if t > t_card + 0.6:
+                subscribe(d, 760, ease((t - t_card - 0.6) / 0.4), "Me vs my own bot. Real money.")
+        return img
+
+    nf = int(total * FPS)
+    buf = np.zeros(int(SR * total) + SR); last = -1
+    for f in range(nf):
+        tt = f / FPS; uu = int(upto_at(tt))
+        if uu != last and HOOK <= tt < t_done and not (t_me <= tt < t_ghost): place(buf, click(0.035), tt)
+        last = uu
+    place(buf, tone(560, 0.3, 0.3, 8), HOOK)
+    if stepped: place(buf, tone(330, 0.45, 0.35, 5), t_me)
+    good = (plan["inr"] if stepped else mine["inr"]) >= 0
+    for kk, fr in enumerate([523, 659, 784] if good else [330, 262, 220]): place(buf, tone(fr, 0.5, 0.22, 5), t_done + kk * 0.08)
+    for kk, fr in enumerate([784, 988, 1175]): place(buf, tone(fr, 0.5, 0.18, 4), t_card + kk * 0.07)
+    if voice is not None:
+        i0 = int(VOICE_AT * SR); i1 = min(len(buf), i0 + len(voice))
+        buf[i0:i1] *= 0.3  # the ticks go quiet while he speaks
+        buf[i0:i1] += voice[: i1 - i0]
+    finish(frame, nf, buf, out, poster, poster_t=min(1.2, HOOK - 0.3))  # the line, not the result
+
+
 def finish(frame, nf, buf, out, poster, poster_t):
     wav = out + ".wav"
     write_wav(wav, buf)
@@ -689,14 +850,15 @@ def finish(frame, nf, buf, out, poster, poster_t):
 
 
 def main():
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: render.py spec.json out.mp4 poster.jpg")
+    if len(sys.argv) not in (4, 5):
+        raise SystemExit("usage: render.py spec.json out.mp4 poster.jpg [voice.wav]")
     spec = json.load(open(sys.argv[1]))
     if spec.get("v") != 2:
         raise SystemExit(f"unsupported spec version {spec.get('v')} (2 = 1-minute candles drawn as live candles of the spec's tf)")
     kind = spec["content"]["kind"]
     if kind == "mystery": render_mystery(spec, sys.argv[2], sys.argv[3])
     elif kind == "vs": render_vs(spec, sys.argv[2], sys.argv[3])
+    elif kind == "bot": render_bot(spec, sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) == 5 else None)
     else: raise SystemExit(f"unknown template {kind}")
 
 
