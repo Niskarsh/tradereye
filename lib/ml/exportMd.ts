@@ -35,8 +35,20 @@ interface Untouched { id: string; name?: string; from?: string; to?: string; ove
 interface Noise { strategy: string; devMin: number; devMax: number; devMean: number; draws?: { draw: string; devNetR: number; devT: number }[] }
 interface Cell { id: string; size: number; floor: number | 'aware'; cap: number; n: number; netR: number; t: number; rPerMonth: number; tradesPerMonth: number; exam: boolean; pool: number | null; solid: boolean; candidate: boolean; gate?: boolean; inrPerMonth?: number }
 interface Block { size: number; gate: boolean; cells: number; strong: number; examOk: number; holds: boolean; best: string | null; inrPerMonth: number | null }
+/** (iteration 17) scripts/ml_iter17_layers.py's block; only what is printed here */
+interface I17P { n: number; netR: number; t: number; monthsGreen?: number; monthsTraded?: number; pass?: boolean | null }
+interface I17Check { cases: number; stocks: number; maxShare: number | null; quarters: [number, number] | null; looMin: number | null; total: number; pass: boolean }
+export interface ExportIter17 {
+  table: { id: string; version: string; be: number; name: string; dev: I17P; exam: I17P; shadow?: I17P; untouched: (I17P & { lessons?: string[] }) | null; draws: Record<string, { n: number; netR: number; sizeR: number }>; atSize: { dev: I17P; exam: I17P } }[];
+  placeboC?: { name: string; dev: I17P } | null; placebo?: { dev: I17P } | null; oldFills?: { dev: I17P; exam: I17P } | null;
+  lessons?: Record<string, { final: Record<string, I17Check>; active: { month: string; active: string[] }[] }>;
+  losses?: Record<string, Record<string, number>>;
+  verdict: { message: string; outcome: string; versions: { id: string; name: string; gain: number; checks: { label: string; ok: boolean }[]; pass: boolean }[]; breakEven: { id: string; version: string; at: number; dev: number; exam: number; untouched: number | null; pass: boolean }[]; placeboClean?: boolean; placeboCGap?: number | null };
+  data?: { sectors?: { ok: boolean; source?: string; indices?: string[]; missingIndustries?: string[]; stockDaysWithSector?: number; stockDays?: number; error?: string }; results?: { ok: boolean; meetings?: number; stocks?: number; flaggedStockDays?: number; error?: string } };
+  structureFacts?: Record<string, { inTop15: { label: string; share: number }[] }>;
+}
 export interface ExportMl {
-  iteration: number; runId: string; code?: string | null; createdAt: number; changes?: string[];
+  iteration: number; iter17?: ExportIter17; runId: string; code?: string | null; createdAt: number; changes?: string[];
   period?: { from: string; to: string }; examFrom?: string; rows?: number; stocks?: number; days?: number; narrowStocks?: number;
   setup?: { maxPerDay?: number; maxPerSide?: number; riskInr?: number; trainMonths?: number; valMonths?: number };
   best?: string; locked?: string; strategies: Strat[];
@@ -68,6 +80,41 @@ const table = (head: string[], rows: unknown[][]) =>
 const examText = (e: P | undefined) => (!e ? '–' : e.pass === true ? 'Pass' : e.pass === false ? 'Fail' : e.n ? `${r(e.netR)} (${e.n})` : '–');
 const green = (p: P | undefined) => (p?.monthsTraded ? `${p.monthsGreen}/${p.monthsTraded}` : '–');
 
+/** iteration 17: every version against the control, the rule, the lessons, the data behind C and D */
+function iter17Md(it: ExportIter17): string {
+  const v = it.verdict, a = it.table.find((x) => x.id === 'A');
+  const parts: string[] = [`## Verdict (rule fixed before the run)\n**${v.outcome}**: ${v.message}`];
+  parts.push('## Every version (decide months, realistic fills, after costs at ₹300 risk)\n' + table(
+    ['id', 'Version', 'Trades', 'R/trade', 't', 'vs A', 'Months green', 'Exam', 'Untouched', 'Draws', '₹10 lakh R/trade', 'Shadow'],
+    it.table.map((x) => [x.id, x.name, x.dev.n, r(x.dev.netR), f(x.dev.t, 1), x.id === 'A' || !a ? '–' : r(x.dev.netR - a.dev.netR), green(x.dev), examText(x.exam),
+      x.untouched?.n ? `${r(x.untouched.netR)} (t ${f(x.untouched.t, 1)}, ${x.untouched.n})${x.untouched.lessons ? ` lessons: ${x.untouched.lessons.join(', ') || 'none'}` : ''}` : '–',
+      Object.entries(x.draws).map(([k, d]) => `${k} ${r(d.netR)}`).join(', '), r(x.atSize.dev.netR), x.shadow?.n ? `${r(x.shadow.netR)} (${x.shadow.n})` : '–']),
+  ));
+  parts.push('## The rule, version by version\n' + v.versions.map((x) => `- **${x.id}** (${r(x.gain)} vs A, ${x.pass ? 'PASS' : 'fail'}): ${x.checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.label}`).join(' · ')}`).join('\n'));
+  parts.push('## Break-even after costs (difference vs no move, same version)\n' + table(['id', 'Version', 'At', 'Decide', 'Exam', 'Untouched', 'Passes'],
+    v.breakEven.map((x) => [x.id, x.version, `${x.at}%`, r(x.dev), r(x.exam), r(x.untouched), x.pass ? 'yes' : 'no'])));
+  const pl: string[] = [];
+  if (it.placeboC) pl.push(`- C from random lines: ${r(it.placeboC.dev.netR)} (t ${f(it.placeboC.dev.t, 1)}, ${it.placeboC.dev.n} trades); C beats it by ${r(v.placeboCGap)}`);
+  if (it.placebo) pl.push(`- Shuffled-outcome placebo: ${r(it.placebo.dev.netR)} (t ${f(it.placebo.dev.t, 1)}, ${it.placebo.dev.n} trades) · ${v.placeboClean ? 'clean' : 'NOT clean'}`);
+  if (it.oldFills) pl.push(`- Control at iteration 10's old fills: ${r(it.oldFills.dev.netR)} (t ${f(it.oldFills.dev.t, 1)}) · exam ${examText(it.oldFills.exam)}`);
+  if (pl.length) parts.push('## Placebos and the old fills\n' + pl.join('\n'));
+  for (const [k, L] of Object.entries(it.lessons ?? {})) {
+    parts.push(`## Lessons from losses: ${k}\n` + table(['Lesson', 'Trades changed', 'Stocks', 'Top stock share', 'Quarters +', 'Best stock out', 'Net R added', 'Months acting', 'Passes'],
+      Object.entries(L.final).map(([name, c]) => [name, c.cases, c.stocks, pct(c.maxShare), c.quarters ? `${c.quarters[0]}/${c.quarters[1]}` : '–', c.looMin ?? '–', c.total,
+        `${L.active.filter((m) => m.active.includes(name)).length}/${L.active.length}`, c.pass ? 'yes' : 'no'])));
+  }
+  if (it.losses && Object.keys(it.losses).length) {
+    const kinds = [...new Set(Object.values(it.losses).flatMap((x) => Object.keys(x)))].sort();
+    parts.push('## How the trades ended (decide months)\nfast = stopped within 30 min · nearTarget = reached 70%+ of the target, then stopped · drift = losing at 15:15 · shock = a 3+ ATR candle against it\n\n' + table(['Version', ...kinds], Object.entries(it.losses).map(([k, x]) => [k, ...kinds.map((q) => x[q] ?? 0)])));
+  }
+  const d = it.data, lines: string[] = [];
+  if (d?.sectors) lines.push(`- Sector: ${d.sectors.ok ? `${d.sectors.source ? `industries from ${d.sectors.source}; ` : ''}${d.sectors.indices?.join(', ')}; ${d.sectors.stockDaysWithSector} of ${d.sectors.stockDays} stock-days${d.sectors.missingIndustries?.length ? `; no index for ${d.sectors.missingIndustries.join(', ')}` : ''}` : `not available (${d.sectors.error})`}`);
+  if (d?.results) lines.push(`- Results days: ${d.results.ok ? `${d.results.meetings} meetings, ${d.results.stocks} companies, ${d.results.flaggedStockDays} stock-days skipped` : `not available (${d.results.error}); D ran on the sector alone`}`);
+  for (const [k, x] of Object.entries(it.structureFacts ?? {})) lines.push(`- New facts in ${k}'s top 15: ${x.inTop15.map((y) => `${y.label} ${pct(y.share)}`).join(' · ') || 'none'}`);
+  if (lines.length) parts.push('## Data behind C and D\n' + lines.join('\n'));
+  return parts.join('\n\n');
+}
+
 export function mlToMarkdown(raw: ExportMl): string {
   const ml = relabelSized(raw); // sized versions: money and labels at their own size (lib/ml/sized.ts)
   const out: string[] = [];
@@ -83,6 +130,7 @@ export function mlToMarkdown(raw: ExportMl): string {
     '- All numbers are decide months (before the exam months) after costs unless marked. R = one unit of risk.',
   ].join('\n'));
   if (ml.changes?.length) out.push('## What changed\n' + ml.changes.map((c) => `- ${c}`).join('\n'));
+  if (ml.iter17) out.push(iter17Md(ml.iter17));
 
   const w = ml.wide;
   if (w) {
