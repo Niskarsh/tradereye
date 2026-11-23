@@ -852,24 +852,25 @@ def render_bot(spec, out, poster, voice_path=None):
         T(d, (32, 70), c["symbol"], F("Black", 40), GOLD, "lm")
         T(d, (32, 114), f"NSE  ·  {p['tf']}-min  ·  {c['dateLabel']}", F("Medium", 23), MUTED, "lm")
         T(d, (688, 70), ch.clock(up), F("Bold", 44), GOLD, "rm")
-        pill(d, 610, 118, 140, 36, "MY BOT" if t < t_me or not stepped else ("ME" if t < t_ghost else "BOT ALONE"), (48, 46, 40), F("Bold", 18))
-        header_common(d)
+        # ONE narrator for the whole video: the bot. Every word on screen is the bot's ("I", "my" = the bot; "he" = him)
+        pill(d, 600, 118, 168, 36, "MY TRADE" if t < t_me or not stepped else ("HE TOOK OVER" if t < t_ghost else "MY PLAN"), (48, 46, 40), F("Bold", 18))
+        T(d, (W / K / 2, 172), "Told by his trading bot. His money. Not advice.", F("Medium", 17), MUTED)
         # the moving price tag only while something is still moving (it would sit on the exit labels after)
         moving = (HOOK <= t < t_me) or (stepped and t_ghost <= t < t_done)
         d.rectangle([u(box[2]), u(box[1]), u(TAGS_X1), u(box[3])], fill=PANEL)
         py, px = ch.draw(d, up, yr, live=moving or t < HOOK)
         if up >= e:
             x0 = px(e) - 8
-            level(d, py, "TARGET", p["target"], EM, x0)
-            level(d, py, "STOP", p["stop"], RED, x0)
-            level(d, py, "BOT IN", entry, GOLD, x0)
+            level(d, py, "MY TARGET", p["target"], EM, x0)
+            level(d, py, "MY STOP", p["stop"], RED, x0)
+            level(d, py, "MY ENTRY", entry, GOLD, x0)
             ex = px(e) - ch.half() - 12; ey = py(entry)
             d.polygon([(u(ex + 8), u(ey)), (u(ex - 8), u(ey - 6)), (u(ex - 8), u(ey + 6))], fill=GOLD)
         if up >= m + 0.999:  # where he got out
             mx, my = px(m), py(mine["price"])
             d.ellipse([u(mx - 10), u(my - 10), u(mx + 10), u(my + 10)], fill=TXT, outline=GOLD, width=u(3))
             if stepped:
-                lab = "I STEPPED IN"; fw = F("Black", 20).getlength(lab) / K + 20
+                lab = "HE STEPPED IN"; fw = F("Black", 20).getlength(lab) / K + 20
                 lx = min(max(mx, box[0] + fw / 2 + 4), box[2] - fw / 2 - 4); ly = my - 34 if my - 34 > box[1] + 20 else my + 34
                 d.rounded_rectangle([u(lx - fw / 2), u(ly - 16), u(lx + fw / 2), u(ly + 16)], radius=u(8), fill=GOLD)
                 T(d, (lx, ly), lab, F("Black", 20), BG)
@@ -889,13 +890,13 @@ def render_bot(spec, out, poster, voice_path=None):
             hh = 70 + (hook_size + 12) * len(hook_lines)
             pop = 1 + 0.06 * (1 - ease(t / 0.25))  # lands with the boom
             d.rounded_rectangle([u(30), u(196), u(690), u(196 + hh)], radius=u(16), fill=mix(BG, DARKGOLD, a))
-            T(d, (360, 222), "MY BOT SAYS", F("Black", 20), mix(BG, GOLD, a))
+            T(d, (360, 222), "I'M HIS TRADING BOT", F("Black", 20), mix(BG, GOLD, a))
             for i, ln in enumerate(hook_lines):
                 T(d, (360, 196 + 50 + (hook_size + 12) * (i + 0.5)), ln, F("Black", int(hook_size * pop)), mix(BG, TXT, a))
         elif up >= e:
             price = ch.price_at(up) if t < t_me or (stepped and t_ghost <= t < t_done) else (mine["price"] if t < t_ghost or not stepped else plan["price"])
             gross = qty * (entry - price)
-            label = "BOT ALONE" if stepped and t >= t_ghost else ("MY RESULT" if t >= t_me else "LIVE P&L")
+            label = "MY PLAN, WITHOUT HIM" if stepped and t >= t_ghost else (("HE GOT OUT WITH" if stepped else "I CLOSED IT AT") if t >= t_me else "MY P&L")
             T(d, (360, 222), label, F("Bold", 22), MUTED)
             if t >= t_me and not (stepped and t_ghost <= t < t_done):
                 val = mine["inr"] if (t < t_ghost or not stepped) else plan["inr"]
@@ -906,29 +907,29 @@ def render_bot(spec, out, poster, voice_path=None):
                 T(d, (360, 314), "before charges", F("Medium", 18), MUTED)
         if HOOK <= t < t_play + 0.6:
             k = 1 - ease((t - t_play) / 0.6) if t > t_play else ease((t - HOOK) / 0.25)
-            pill(d, 360, 960, 360, 70, "MY BOT SHORTS", mix(BG, RED, k), F("Black", 32), mix(BG, TXT, k))
+            pill(d, 360, 960, 360, 70, "I SHORT IT", mix(BG, RED, k), F("Black", 32), mix(BG, TXT, k))
         if stepped and t_ghost <= t < t_done:
-            pill(d, 360, 960, 420, 66, "IF I'D LEFT IT…", (48, 46, 40), F("Black", 30))
+            pill(d, 360, 960, 520, 66, "IF HE'D LEFT ME ALONE…", (48, 46, 40), F("Black", 30))
 
         if t >= t_card:  # the end card
             k = ease((t - t_card) / 0.45)
             img = dim(img, 0.88 * k); d = ImageDraw.Draw(img)
             if stepped:
                 diff = mine["inr"] - plan["inr"]
-                T(d, (360, 330), "Stepping in cost me" if diff < 0 else "Stepping in saved me", F("Black", 40), mix(BG, TXT, k))
+                T(d, (360, 330), "He stepped in. It cost him" if diff < 0 else "He stepped in. Saved him", F("Black", 38), mix(BG, TXT, k))
                 T(d, (360, 420), inr(abs(diff), sign=False), F("Black", 96), mix(BG, RED if diff < 0 else EM, k))
-                for row, (name, val) in enumerate((("ME", mine["inr"]), ("MY BOT, UNTOUCHED", plan["inr"]))):
+                for row, (name, val) in enumerate((("HIM", mine["inr"]), ("ME, LEFT ALONE", plan["inr"]))):
                     y = 540 + row * 64
                     T(d, (90, y), name, F("Black", 32), mix(BG, TXT, k), "lm")
                     T(d, (630, y), inr(val), F("Black", 38), mix(BG, EM if val >= 0 else RED, k), "rm")
-                T(d, (360, 675), "after charges  ·  untouched = backtest fill rules", F("Medium", 19), mix(BG, MUTED, k))
+                T(d, (360, 675), "after charges  ·  \"me, left alone\" uses backtest fill rules", F("Medium", 19), mix(BG, MUTED, k))
             else:
-                T(d, (360, 330), "My bot's trade", F("Black", 40), mix(BG, TXT, k))
+                T(d, (360, 330), "He left me alone.", F("Black", 40), mix(BG, TXT, k))
                 T(d, (360, 430), inr(mine["inr"]), F("Black", 104), mix(BG, EM if mine["inr"] >= 0 else RED, k))
-                T(d, (360, 540), "I didn't touch it.", F("Black", 36), mix(BG, GOLD, k))
+                T(d, (360, 540), "My trade. His money.", F("Black", 36), mix(BG, GOLD, k))
                 T(d, (360, 600), "after charges", F("Medium", 20), mix(BG, MUTED, k))
             if t > t_card + 0.6:
-                subscribe(d, 760, ease((t - t_card - 0.6) / 0.4), "Me vs my own bot. Real money.")
+                subscribe(d, 760, ease((t - t_card - 0.6) / 0.4), "A trading bot vs its human. Real money.")
         return img
 
     nf = int(total * FPS)
