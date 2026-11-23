@@ -85,7 +85,7 @@ const inr = (x: number) => `${x < 0 ? '−' : '+'}₹${Math.abs(Math.round(x)).t
 export function fallbackLine(s: Pick<BotSpec, 'mine' | 'plan' | 'stepped'>): string {
   if (s.stepped && s.plan) {
     const diff = s.mine.inr - s.plan.inr;
-    return diff < 0 ? `He touched my trade. Cost him ₹${Math.abs(Math.round(diff))}.` : `He stepped in. Saved ₹${Math.round(diff)}. Fine.`;
+    return diff < 0 ? `He touched my trade. Cost him ₹${Math.abs(Math.round(diff))}.` : `He stepped in. He was right. ₹${Math.round(diff)}.`;
   }
   return s.mine.inr >= 0 ? `He left me alone. I made ₹${Math.round(s.mine.inr)}.` : `He let me trade. I lost ₹${Math.abs(Math.round(s.mine.inr))}.`;
 }

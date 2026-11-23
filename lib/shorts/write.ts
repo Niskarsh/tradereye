@@ -209,10 +209,12 @@ Hard rules:
 - Never name or describe the bot's strategy or rules (that is private).
 
 line (the bot speaks it, and it is the opening frame):
-- Max 8 words, the bot talking about HIM in the third person ("he", "him"), dry, deadpan, a little smug when he cost
-  money, grudging when he saved some. ONE concrete rupee number from the facts, written "₹520" (whole rupees). No ticker.
-  Shapes (use the real numbers): "He touched my trade. Cost him ₹520." / "He let me work. ₹480." / "He stepped in. Saved
-  ₹310. Annoying." It must stop a stranger scrolling in the first second.
+- Max 8 words, the bot talking about HIM in the third person ("he", "him"). The bot is quietly fed up with its human
+  stepping in, but NEVER says so: no emotion words at all (not "annoying", "frustrated", "ugh", "fine", "sigh", "again").
+  The feeling comes only from flat, factual understatement and what is left unsaid; the voice is a monotone robot, so
+  the words must carry it. ONE concrete rupee number from the facts, written "₹520" (whole rupees). No ticker.
+  Shapes (use the real numbers): "He touched my trade. Cost him ₹520." / "He let me work. ₹480." / "He stepped in.
+  He was right. ₹310." It must stop a stranger scrolling in the first second.
 
 YouTube (Shorts feed first, search second):
 - ONE NARRATOR everywhere: the bot. In the line, the title and the story, "I" / "my" is always the bot and "he" / "him"
