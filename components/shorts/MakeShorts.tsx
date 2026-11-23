@@ -25,7 +25,7 @@ interface ChartInfo { symbol: string; date: string; dir: 'LONG' | 'SHORT'; secur
 interface Used { n: number; scheduled: boolean; lastAt: number }
 interface MysteryTrade { id: string; date: string; symbol: string; dir: 'LONG' | 'SHORT'; entryTime: string; holdMin: number; result: Result; chart: ChartInfo; hasStop?: boolean; used?: Used }
 interface Side { r: number; n: number; uncounted: number }
-/** an Algo Live trade for "My bot's trade" (YouTube only): what he did vs what the bracket would have done, after charges */
+/** an Algo Live trade for "My bot's trade": what he did vs what the bracket would have done, after charges */
 interface BotTrade { ref: string; date: string; symbol: string; time: string; entry: number; stop: number; target: number; myInr: number; myHow: string; myTime: string; planInr: number | null; planOutcome: string | null; diffInr: number | null; steppedIn: boolean | null; note?: string; used?: Used }
 interface WeekTrade { symbol: string; date: string; dir: string; r?: number; chart: ChartInfo }
 type Winner = 'me' | 'algo' | 'tie' | 'none';
@@ -289,7 +289,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
         {kind === 'bot' && (
           <>
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-ink-3">Algo Live trades, newest first. <b className="text-ink-2">YouTube only.</b> The bot narrates its own trade (AI voice, disclosed on upload).</p>
+              <p className="text-xs text-ink-3">Algo Live trades, newest first. The bot narrates its own trade (AI voice, disclosed on YouTube and in the caption). Schedules to YouTube and Instagram like a mystery chart.</p>
               {hideToggle(botTrades?.filter((t) => t.used).length ?? 0)}
             </div>
             {!botTrades || !shownBots ? <Loader2 className="size-5 animate-spin text-ink-3" /> : !shownBots.length ? <p className="text-sm text-ink-3">{botTrades.length ? 'Every bot trade already has a short: untick Hide used to see them.' : 'No closed Algo Live trades yet.'}</p> : (

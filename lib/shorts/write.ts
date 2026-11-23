@@ -225,11 +225,18 @@ YouTube (Shorts feed first, search second):
   he can't keep his hands off. My voice is AI-generated." Then "Real trade, real money. Not investment advice." Then
   exactly 3 hashtags, #shorts first. Do not write a longer disclaimer: it is added automatically.
 - tags: 15-25 lowercase search phrases (algo trading, trading bot, automated trading, intraday trading, stock market
-  india, nse, trading psychology...). Never a stock name, ticker or person's name.`;
+  india, nse, trading psychology...). Never a stock name, ticker or person's name.
+
+Instagram (the same video as a Reel):
+- instagram.caption: max 600 characters, the bot speaking throughout. First line (max 125 characters, shown before
+  "more") is the hook with searchable words (trading bot, intraday, NSE). Then 1-2 short lines on what happened in
+  rupees. Then one easy question that invites a comment (e.g. "Should he have let me trade? 👇"). Then "My voice is
+  AI-generated." Then "Real trade, real money. Not investment advice." Then 3-5 specific hashtags (#algotrading
+  #tradingbot #intradaytrading...). At most 2 emoji. Do not write a longer disclaimer: it is added automatically.`;
 
 export const BOT_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['line', 'youtube'],
-  properties: { line: { type: 'string' }, youtube: TEXT_SCHEMA.properties.youtube },
+  type: 'object', additionalProperties: false, required: ['line', 'youtube', 'instagram'],
+  properties: { line: { type: 'string' }, youtube: TEXT_SCHEMA.properties.youtube, instagram: TEXT_SCHEMA.properties.instagram },
 } as const;
 
 const clip = (s: unknown, n: number) => String(s ?? '').replace(/\s+\n/g, '\n').trim().slice(0, n);
@@ -275,15 +282,15 @@ export async function writeText(kind: 'mystery' | 'vs', message: string, hiddenT
   return { ...text, model: r.model, costInr: r.costInr, at: Date.now() };
 }
 
-/** The model's JSON for a bot short -> SocialText (YouTube only: the Instagram caption stays empty). */
+/** The model's JSON for a bot short -> SocialText (YouTube text and Instagram caption, each with the disclaimer). */
 export function toBotText(j: Record<string, unknown>, fallback: string): SocialText {
-  const yt = (j.youtube ?? {}) as Record<string, unknown>;
+  const yt = (j.youtube ?? {}) as Record<string, unknown>, ig = (j.instagram ?? {}) as Record<string, unknown>;
   const tags = Array.isArray(yt.tags) ? fitTags(yt.tags.map((t) => clip(t, 60).replace(/^#/, ''))) : [];
   const line = clip(j.line, 80) || fallback;
   return {
     botLine: line,
     youtube: { title: clip(yt.title, 100) || line, description: withDisclaimer(clip(yt.description, 4000), 'youtube'), tags },
-    instagram: { caption: '' },
+    instagram: { caption: capHashtags(withDisclaimer(clip(ig.caption, 1700) || `${line}\nMy voice is AI-generated.\nReal trade, real money. Not investment advice.`, 'instagram')) },
   };
 }
 

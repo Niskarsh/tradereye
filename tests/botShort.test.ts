@@ -58,10 +58,14 @@ test('bot voice: the line as text-to-speech reads it; no voice when switched off
   assert.equal(buildBotSpec(ROW, day(), 'x', false).say, '');
 });
 
-test('bot text: YouTube only, missing line falls back', () => {
-  const t = toBotText({ line: '', youtube: { title: 'I touched my bot', description: 'd', tags: ['algo trading'] } }, 'fallback line');
+test('bot text: YouTube text and an Instagram caption, both with the disclaimer; missing parts fall back', () => {
+  const t = toBotText({ line: '', youtube: { title: 'I touched my bot', description: 'd', tags: ['algo trading'] }, instagram: { caption: 'He touched my trade.\n#algotrading #tradingbot' } }, 'fallback line');
   assert.equal(t.botLine, 'fallback line');
-  assert.equal(t.instagram.caption, '');
+  assert.ok(t.instagram.caption.startsWith('He touched my trade.'));
+  assert.ok(t.instagram.caption.includes('not a SEBI-registered'));
+  assert.ok(t.instagram.caption.trimEnd().endsWith('#algotrading #tradingbot'));
+  const none = toBotText({ line: 'He touched my trade. Cost him ₹520.', youtube: { title: 'x' } }, 'f');
+  assert.ok(none.instagram.caption.startsWith('He touched my trade. Cost him ₹520.\nMy voice is AI-generated.'));
   assert.ok(t.youtube.description.includes('not a SEBI-registered'));
 });
 

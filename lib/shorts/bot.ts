@@ -3,7 +3,7 @@ import type { MeVsAlgoRow } from '../algoLive/meVsAlgo';
 import { dateLabel } from './spec';
 
 /**
- * "My bot's trade": a YouTube-only short built from one Algo Live trade. THE BOT narrates: its line opens the video, big on
+ * "My bot's trade": a Short / Reel built from one Algo Live trade. THE BOT narrates: its line opens the video, big on
  * screen and spoken in a voice that is plainly synthetic (open-source text-to-speech in the render job, with a robotic
  * effect), because the bot is the AI in this story; nothing pretends to be him. The chart moves at once (no freeze, no
  * countdown), the bot's entry / stop / target are labelled lines, and when he stepped in the video shows where, then what

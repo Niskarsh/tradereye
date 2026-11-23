@@ -680,7 +680,7 @@ def render_vs(spec, out, poster):
     finish(frame, nf, buf, out, poster, poster_t=1.2)  # the hook, not the result
 
 
-# =============== My bot's trade (YouTube only) ===============
+# =============== My bot's trade (the bot narrates) ===============
 def read_voice(path):
     """The bot's line (Piper text-to-speech, mono 44.1 kHz WAV made by the workflow), given a plainly robotic edge so no
     one takes it for a person: a ring modulator under the voice and a short metallic comb. None without one."""

@@ -7,7 +7,7 @@ import { botFacts, buildBotSpec, fallbackLine } from '@/lib/shorts/bot';
 import { botShortSpec, dateLabel, mysterySpec, toMarks, vsPanel, vsSpec, type MysterySpec, type ShortSpec } from '@/lib/shorts/spec';
 import { addShort, setStatus, store, textKey } from '@/lib/shorts/store';
 import { putJson } from '@/lib/setups/store';
-import { mysteryMessage, vsMessage, writeBotText, writeText, type WrittenText } from '@/lib/shorts/write';
+import { mysteryMessage, toBotText, vsMessage, writeBotText, writeText, type WrittenText } from '@/lib/shorts/write';
 import { mysteryEligible } from '@/lib/shorts/trades';
 import { freezeThrough, loadLedger, mergedWeeks, saveLedger } from '@/lib/shorts/season';
 
@@ -19,8 +19,8 @@ const newId = (kind: string) => `${kind}-${new Date().toISOString().slice(0, 10)
 
 /**
  * POST { kind: 'mystery', tradeId, date, tell?, ai? }  or  { kind: 'vs', week, notes?: { me?, algo? }, ai? }
- *   or { kind: 'bot', ref, line?, ai? }: my bot's trade (YouTube only). Claude writes the bot's line (spoken by its
- *   synthetic voice in the render job) and the YouTube text; a line he typed is used instead.
+ *   or { kind: 'bot', ref, line?, ai? }: my bot's trade. Claude writes the bot's line (spoken by its synthetic voice in
+ *   the render job), the YouTube text and the Instagram caption; a line he typed is used instead.
  * -> builds the short's spec from the journal / Algo Live / saved candles, saves it, and starts the render job on
  * GitHub Actions. A Dhan token (header) is used only when a trade day's candles are not saved yet.
  * With ai (the default), one Claude call writes the tell (or the two reasons) and the YouTube / Instagram text first;
@@ -46,9 +46,9 @@ export async function POST(req: Request) {
       label = `My bot's trade: ${row.symbol} · ${dateLabel(row.date)}`;
       ref = String(b.ref);
       if (!text || 'error' in text) {
-        // the schedule screen still needs a title: the line itself, until he edits it
+        // the schedule screen still needs a title and a caption: the line itself, until he edits them
         const err = text && 'error' in text ? text.error : undefined;
-        await putJson(store, textKey(spec.id), { botLine: line, youtube: { title: line, description: '', tags: [] }, instagram: { caption: '' }, model: 'none', costInr: 0, at: Date.now() } satisfies WrittenText);
+        await putJson(store, textKey(spec.id), { ...toBotText({ line, youtube: { title: line } }, line), model: 'none', costInr: 0, at: Date.now() } satisfies WrittenText);
         text = err ? { error: err } : undefined;
       }
     } else if (b.kind === 'mystery') {
