@@ -23,7 +23,8 @@ export interface Facts {
 }
 export interface PostMetrics {
   id: string; facts: Facts; points: Point[];
-  youtube?: { videoId: string; at: number; url?: string; retention?: RetentionPoint[] };
+  /** traffic: views by YouTube traffic source, publish day to the latest pull (SHORTS = the Shorts feed) */
+  youtube?: { videoId: string; at: number; url?: string; retention?: RetentionPoint[]; traffic?: Record<string, number> };
   instagram?: { mediaId: string; at: number; url?: string };
 }
 export interface AccountPoint { at: number; youtubeSubs?: number; youtubeViews?: number; igFollowers?: number }

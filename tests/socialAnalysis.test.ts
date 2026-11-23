@@ -154,3 +154,42 @@ test('Claude\'s answer is trimmed to three lines and a safe confidence', () => {
   const r = toRead({ call: 'x', confidence: 'sure', why: ['1', '2', '3', '4'], next_test: { change: 'c', posts: 4 } });
   assert.deepEqual([r.confidence, r.why.length, r.next_test.posts, r.keep.length], ['low', 3, 4, 0]);
 });
+
+test('YouTube traffic sources: views by source, keyed by YouTube\'s own names', async () => {
+  const { youtubeTraffic } = await import('../lib/socialAnalysis/fetch');
+  let asked = '';
+  const f = (async (u: string) => { asked = u; return new Response(JSON.stringify({ columnHeaders: [{ name: 'insightTrafficSourceType' }, { name: 'views' }], rows: [['SHORTS', 2], ['SUBSCRIBER', 1]] }), { status: 200 }); }) as unknown as typeof fetch;
+  assert.deepEqual(await youtubeTraffic('t', 'vid', '2026-11-01', '2026-11-08', f), { SHORTS: 2, SUBSCRIBER: 1 });
+  assert.match(asked, /dimensions=insightTrafficSourceType/);
+  assert.match(asked, /filters=video%3D%3Dvid/);
+});
+
+test('export for Claude: every post with its full text, daily numbers, retention and traffic; every short with its posting state', async () => {
+  const { buildExport } = await import('../lib/socialAnalysis/export');
+  const at = Date.parse('2026-11-14T13:00:00Z');
+  const file = {
+    v: 1 as const, updatedAt: at, account: [{ at, youtubeSubs: 40, igFollowers: 900 }],
+    posts: {
+      'mystery-1': {
+        id: 'mystery-1', facts: { label: 'Mystery: FSL · 3 Jul 2026', kind: 'mystery' as const, outcome: 'win' as const, resultR: 2.4 },
+        points: [{ at: at + 86_400_000, youtube: { views: 3, privacy: 'public', durationSec: 41, stats: { avgPct: 31.5 } }, instagram: { views: 2100, skipPct: 48 } }],
+        youtube: { videoId: 'v1', at, retention: [[0.05, 0.42, 0.21]] as [number, number, number | null][], traffic: { SHORTS: 2, SUBSCRIBER: 1 } },
+        instagram: { mediaId: 'm1', at },
+      },
+    },
+  };
+  const posts = { 'mystery-1': { youtube: { at, state: 'live', updatedAt: at, videoId: 'v1' } }, 'vs-2': { youtube: { at, state: 'failed', updatedAt: at, error: 'quota' } } } as never;
+  const items = [{ id: 'vs-2', kind: 'vs' as const, label: 'Me vs Algo · Week of 9 Nov 2026', createdAt: at }, { id: 'mystery-1', kind: 'mystery' as const, label: 'Mystery: FSL · 3 Jul 2026', createdAt: at }];
+  const texts = { 'mystery-1': { youtube: { title: 'Long or short?', description: 'd', tags: ['a'] }, instagram: { caption: 'cap' } } } as never;
+  const out = buildExport({ file, posts, items, texts, reads: [], now: at });
+  const p = out.posts[0];
+  assert.equal(p.text.youtubeTitle, 'Long or short?');
+  assert.equal(p.youtube?.published, '2026-11-14 18:30 IST');
+  assert.equal(p.youtube?.durationSec, 41);
+  assert.deepEqual(p.youtube?.traffic, { SHORTS: 2, SUBSCRIBER: 1 });
+  assert.deepEqual(p.youtube?.retention, [[5, 0.42, 0.21]]);
+  assert.equal(p.daily[0].date, '2026-11-15');
+  assert.equal(p.daily[0].instagram?.skipPct, 48);
+  assert.equal(out.shorts.find((s) => s.id === 'vs-2')?.youtube?.error, 'quota');   // a failed upload shows up
+  assert.equal(out.account[0].youtubeSubs, 40);
+});

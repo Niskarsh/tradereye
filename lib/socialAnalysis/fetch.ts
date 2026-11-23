@@ -94,6 +94,21 @@ export async function youtubeRetention(token: string, videoId: string, startDate
   return (t.rows ?? []).map((row): RetentionPoint => [Number(row[x]), Number(row[w]), r >= 0 ? num(row[r]) ?? null : null]).sort((a, b) => a[0] - b[0]);
 }
 
+/**
+ * Where a video's views came from (YouTube's own source names: SHORTS = the Shorts feed, SUBSCRIBER, YT_SEARCH,
+ * YT_CHANNEL, EXT_URL...). Answers "is YouTube showing it in the Shorts feed at all". Views by source, 2-3 days behind.
+ */
+export async function youtubeTraffic(token: string, videoId: string, startDate: string, endDate: string, f: typeof fetch = fetch): Promise<Record<string, number>> {
+  const t = await report(token, { startDate, endDate, dimensions: 'insightTrafficSourceType', metrics: 'views', filters: `video==${videoId}` }, f);
+  if (t instanceof Response) throw await failure(t, 'Reading YouTube traffic sources');
+  const at = (name: string) => (t.columnHeaders ?? []).findIndex((h) => h.name === name);
+  const [k, v] = [at('insightTrafficSourceType'), at('views')];
+  if (k < 0 || v < 0) return {};
+  const out: Record<string, number> = {};
+  for (const row of t.rows ?? []) { const n = num(row[v]); if (n !== undefined) out[String(row[k])] = n; }
+  return out;
+}
+
 export interface IgStats {
   views?: number; reach?: number; likes?: number; comments?: number; shares?: number; saved?: number; reposts?: number;
   interactions?: number; avgWatchSec?: number; totalWatchSec?: number; skipPct?: number;

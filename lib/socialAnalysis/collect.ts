@@ -8,7 +8,7 @@ import type { ShortSpec } from '../shorts/spec';
 import type { WrittenText } from '../shorts/write';
 import { addPoint, emptyFile, type MetricsFile, type Point, type PostMetrics } from './analyze';
 import { factsOf, isLive, toFollow } from './follow';
-import { instagramAccount, instagramStats, youtubeAccount, youtubeLive, youtubeRetention, youtubeStats, type YtLive } from './fetch';
+import { instagramAccount, instagramStats, youtubeAccount, youtubeLive, youtubeRetention, youtubeStats, youtubeTraffic, type YtLive } from './fetch';
 
 /**
  * The pull: for every Short / Reel tradereye published, read today's numbers and add them to one S3 file,
@@ -62,8 +62,8 @@ export async function pullMetrics(source: 'timer' | 'manual', now = Date.now()):
       const c = counts[y.videoId];
       if (c && c.privacy === 'public') {
         const yp: NonNullable<Point['youtube']> = { ...c };
-        const retention = old?.youtube?.retention;
-        rec.youtube = { videoId: y.videoId, at: y.at, url: y.url, retention };
+        const retention = old?.youtube?.retention, traffic = old?.youtube?.traffic;
+        rec.youtube = { videoId: y.videoId, at: y.at, url: y.url, retention, traffic };
         if (yt.analytics) {
           const start = istDate(y.at), end = istDate(now);
           try {
@@ -71,6 +71,9 @@ export async function pullMetrics(source: 'timer' | 'manual', now = Date.now()):
             yp.stats = stats;
             if (curve.length) rec.youtube.retention = curve;
           } catch (e) { bad = true; note((e as Error).message); }
+          // a missing traffic split never fails the post: it is extra
+          try { const tr = await youtubeTraffic(yt.token, y.videoId, start, end); if (Object.keys(tr).length) rec.youtube.traffic = tr; }
+          catch (e) { note((e as Error).message); }
         }
         point.youtube = yp;
       }

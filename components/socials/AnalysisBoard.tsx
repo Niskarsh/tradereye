@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ExternalLink, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronDown, Download, ExternalLink, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AccountPoint, Finding, Group, LastRun, Row } from '@/lib/socialAnalysis/analyze';
 import type { SavedRead } from '@/lib/socialAnalysis/prompt';
@@ -61,9 +61,16 @@ export default function AnalysisBoard() {
           <h1 className="text-2xl font-semibold text-white">Analysis</h1>
           <p className="mt-1 text-sm text-ink-3">{data?.updatedAt ? `Numbers from ${when(data.updatedAt)}. Pulled every morning at 7.` : 'How each Short and Reel did, and what to change next.'}</p>
         </div>
-        <button onClick={() => act('refresh')} disabled={!!busy} className="inline-flex h-9 items-center gap-2 rounded-full border border-line-strong px-4 text-sm text-ink-2 hover:border-brand-accent hover:text-white disabled:opacity-50">
-          {busy === 'refresh' ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}Refresh numbers
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {/* every saved number in one file, to attach in a Claude chat (the discussion happens there: no API cost) */}
+          <a href="/api/social/analysis/export" download title="Every saved number (posts, daily counts, retention, traffic sources, titles, captions) in one JSON file to attach in a Claude chat"
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-brand-accent/70 px-4 text-sm font-semibold text-brand-accent hover:bg-brand-accent hover:text-brand-bg">
+            <Download className="size-4" />Download for Claude
+          </a>
+          <button onClick={() => act('refresh')} disabled={!!busy} className="inline-flex h-9 items-center gap-2 rounded-full border border-line-strong px-4 text-sm text-ink-2 hover:border-brand-accent hover:text-white disabled:opacity-50">
+            {busy === 'refresh' ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}Refresh numbers
+          </button>
+        </div>
       </div>
 
       {err && <p className="mt-4 text-sm text-data-red-text">{err}</p>}
