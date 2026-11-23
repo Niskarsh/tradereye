@@ -15,8 +15,6 @@ import { istDay, nextSlotPairs } from '@/lib/shorts/slots';
  * marked Used (and hidden while "Hide used" is on); it can still be used again.
  */
 
-const MAX_PICKS = 3;
-
 /** 'vs' (Me vs Algo) is kept but has no tab: with him trading only through the algo, his side is always empty */
 type Kind = 'mystery' | 'vs' | 'bot';
 interface Result { value: number; unit: 'R' | '%' }
@@ -114,10 +112,9 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
     }
   }, [kind, trades, weeks, botTrades, token]);
 
-  const full = picks.length >= MAX_PICKS;
-  const addMystery = (t: MysteryTrade) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'mystery', trade: t, tell: '' }]);
-  const addBot = (t: BotTrade) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'bot', trade: t, line: '' }]);
-  const addWeek = (w: Week) => !full && setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'vs', week: w, notes: { me: '', algo: '' } }]);
+  const addMystery = (t: MysteryTrade) => setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'mystery', trade: t, tell: '' }]);
+  const addBot = (t: BotTrade) => setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'bot', trade: t, line: '' }]);
+  const addWeek = (w: Week) => setPicks((p) => [...p, { key: Date.now() + Math.random(), kind: 'vs', week: w, notes: { me: '', algo: '' } }]);
   const update = (key: number, f: (p: Pick) => Pick) => setPicks((ps) => ps.map((p) => (p.key === key ? f(p) : p)));
   const removePick = (key: number) => setPicks((ps) => ps.filter((p) => p.key !== key));
   /** how many times a trade / week is already in the tray (the row's Add button shows it) */
@@ -209,12 +206,12 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   /** Add, or once in the tray "Added" with a tick (click again to add it once more) */
   const addBtn = (onClick: () => void, n: number) => (
     n > 0 ? (
-      <button onClick={onClick} disabled={full} title={full ? `${MAX_PICKS} picked already` : 'Add it again'}
+      <button onClick={onClick} title="Add it again"
         className="inline-flex h-8 items-center gap-1 rounded-full border border-brand-accent bg-brand-accent/15 px-3 text-xs font-semibold text-brand-accent transition-colors hover:bg-brand-accent/25 disabled:cursor-default disabled:hover:bg-brand-accent/15">
         <Check className="size-3.5 animate-[pop_.25s_ease-out]" />Added{n > 1 ? ` ×${n}` : ''}
       </button>
     ) : (
-      <button onClick={onClick} disabled={full} title={full ? `${MAX_PICKS} picked already: remove one below` : undefined}
+      <button onClick={onClick}
         className="inline-flex h-8 items-center gap-1 rounded-full border border-line-strong px-3 text-xs font-semibold text-ink-2 transition-colors hover:border-brand-accent hover:text-white disabled:opacity-30">
         <Plus className="size-3.5" />Add
       </button>
@@ -246,7 +243,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
   return (
     <section className="mt-4">
       <h2 className="text-xl font-semibold text-white">Make shorts</h2>
-      <p className="mt-1 text-sm text-ink-3">Pick up to {MAX_PICKS} in total from either tab. Open a row to see the trade on its chart. Rendering takes a few minutes on GitHub; each short shows below when ready.</p>
+      <p className="mt-1 text-sm text-ink-3">Pick as many as you like from either tab. Open a row to see the trade on its chart. Rendering takes a few minutes on GitHub; each short shows below when ready.</p>
 
       <div className="mt-4 rounded-2xl border border-line-strong bg-brand-card p-4">
         <div className="mb-4 inline-flex gap-1 rounded-full border border-line-strong p-1">
@@ -369,7 +366,7 @@ export default function MakeShorts({ onOpenPosting }: { onOpenPosting?: () => vo
 
         {/* the tray: up to 3 picks, each with its own tell / notes */}
         <div className="mt-5 border-t border-line pt-4">
-          <p className="text-sm font-semibold text-white">Selected {picks.length} / {MAX_PICKS}</p>
+          <p className="text-sm font-semibold text-white">Selected {picks.length}</p>
           {!picks.length && <p className="mt-1 text-xs text-ink-4">Use Add on any row. The same trade or week can be added again.</p>}
           <div className="mt-2 space-y-3">
             {picks.map((p, i) => (
